@@ -14,6 +14,13 @@ using u32 = std::uint32_t;
 using s32 = std::int32_t;
 
 constexpr float ReplayValidationThreshold = 0.1f;
+constexpr u32 ReplayRespawnCountLimit = 999u;
+
+u32 SaturateReplayRespawnCount(u32 respawnCount) {
+    return respawnCount > ReplayRespawnCountLimit
+            ? ReplayRespawnCountLimit
+            : respawnCount;
+}
 
 ReplayValidationOutcome OutcomeFromComparison(
         ReplayValidationComparisonResult result) {
@@ -146,7 +153,8 @@ ReplayEvaluationMetadata ResolveActualMetadata(
         simulationResult.raceCompleted,
         std::nullopt,
         std::nullopt,
-        static_cast<s32>(simulationResult.executedRespawnCount),
+        static_cast<s32>(SaturateReplayRespawnCount(
+                simulationResult.executedRespawnCount)),
     };
     if (simulationResult.stuntsScore.has_value() &&
         *simulationResult.stuntsScore <=
@@ -268,6 +276,7 @@ ReplayValidationExecutionOutput EvaluateReplayValidation(
     output.raceOutcome.raceCompleted = actual.raceCompleted;
     output.raceOutcome.raceTimeMs = actual.raceTimeMs;
     output.raceOutcome.stuntsScore = actual.stuntsScore;
-    output.raceOutcome.respawnCount = simulationResult.executedRespawnCount;
+    output.raceOutcome.respawnCount = SaturateReplayRespawnCount(
+            simulationResult.executedRespawnCount);
     return output;
 }
