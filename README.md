@@ -120,7 +120,8 @@ build/native/forevervalidator \
 Select a simulation backend at runtime with `--backend reference`,
 `--backend optimized-cpu`, or `--backend batched`. Single-replay validation
 defaults to the authoritative reference backend. Multi-replay runs default to
-the ordered batched backend.
+the ordered batched backend. `--batch-size N` controls how many replay files
+are loaded and submitted together, and defaults to 10.
 
 A single replay returns exit status 0 for valid, 1 for invalid, and a distinct
 nonzero error code when replay decoding, asset loading, or simulation cannot

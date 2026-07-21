@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <charconv>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -111,9 +112,9 @@ fs::path BatchOutputPath(
 void PrintUsage(const char *program) {
     std::fprintf(stderr,
                  "usage:\n"
-                 "  %s --pak-dir DIR [--backend BACKEND] REPLAY [--out PATH]\n"
-                 "  %s --pak-dir DIR [--backend BACKEND] --out-dir DIR REPLAY_OR_DIRECTORY [REPLAY_OR_DIRECTORY ...]\n"
-                 "  BACKEND: reference, optimized-cpu, batched\n",
+                 "  %s --pak-dir DIR [--backend BACKEND] [--batch-size N] REPLAY [--out PATH]\n"
+                 "  %s --pak-dir DIR [--backend BACKEND] [--batch-size N] --out-dir DIR REPLAY_OR_DIRECTORY [REPLAY_OR_DIRECTORY ...]\n"
+                 "  BACKEND: reference, optimized-cpu, batched; N defaults to 10\n",
                  program,
                  program);
 }
@@ -230,6 +231,16 @@ std::optional<forevervalidator::SimulationBackend> ParseBackend(
     return std::nullopt;
 }
 
+std::optional<std::size_t> ParseBatchSize(const char *value) {
+    const char *end = value + std::strlen(value);
+    std::size_t result = 0u;
+    const std::from_chars_result parsed = std::from_chars(value, end, result);
+    if (parsed.ec != std::errc{} || parsed.ptr != end || result == 0u) {
+        return std::nullopt;
+    }
+    return result;
+}
+
 ValidationAttempt SerializeValidationAttempt(
         forevervalidator::ReplayValidationAttempt attempt) {
     if (!attempt) {
@@ -256,6 +267,7 @@ int main(int argc, char **argv) {
     std::optional<fs::path> packDirectory;
     std::vector<fs::path> replays;
     bool repeatSameProcess = false;
+    std::size_t batchSize = 10u;
     std::optional<forevervalidator::SimulationBackend> selectedBackend;
 
     for (int index = 1; index < argc; ++index) {
@@ -276,6 +288,15 @@ int main(int argc, char **argv) {
                 PrintUsage(argv[0]);
                 return 64;
             }
+        } else if (std::strcmp(argv[index], "--batch-size") == 0 &&
+                   index + 1 < argc) {
+            const std::optional<std::size_t> parsed =
+                    ParseBatchSize(argv[++index]);
+            if (!parsed.has_value()) {
+                PrintUsage(argv[0]);
+                return 64;
+            }
+            batchSize = *parsed;
         } else if (argv[index][0] == '-') {
             PrintUsage(argv[0]);
             return 64;
@@ -352,85 +373,92 @@ int main(int argc, char **argv) {
         return exitCode;
     }
 
-    std::vector<AssetBytes> loadedReplays;
-    std::vector<forevervalidator::ReplayValidationRequest> requests;
-    loadedReplays.reserve(replays.size());
-    requests.reserve(repeatSameProcess ? replays.size() * 2u : replays.size());
-    for (const fs::path &replay : replays) {
-        const ReplayIdentity identity{replay.string()};
-        NativeFileResult file = forevervalidator::ReadNativeReplayFile(
-                identity.name, identity);
-        if (!file) {
-            ReportValidationError(file.Error());
-            return forevervalidator::ValidationErrorExitCode(file.Error());
-        }
-        loadedReplays.push_back(std::move(file).Value());
-    }
-    for (std::size_t index = 0u; index < replays.size(); ++index) {
-        requests.push_back({
-                ByteView{loadedReplays[index].data(), loadedReplays[index].size()},
-                ReplayIdentity{replays[index].string()}});
-        if (repeatSameProcess) {
-            requests.push_back(requests.back());
-        }
-    }
-    Result<forevervalidator::ReplayBatchReport> batch =
-            forevervalidator::ValidateReplayBatch(
-                    context, requests, validationOptions);
-    if (!batch) {
-        ReportValidationError(batch.Error());
-        return forevervalidator::ValidationErrorExitCode(batch.Error());
-    }
-
-    std::vector<ValidationAttempt> attempts;
-    attempts.reserve(batch.Value().attempts.size());
-    for (auto &attempt : batch.Value().attempts) {
-        attempts.push_back(SerializeValidationAttempt(std::move(attempt)));
-    }
-
     unsigned valid = 0u;
     unsigned invalid = 0u;
     unsigned errors = 0u;
-    for (std::size_t index = 0u; index < replays.size(); ++index) {
-        const fs::path output = BatchOutputPath(
-                *outputDirectory, replays[index], index);
-        const std::string replayText = replays[index].string();
-        std::fprintf(stderr, "validate: %s\n", replayText.c_str());
-
-        const std::size_t attemptIndex = repeatSameProcess ? index * 2u : index;
-        ValidationAttempt &attempt = attempts[attemptIndex];
-        ReportReplayClassification(attempt);
-        if (!attempt) {
-            ReportValidationError(attempt.Error());
-        }
-        int result = AttemptExitCode(attempt);
-        if (repeatSameProcess) {
-            ValidationAttempt &second = attempts[attemptIndex + 1u];
-            if (result != AttemptExitCode(second) ||
-                AttemptJson(attempt) != AttemptJson(second)) {
-                std::fprintf(stderr,
-                             "same-process replay result mismatch for %s\n",
-                             replayText.c_str());
-                result = 71;
+    for (std::size_t batchBegin = 0u; batchBegin < replays.size();) {
+        const std::size_t replayCount = std::min(
+                batchSize, replays.size() - batchBegin);
+        std::vector<AssetBytes> loadedReplays;
+        std::vector<forevervalidator::ReplayValidationRequest> requests;
+        loadedReplays.reserve(replayCount);
+        requests.reserve(repeatSameProcess ? replayCount * 2u : replayCount);
+        for (std::size_t offset = 0u; offset < replayCount; ++offset) {
+            const fs::path &replay = replays[batchBegin + offset];
+            const ReplayIdentity identity{replay.string()};
+            NativeFileResult file = forevervalidator::ReadNativeReplayFile(
+                    identity.name, identity);
+            if (!file) {
+                ReportValidationError(file.Error());
+                return forevervalidator::ValidationErrorExitCode(file.Error());
+            }
+            loadedReplays.push_back(std::move(file).Value());
+            requests.push_back({
+                    ByteView{loadedReplays.back().data(),
+                             loadedReplays.back().size()},
+                    identity});
+            if (repeatSameProcess) {
+                requests.push_back(requests.back());
             }
         }
-        if (result <= 1 && !WriteTextFile(output, AttemptJson(attempt))) {
-            result = 67;
+
+        Result<forevervalidator::ReplayBatchReport> batch =
+                forevervalidator::ValidateReplayBatch(
+                        context, requests, validationOptions);
+        if (!batch) {
+            ReportValidationError(batch.Error());
+            return forevervalidator::ValidationErrorExitCode(batch.Error());
+        }
+        std::vector<ValidationAttempt> attempts;
+        attempts.reserve(batch.Value().attempts.size());
+        for (auto &attempt : batch.Value().attempts) {
+            attempts.push_back(SerializeValidationAttempt(std::move(attempt)));
         }
 
-        std::fprintf(stderr, "result: %s -> %s",
-                     replayText.c_str(), ValidationResultName(result));
-        if (result > 1) {
-            std::fprintf(stderr, " (%d)", result);
+        for (std::size_t offset = 0u; offset < replayCount; ++offset) {
+            const std::size_t index = batchBegin + offset;
+            const fs::path output = BatchOutputPath(
+                    *outputDirectory, replays[index], index);
+            const std::string replayText = replays[index].string();
+            std::fprintf(stderr, "validate: %s\n", replayText.c_str());
+
+            const std::size_t attemptIndex = repeatSameProcess
+                    ? offset * 2u : offset;
+            ValidationAttempt &attempt = attempts[attemptIndex];
+            ReportReplayClassification(attempt);
+            if (!attempt) {
+                ReportValidationError(attempt.Error());
+            }
+            int result = AttemptExitCode(attempt);
+            if (repeatSameProcess) {
+                ValidationAttempt &second = attempts[attemptIndex + 1u];
+                if (result != AttemptExitCode(second) ||
+                    AttemptJson(attempt) != AttemptJson(second)) {
+                    std::fprintf(stderr,
+                                 "same-process replay result mismatch for %s\n",
+                                 replayText.c_str());
+                    result = 71;
+                }
+            }
+            if (result <= 1 && !WriteTextFile(output, AttemptJson(attempt))) {
+                result = 67;
+            }
+
+            std::fprintf(stderr, "result: %s -> %s",
+                         replayText.c_str(), ValidationResultName(result));
+            if (result > 1) {
+                std::fprintf(stderr, " (%d)", result);
+            }
+            std::fputc('\n', stderr);
+            if (result == 0) {
+                ++valid;
+            } else if (result == 1) {
+                ++invalid;
+            } else {
+                ++errors;
+            }
         }
-        std::fputc('\n', stderr);
-        if (result == 0) {
-            ++valid;
-        } else if (result == 1) {
-            ++invalid;
-        } else {
-            ++errors;
-        }
+        batchBegin += replayCount;
     }
 
     std::printf("{\"schema\":\"forevervalidator-batch-v1\","
