@@ -21,9 +21,13 @@ FROM debian:trixie-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libssl3 \
         zlib1g \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system forevervalidator \
+    && useradd --system --gid forevervalidator --no-create-home --shell /usr/sbin/nologin forevervalidator
 
 COPY --from=build /src/build/native/forevervalidator /usr/local/bin/forevervalidator
+
+USER forevervalidator
 
 ENTRYPOINT ["/usr/local/bin/forevervalidator"]
 CMD ["--help"]
