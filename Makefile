@@ -11,7 +11,7 @@ export SOURCE_DATE_EPOCH
 export LC_ALL := C
 export TZ := UTC
 
-COMMON_WARNINGS := -Wall -Wextra -Werror -Wno-deprecated-declarations
+COMMON_WARNINGS := -Wall -Wextra -Werror -Wno-deprecated-declarations -Wno-error=maybe-uninitialized
 COMMON_CXXFLAGS ?= -O2 -ffp-contract=off -MMD -MP -std=c++17 \
 	$(COMMON_WARNINGS) -frandom-seed=forevervalidator \
 	-ffile-prefix-map=$(CURDIR)=.

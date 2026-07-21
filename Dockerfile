@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- Build stage --------------------------------------------------------
-FROM debian:bookworm-slim AS build
+FROM debian:trixie-slim AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
@@ -16,7 +16,7 @@ COPY . .
 RUN make -j"$(nproc)"
 
 # ---- Runtime stage --------------------------------------------------------
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie-slim AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libssl3 \
