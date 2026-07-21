@@ -221,6 +221,17 @@ PlayMode ToPublicPlayMode(EChallengePlayMode mode) noexcept {
     return PlayMode::Race;
 }
 
+ReplayProvenance ToPublicReplayProvenance(
+        ReplayInputProvenance provenance) noexcept {
+    switch (provenance) {
+    case ReplayInputProvenance::Unmarked:
+        return ReplayProvenance::Unmarked;
+    case ReplayInputProvenance::TMInterface:
+        return ReplayProvenance::TMInterface;
+    }
+    return ReplayProvenance::Unmarked;
+}
+
 ValidationReport ToPublicReport(
         const ReplayIdentity &identity,
         const ReplayFileValidationResult &source,
@@ -249,6 +260,25 @@ ValidationReport ToPublicReport(
     report.maxDeviationDistance = source.validation.maxDeviationDistance;
     report.observationError =
             ToPublicObservationError(source.validation.observationError);
+    report.metadata.replayProvenance = ToPublicReplayProvenance(
+            replay.InputTimeline().Provenance());
+    if (report.metadata.replayProvenance == ReplayProvenance::TMInterface) {
+        if (source.validation.status ==
+            ReplayValidationStatus::WrongSimulation) {
+            report.inputGhostMatch = InputGhostMatch::Mismatch;
+        } else if (source.validation.expectedSamples > 0u &&
+                   source.validation.measuredSamples ==
+                           source.validation.expectedSamples) {
+            report.inputGhostMatch = InputGhostMatch::Match;
+        }
+        if (source.validation.status == ReplayValidationStatus::Valid ||
+            source.validation.status == ReplayValidationStatus::ValidPrefix) {
+            report.valid = false;
+            report.status = ValidationStatus::TMInterfaceReplay;
+            report.outcome = ValidationOutcome::Invalid;
+            report.wrongSimulation = false;
+        }
+    }
     report.metadata.mapEnvironment =
             ToPublicMapEnvironment(route.mapEnvironment);
     report.metadata.vehicleModel = ToPublicVehicleModel(route.vehicleModel);

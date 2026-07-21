@@ -31,6 +31,8 @@ using forevervalidator::ValidationError;
 struct ValidationOutput {
     int exitCode;
     std::string json;
+    forevervalidator::ReplayProvenance replayProvenance;
+    forevervalidator::InputGhostMatch inputGhostMatch;
 };
 
 using ValidationAttempt = Result<ValidationOutput>;
@@ -143,6 +145,29 @@ const std::string &AttemptJson(const ValidationAttempt &attempt) {
     return attempt.HasValue() ? attempt.Value().json : empty;
 }
 
+const char *InputGhostMatchName(forevervalidator::InputGhostMatch match) {
+    switch (match) {
+    case forevervalidator::InputGhostMatch::Unavailable:
+        return "Unavailable";
+    case forevervalidator::InputGhostMatch::Match:
+        return "Match";
+    case forevervalidator::InputGhostMatch::Mismatch:
+        return "Mismatch";
+    }
+    return "Unavailable";
+}
+
+void ReportReplayClassification(const ValidationAttempt &attempt) {
+    if (!attempt.HasValue() ||
+        attempt.Value().replayProvenance !=
+                forevervalidator::ReplayProvenance::TMInterface) {
+        return;
+    }
+    std::fprintf(stderr,
+                 "TMInterface replay: input-vs-ghost=%s\n",
+                 InputGhostMatchName(attempt.Value().inputGhostMatch));
+}
+
 ValidationAttempt ValidateLoadedReplay(
         ValidationContext &context,
         const NativeFileResult &file,
@@ -168,7 +193,9 @@ ValidationAttempt ValidateLoadedReplay(
     }
     return ValidationAttempt::Success(ValidationOutput{
             valid ? 0 : 1,
-            std::move(serialization).Value()});
+            std::move(serialization).Value(),
+            validation.Value().metadata.replayProvenance,
+            validation.Value().inputGhostMatch});
 }
 
 ValidationAttempt ValidateReplayPath(
@@ -201,6 +228,7 @@ int ValidateReplayInChild(
     NativeFileResult file = forevervalidator::ReadNativeReplayFile(
             replayText, identity);
     ValidationAttempt attempt = ValidateLoadedReplay(context, file, identity);
+    ReportReplayClassification(attempt);
     if (!attempt) {
         ReportValidationError(attempt.Error());
     }
@@ -224,6 +252,7 @@ int ValidateReplayInChild(
     }
     if (pid == 0) {
         ValidationAttempt attempt = ValidateReplayPath(context, replayPath);
+        ReportReplayClassification(attempt);
         if (!attempt) {
             ReportValidationError(attempt.Error());
         }
@@ -330,6 +359,7 @@ int main(int argc, char **argv) {
 
     if (singleRun) {
         ValidationAttempt attempt = ValidateReplayPath(context, replays.front());
+        ReportReplayClassification(attempt);
         if (!attempt) {
             ReportValidationError(attempt.Error());
         }
@@ -365,6 +395,7 @@ int main(int argc, char **argv) {
                     replayText, identity);
             ValidationAttempt first = ValidateLoadedReplay(context, file, identity);
             ValidationAttempt second = ValidateLoadedReplay(context, file, identity);
+            ReportReplayClassification(first);
             if (!first) {
                 ReportValidationError(first.Error());
             }

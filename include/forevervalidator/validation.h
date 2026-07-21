@@ -175,10 +175,22 @@ enum class ValidationStatus {
     RespawnExpectationUnavailable, ObservationError,
     IncompatibleReplayVersion = 11,
     InputUnavailable = 12,
+    TMInterfaceReplay = 13,
 };
 
 enum class ValidationOutcome { Invalid, Valid, WrongSimulation, Unavailable, Error };
 enum class ObservationError { NonFiniteDistance, ReplayMetadataUnavailable };
+
+enum class ReplayProvenance : std::uint8_t {
+    Unmarked,
+    TMInterface,
+};
+
+enum class InputGhostMatch : std::uint8_t {
+    Unavailable,
+    Match,
+    Mismatch,
+};
 
 enum class MapEnvironment : std::uint8_t {
     Unknown,
@@ -237,6 +249,7 @@ struct ValidationMetadata {
     std::size_t expectedSamples = 0u;
     std::size_t actionCount = 0u;
     std::size_t eventCount = 0u;
+    ReplayProvenance replayProvenance = ReplayProvenance::Unmarked;
 };
 struct SimulationOutcome {
     std::optional<bool> raceCompleted;
@@ -261,6 +274,7 @@ struct ValidationReport {
     std::optional<ObservationError> observationError;
     ValidationMetadata metadata;
     SimulationOutcome simulation;
+    InputGhostMatch inputGhostMatch = InputGhostMatch::Unavailable;
 };
 
 class ValidationContext;

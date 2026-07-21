@@ -34,8 +34,27 @@ const char *ValidationStatusName(ValidationStatus status) {
         return "incompatible_replay_version";
     case ValidationStatus::InputUnavailable:
         return "validation_input_unavailable";
+    case ValidationStatus::TMInterfaceReplay:
+        return "tminterface_replay";
     }
     return "unexpected_validation_status";
+}
+
+const char *ReplayProvenanceName(ReplayProvenance provenance) {
+    switch (provenance) {
+    case ReplayProvenance::Unmarked: return "Unmarked";
+    case ReplayProvenance::TMInterface: return "TMInterface";
+    }
+    return "Unmarked";
+}
+
+const char *InputGhostMatchName(InputGhostMatch match) {
+    switch (match) {
+    case InputGhostMatch::Unavailable: return "Unavailable";
+    case InputGhostMatch::Match: return "Match";
+    case InputGhostMatch::Mismatch: return "Mismatch";
+    }
+    return "Unavailable";
 }
 
 int ValidationOutcomeCode(ValidationOutcome outcome) {
@@ -160,6 +179,9 @@ void AppendValidationMessageJson(
                 "\"Replay version: TMr.6 is not compatible with current "
                 "game version: TMr.7\"");
         break;
+    case ValidationStatus::TMInterfaceReplay:
+        json.Append("\"TMInterface replay is invalid\"");
+        break;
     default:
         json.Append("null");
         break;
@@ -225,6 +247,8 @@ void AppendValidationResultJson(
                       report.comparedExactGhostStateCount);
     json.AppendFormat(",\"wrong_simulation\":%s",
                       report.wrongSimulation ? "true" : "false");
+    json.Append(",\"input_ghost_match\":");
+    json.AppendJsonString(InputGhostMatchName(report.inputGhostMatch));
     json.Append(",\"first_divergence\":");
     AppendDeviationJson(json, report.firstDivergence);
     json.Append(",\"first_exact_deviation\":");
@@ -235,7 +259,9 @@ void AppendValidationMetadataJson(
         JsonText &json,
         const ValidationMetadata &metadata) {
     json.Append(",\"replay_file_metadata\":{");
-    json.Append("\"map_environment\":");
+    json.Append("\"replay_provenance\":");
+    json.AppendJsonString(ReplayProvenanceName(metadata.replayProvenance));
+    json.Append(",\"map_environment\":");
     json.AppendJsonString(MapEnvironmentName(metadata.mapEnvironment));
     json.Append(",\"vehicle_model\":");
     json.AppendJsonString(VehicleModelName(metadata.vehicleModel));

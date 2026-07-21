@@ -80,6 +80,7 @@ constexpr Nat32 GhostEncodingMode = 0u;
 constexpr Nat32 GhostStateVersion = 9u;
 constexpr Nat32 GhostEncodedSampleBytes = 61u;
 constexpr double InputAxisScale = 1.0 / 65536.0;
+constexpr Nat32 TMInterfaceInputClockOffsetMs = 0xffffu;
 
 struct Bytes {
     const Byte *data = nullptr;
@@ -1635,6 +1636,56 @@ ReplayInputActionValue DecodeInputValue(
     return ReplayInputActionValue::Switch(state);
 }
 
+bool NormalizeTMInterfaceInputClock(
+        std::vector<ReplayInputEvent> *events,
+        const ReplayInputMetadata &metadata,
+        ReplayInputProvenance *provenance) {
+    if (events == nullptr || provenance == nullptr) {
+        return false;
+    }
+    *provenance = ReplayInputProvenance::Unmarked;
+
+    bool isTMInterfaceClock = false;
+    for (const ReplayInputEvent &event : *events) {
+        if (event.action == ReplayInputActionKind::RaceRunning &&
+            event.timeMs % 10u == 5u) {
+            isTMInterfaceClock = true;
+            break;
+        }
+    }
+    if (!isTMInterfaceClock) {
+        return true;
+    }
+
+    for (ReplayInputEvent &event : *events) {
+        if (event.timeMs < TMInterfaceInputClockOffsetMs) {
+            return false;
+        }
+        event.timeMs -= TMInterfaceInputClockOffsetMs;
+    }
+
+    const ReplayInputEvent *raceRunning = nullptr;
+    const ReplayInputEvent *finishLine = nullptr;
+    for (const ReplayInputEvent &event : *events) {
+        if (raceRunning == nullptr &&
+            event.action == ReplayInputActionKind::RaceRunning &&
+            event.value.IsCanonicalPress()) {
+            raceRunning = &event;
+        }
+        if (event.action == ReplayInputActionKind::FinishLine &&
+            event.value.IsCanonicalPress()) {
+            finishLine = &event;
+        }
+    }
+    if (raceRunning != nullptr && finishLine != nullptr &&
+        (finishLine->timeMs < raceRunning->timeMs ||
+         finishLine->timeMs - raceRunning->timeMs != metadata.durationMs)) {
+        return false;
+    }
+    *provenance = ReplayInputProvenance::TMInterface;
+    return true;
+}
+
 ReplayFileReadError DecodeGhostInputMetadata(
         const GhostSections &sections,
         Nat32 durationMs,
@@ -1765,12 +1816,18 @@ ReplayFileReadError DecodeInputTimeline(
         return metadataError;
     }
 
+    ReplayInputProvenance provenance = ReplayInputProvenance::Unmarked;
+    if (!NormalizeTMInterfaceInputClock(&events, metadata, &provenance)) {
+        return ReplayFileReadError::InvalidInputTimeline;
+    }
+
     const ReplayInputTimelineCreateResult createResult =
             ReplayInputTimeline::Create(
                     std::move(metadata),
                     std::move(actionKinds),
                     std::move(events),
-                    outTimeline);
+                    outTimeline,
+                    provenance);
     return createResult == ReplayInputTimelineCreateResult::Success
             ? ReplayFileReadError::Success
             : ReplayFileReadError::InvalidInputTimeline;

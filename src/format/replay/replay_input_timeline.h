@@ -93,6 +93,11 @@ struct ReplayInputMetadata {
     std::optional<uint32_t> stuntScore;
 };
 
+enum class ReplayInputProvenance {
+    Unmarked,
+    TMInterface,
+};
+
 enum class ReplayInputTimelineCreateResult {
     Success,
     MissingOutput,
@@ -109,7 +114,9 @@ public:
             ReplayInputMetadata metadata,
             std::vector<ReplayInputActionKind> definedActions,
             std::vector<ReplayInputEvent> events,
-            ReplayInputTimeline *out) {
+            ReplayInputTimeline *out,
+            ReplayInputProvenance provenance =
+                    ReplayInputProvenance::Unmarked) {
         if (out == nullptr) {
             return ReplayInputTimelineCreateResult::MissingOutput;
         }
@@ -148,6 +155,7 @@ public:
         timeline.metadata_ = std::move(metadata);
         timeline.definedActions_ = std::move(definedActions);
         timeline.events_ = std::move(events);
+        timeline.provenance_ = provenance;
         *out = std::move(timeline);
         return ReplayInputTimelineCreateResult::Success;
     }
@@ -172,6 +180,10 @@ public:
         return events_.size();
     }
 
+    ReplayInputProvenance Provenance() const {
+        return provenance_;
+    }
+
 private:
     static ReplayInputActionValueKind ValueKindForAction(
             ReplayInputActionKind action) {
@@ -189,6 +201,7 @@ private:
     ReplayInputMetadata metadata_;
     std::vector<ReplayInputActionKind> definedActions_;
     std::vector<ReplayInputEvent> events_;
+    ReplayInputProvenance provenance_ = ReplayInputProvenance::Unmarked;
 };
 
 #endif
