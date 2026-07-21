@@ -1,6 +1,5 @@
 # syntax=docker/dockerfile:1
 
-# ---- Build stage --------------------------------------------------------
 FROM debian:trixie-slim AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -15,7 +14,7 @@ COPY . .
 
 RUN make -j"$(nproc)"
 
-# ---- Runtime stage --------------------------------------------------------
+
 FROM debian:trixie-slim AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
