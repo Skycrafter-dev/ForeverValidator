@@ -1103,6 +1103,7 @@ bool IsGhostWrappedChunk(Nat32 chunkId) {
     case 0x03092014u:
     case 0x03092016u:
     case 0x03092017u:
+    case 0x0309201au:
         return true;
     default:
         return false;
