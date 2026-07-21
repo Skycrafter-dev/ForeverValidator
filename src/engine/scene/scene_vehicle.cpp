@@ -94,6 +94,32 @@ CSceneVehicle::CSceneVehicle(void) {
 
 CSceneVehicle::~CSceneVehicle(void) = default;
 
+CSceneVehicle::RuntimeClone
+CSceneVehicle::CaptureRuntimeClone(void) const noexcept {
+    RuntimeClone clone;
+    clone.mobil = CSceneMobil::CaptureRuntimeClone();
+    clone.vehicleEvents = vehicleEvents;
+    clone.water = water;
+    clone.updateAsync = updateAsync;
+    clone.networked = networked;
+    clone.predictionDelayTicks = predictionDelayTicks;
+    clone.stateSampleWindow = stateSampleWindow;
+    clone.asyncPeriodSeconds = asyncPeriodSeconds;
+    return clone;
+}
+
+void CSceneVehicle::RestoreRuntimeClone(
+        const RuntimeClone &clone) noexcept {
+    CSceneMobil::RestoreRuntimeClone(clone.mobil);
+    vehicleEvents = clone.vehicleEvents;
+    water = clone.water;
+    updateAsync = clone.updateAsync;
+    networked = clone.networked;
+    predictionDelayTicks = clone.predictionDelayTicks;
+    stateSampleWindow = clone.stateSampleWindow;
+    asyncPeriodSeconds = clone.asyncPeriodSeconds;
+}
+
 void CSceneVehicle::TuningsSet(CSceneVehicleTunings *tunings) { tuningContainer = tunings; }
 
 void CSceneVehicle::BindMaterialContainer(CSceneVehicleMaterialContainer &container) {

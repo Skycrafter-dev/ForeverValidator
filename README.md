@@ -188,8 +188,10 @@ owned by the sandbox rather than copied into state snapshots.
 The API exposes replay-level input events and search-relevant state such as car
 dynamics, race-relative time, checkpoints, laps, respawns, and completion. It
 does not expose arbitrary engine objects, per-tick callbacks, or TAS search
-concepts. Snapshot restoration currently rebuilds the mutable simulation by
-deterministically replaying the captured input prefix.
+concepts. Snapshot restoration clones the complete evolving runtime state at
+a completed-tick boundary.
+Capture and restore execute no physics ticks; runtime-owned pointers are
+rebound to the target sandbox while static map collision data stays in place.
 
 ```text
 libforevervalidator_core.a    portable validation backend

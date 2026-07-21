@@ -31,6 +31,7 @@ class SSurfaceId {
 
 class CSceneVehicle : public CSceneMobil {
   public:
+    struct RuntimeClone;
     enum EVehicleEvent {
         EVehicleEvent_None = 0,
         EVehicleEvent_WaterSplash = 1,
@@ -156,6 +157,19 @@ class CSceneVehicle : public CSceneMobil {
     virtual int WheelIsSliding(unsigned long wheelIndex) const;
     virtual unsigned short WheelGetContactMaterial(unsigned long wheelIndex) const;
     virtual const GmVec3 &WheelGetAsyncGroundContactPos(unsigned long wheelIndex) const;
+
+    struct RuntimeClone {
+        CSceneMobil::RuntimeClone mobil{};
+        std::array<SEventSlot, 2> vehicleEvents{};
+        SWaterState water{};
+        bool updateAsync = true;
+        bool networked = false;
+        u32 predictionDelayTicks = 0u;
+        std::optional<SStateSampleWindow> stateSampleWindow;
+        float asyncPeriodSeconds = 0.0f;
+    };
+    RuntimeClone CaptureRuntimeClone(void) const noexcept;
+    void RestoreRuntimeClone(const RuntimeClone &clone) noexcept;
 
 private:
     CSceneVehicleTunings *tuningContainer = nullptr;

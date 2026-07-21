@@ -173,3 +173,34 @@ void ReplayVehicleWheelSurfaces::OnWheelSurfaceUpdated(
         CSceneVehicleCar::SSimulationWheel &wheel) {
     MarkWheelSurfaceUpdated(&car, &wheel);
 }
+
+ReplayVehicleWheelSurfaces::RuntimeClone
+ReplayVehicleWheelSurfaces::CaptureRuntimeClone() const {
+    RuntimeClone clone;
+    clone.movedByUpdateSurface.reserve(wheelBindings.size());
+    for (const WheelSurfaceBinding &binding : wheelBindings) {
+        clone.movedByUpdateSurface.push_back(binding.movedByUpdateSurface);
+    }
+    return clone;
+}
+
+bool ReplayVehicleWheelSurfaces::CanRestoreRuntimeClone(
+        const RuntimeClone &clone,
+        const CSceneVehicleCar &car) const noexcept {
+    return clone.movedByUpdateSurface.size() == wheelBindings.size() &&
+           clone.movedByUpdateSurface.size() == car.WheelGetCount();
+}
+
+void ReplayVehicleWheelSurfaces::RestoreRuntimeClone(
+        const RuntimeClone &clone,
+        CSceneVehicleCar &car) noexcept {
+    for (u32 index = 0u; index < car.WheelGetCount(); ++index) {
+        wheelBindings[index].movedByUpdateSurface =
+                clone.movedByUpdateSurface[index];
+        CSceneVehicleCar::SSimulationWheel &wheel = car.WheelAt(index);
+        CPlugTree *tree = wheel.surfaceHandler.Tree();
+        if (tree != nullptr) {
+            tree->SetLocation(wheel.surfaceHandler.CurrentPose());
+        }
+    }
+}

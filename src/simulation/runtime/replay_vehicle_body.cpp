@@ -200,3 +200,17 @@ CPlugSolid &ReplayVehicleBody::Solid() {
 CHmsCorpus &ReplayVehicleBody::Corpus() {
     return corpus;
 }
+
+ReplayVehicleBody::RuntimeClone
+ReplayVehicleBody::CaptureRuntimeClone() const {
+    return dyna.CaptureRuntimeClone();
+}
+
+bool ReplayVehicleBody::PrepareRuntimeCloneRestore(
+        const RuntimeClone &clone) {
+    return dyna.PrepareRuntimeCloneRestore(clone);
+}
+
+void ReplayVehicleBody::RestoreRuntimeClone(RuntimeClone clone) noexcept {
+    dyna.RestoreRuntimeClone(std::move(clone));
+}

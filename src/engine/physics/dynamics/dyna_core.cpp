@@ -714,3 +714,36 @@ void CHmsDyna::DoPostCollisionDynamic(void) {
     dyna->ComputeSynthetizedReplacement(replacement);
     dyna->ApplyReplacement(replacement);
 }
+CHmsDyna::RuntimeClone CHmsDyna::CaptureRuntimeClone(void) const {
+    RuntimeClone clone;
+    clone.maxAngularSpeed = maxAngularSpeed;
+    clone.dynaParams = dynaParams;
+    clone.tempState = tempState;
+    clone.writeState = writeState;
+    clone.currentState = currentState;
+    clone.pendingCollisionReplacements = pendingCollisionReplacements_;
+    clone.isDynamicActive = isDynamicActive;
+    clone.dynamicType = dynamicType;
+    return clone;
+}
+
+bool CHmsDyna::PrepareRuntimeCloneRestore(const RuntimeClone &clone) {
+    try {
+        pendingCollisionReplacements_.reserve(
+                clone.pendingCollisionReplacements.size());
+        return true;
+    } catch (const std::bad_alloc &) {
+        return false;
+    }
+}
+
+void CHmsDyna::RestoreRuntimeClone(RuntimeClone clone) noexcept {
+    maxAngularSpeed = clone.maxAngularSpeed;
+    dynaParams = clone.dynaParams;
+    tempState = clone.tempState;
+    writeState = clone.writeState;
+    currentState = clone.currentState;
+    pendingCollisionReplacements_.swap(clone.pendingCollisionReplacements);
+    isDynamicActive = clone.isDynamicActive;
+    dynamicType = clone.dynamicType;
+}

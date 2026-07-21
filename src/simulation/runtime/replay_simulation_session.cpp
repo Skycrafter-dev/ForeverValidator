@@ -42,9 +42,8 @@ ReplayTrajectoryObservation ObserveReplayTrajectory(
 
 }  // namespace
 
-struct ReplaySimulationSession::Impl {
+struct ReplaySimulationInstance {
     CTrackManiaRace race;
-    ReplayMapScene mapScene;
     std::unique_ptr<ReplaySimulationRuntime> runtime;
     std::uint32_t incrementalRespawnCount = 0u;
 
@@ -54,6 +53,13 @@ struct ReplaySimulationSession::Impl {
     }
 };
 
+struct ReplaySimulationSession::Impl {
+    ReplayMapScene mapScene;
+    ReplaySimulationInstance instance;
+
+    void ResetRuntime() { instance.ResetRuntime(); }
+};
+
 ReplaySimulationSession::ReplaySimulationSession()
     : impl(std::make_unique<Impl>()) {}
 
@@ -61,7 +67,7 @@ ReplaySimulationSession::~ReplaySimulationSession() = default;
 
 void ReplaySimulationSession::Reset() {
     impl->ResetRuntime();
-    impl->mapScene.Reset(impl->race);
+    impl->mapScene.Reset(impl->instance.race);
 }
 
 bool ReplaySimulationSession::PreloadChallenge(
@@ -84,8 +90,8 @@ void ReplaySimulationSession::ConfigureReplayRace(
         EChallengePlayMode playMode,
         bool isLapRace,
         std::uint32_t lapCount) {
-    impl->race.SetReplayChallengePlayMode(playMode);
-    impl->race.InitNbLapsAndCheckpoints(
+    impl->instance.race.SetReplayChallengePlayMode(playMode);
+    impl->instance.race.InitNbLapsAndCheckpoints(
             isLapRace ? lapCount : 1u);
 }
 
@@ -106,7 +112,7 @@ ReplaySimulationTimelineResult ReplaySimulationSession::SimulateTimeline(
     impl->ResetRuntime();
 
     const ReplayMapSceneResult readyResult =
-            impl->mapScene.EnsureReady(impl->race);
+            impl->mapScene.EnsureReady(impl->instance.race);
     if (readyResult != ReplayMapSceneResult::Ready) {
         result.result = MapReplaySceneResult(readyResult);
         return result;
@@ -117,8 +123,9 @@ ReplaySimulationTimelineResult ReplaySimulationSession::SimulateTimeline(
         return result;
     }
 
-    impl->runtime = std::make_unique<ReplaySimulationRuntime>(impl->race);
-    result.result = impl->runtime->Start(
+    impl->instance.runtime = std::make_unique<ReplaySimulationRuntime>(
+            impl->instance.race);
+    result.result = impl->instance.runtime->Start(
             simulationDefinition,
             impl->mapScene,
             startLocation,
@@ -130,7 +137,7 @@ ReplaySimulationTimelineResult ReplaySimulationSession::SimulateTimeline(
 
     for (const ReplayControlTick &tick : controlTicks) {
         const ReplaySimulationStepExecution execution =
-                impl->runtime->Step(tick);
+                impl->instance.runtime->Step(tick);
         if (execution.result != ReplaySimulationRunResult::Success) {
             result.result = execution.result;
             return result;
@@ -149,8 +156,8 @@ ReplaySimulationTimelineResult ReplaySimulationSession::SimulateTimeline(
             }
         }
     }
-    result.finishTimeMs = impl->runtime->FinishTimeMs();
-    result.stuntsScore = impl->runtime->StuntsScore();
+    result.finishTimeMs = impl->instance.runtime->FinishTimeMs();
+    result.stuntsScore = impl->instance.runtime->StuntsScore();
     result.raceCompleted = result.finishTimeMs.has_value();
     result.result = ReplaySimulationRunResult::Success;
     return result;
@@ -165,7 +172,7 @@ ReplaySimulationRunResult ReplaySimulationSession::StartIncremental(
     }
     impl->ResetRuntime();
     const ReplayMapSceneResult readyResult =
-            impl->mapScene.EnsureReady(impl->race);
+            impl->mapScene.EnsureReady(impl->instance.race);
     if (readyResult != ReplayMapSceneResult::Ready) {
         return MapReplaySceneResult(readyResult);
     }
@@ -173,8 +180,9 @@ ReplaySimulationRunResult ReplaySimulationSession::StartIncremental(
     if (!impl->mapScene.FirstStartLineSpawnLocation(startLocation)) {
         return ReplaySimulationRunResult::MapStartUnavailable;
     }
-    impl->runtime = std::make_unique<ReplaySimulationRuntime>(impl->race);
-    return impl->runtime->Start(
+    impl->instance.runtime = std::make_unique<ReplaySimulationRuntime>(
+            impl->instance.race);
+    return impl->instance.runtime->Start(
             simulationDefinition,
             impl->mapScene,
             startLocation,
@@ -187,48 +195,83 @@ ReplaySimulationTimelineResult ReplaySimulationSession::AdvanceIncremental(
         std::size_t begin,
         std::size_t count) {
     ReplaySimulationTimelineResult result;
-    if (!impl->runtime || begin > controlTicks.size() ||
+    if (!impl->instance.runtime || begin > controlTicks.size() ||
         count > controlTicks.size() - begin) {
         return result;
     }
     for (std::size_t index = begin; index < begin + count; ++index) {
         const ReplayControlTick &tick = controlTicks[index];
         const ReplaySimulationStepExecution execution =
-                impl->runtime->Step(tick);
+                impl->instance.runtime->Step(tick);
         if (execution.result != ReplaySimulationRunResult::Success) {
             result.result = execution.result;
             return result;
         }
-        impl->incrementalRespawnCount += execution.respawnExecutedCount;
+        impl->instance.incrementalRespawnCount +=
+                execution.respawnExecutedCount;
     }
-    result.finishTimeMs = impl->runtime->FinishTimeMs();
-    result.stuntsScore = impl->runtime->StuntsScore();
+    result.finishTimeMs = impl->instance.runtime->FinishTimeMs();
+    result.stuntsScore = impl->instance.runtime->StuntsScore();
     result.raceCompleted = result.finishTimeMs.has_value();
-    result.executedRespawnCount = impl->incrementalRespawnCount;
+    result.executedRespawnCount = impl->instance.incrementalRespawnCount;
     result.result = ReplaySimulationRunResult::Success;
     return result;
 }
 
 std::optional<ReplaySimulationStateView>
 ReplaySimulationSession::CurrentState() const {
-    if (!impl->runtime) {
+    if (!impl->instance.runtime) {
         return std::nullopt;
     }
     ReplaySimulationStateView result;
-    result.frame = impl->runtime->CurrentFrame();
-    result.controls = impl->runtime->CurrentControls();
-    result.race = impl->runtime->RaceProgress();
-    result.finishTimeMs = impl->runtime->FinishTimeMs();
-    result.stuntsScore = impl->runtime->StuntsScore();
-    result.respawnCount = impl->incrementalRespawnCount;
+    result.frame = impl->instance.runtime->CurrentFrame();
+    result.controls = impl->instance.runtime->CurrentControls();
+    result.race = impl->instance.runtime->RaceProgress();
+    result.finishTimeMs = impl->instance.runtime->FinishTimeMs();
+    result.stuntsScore = impl->instance.runtime->StuntsScore();
+    result.respawnCount = impl->instance.incrementalRespawnCount;
     return result;
 }
 
 std::optional<std::uint32_t>
 ReplaySimulationSession::ApplyReplayStuntTimePenalty(
         std::uint32_t overtimeMs) {
-    if (!impl->runtime) {
+    if (!impl->instance.runtime) {
         return std::nullopt;
     }
-    return impl->runtime->ApplyReplayStuntTimePenalty(overtimeMs);
+    return impl->instance.runtime->ApplyReplayStuntTimePenalty(overtimeMs);
+}
+
+std::shared_ptr<const ReplaySimulationInstanceClone>
+ReplaySimulationSession::CaptureRuntimeClone() const {
+    if (!impl->instance.runtime ||
+        impl->instance.runtime->CurrentPhase() !=
+                                  ReplaySimulationRuntime::Phase::Idle) {
+        return {};
+    }
+    std::optional<ReplaySimulationRuntime::RuntimeClone> runtime =
+            impl->instance.runtime->CaptureRuntimeClone();
+    if (!runtime.has_value()) {
+        return {};
+    }
+    auto clone = std::make_shared<ReplaySimulationInstanceClone>();
+    clone->race = impl->instance.race.CaptureRuntimeClone();
+    clone->runtime = std::move(*runtime);
+    clone->incrementalRespawnCount =
+            impl->instance.incrementalRespawnCount;
+    return clone;
+}
+
+bool ReplaySimulationSession::PrepareRuntimeCloneRestore(
+        const ReplaySimulationInstanceClone &clone) {
+    return impl->instance.runtime &&
+           impl->instance.race.PrepareRuntimeCloneRestore(clone.race) &&
+           impl->instance.runtime->PrepareRuntimeCloneRestore(clone.runtime);
+}
+
+void ReplaySimulationSession::RestoreRuntimeClone(
+        ReplaySimulationInstanceClone clone) noexcept {
+    impl->instance.race.RestoreRuntimeClone(std::move(clone.race));
+    impl->instance.runtime->RestoreRuntimeClone(std::move(clone.runtime));
+    impl->instance.incrementalRespawnCount = clone.incrementalRespawnCount;
 }

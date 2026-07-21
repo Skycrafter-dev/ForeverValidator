@@ -22,6 +22,10 @@ enum class ReplayVehiclePreparationResult {
 
 class ReplayVehicleSimulation {
 public:
+    struct RuntimeClone {
+        CSceneVehicleCar::RuntimeClone car;
+        ReplayVehicleWheelSurfaces::RuntimeClone wheelSurfaces;
+    };
     explicit ReplayVehicleSimulation(CTrackManiaRace &race);
     ~ReplayVehicleSimulation();
 
@@ -40,6 +44,9 @@ public:
     CSceneVehicleCar &Car() { return car_; }
     std::optional<ReplayDynaParameters> BuildDynaParameters() const;
     std::optional<u32> FinishTimeMs() const;
+    RuntimeClone CaptureRuntimeClone() const;
+    bool CanRestoreRuntimeClone(const RuntimeClone &clone) const noexcept;
+    void RestoreRuntimeClone(const RuntimeClone &clone) noexcept;
 
 private:
     void InstallActiveTuning();

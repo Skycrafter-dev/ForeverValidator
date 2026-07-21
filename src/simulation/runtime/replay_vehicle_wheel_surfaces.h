@@ -12,6 +12,9 @@ class ReplayVehicleCollisionModel;
 class ReplayVehicleWheelSurfaces final
         : public CSceneVehicleCarWheelSurfaceObserver {
 public:
+    struct RuntimeClone {
+        std::vector<bool> movedByUpdateSurface;
+    };
     void Reset(CSceneVehicleCar *car = nullptr);
     void MarkWheelSurfaceUpdated(CSceneVehicleCar *car,
                                  CSceneVehicleCar::SSimulationWheel *wheel);
@@ -26,6 +29,11 @@ public:
     void OnWheelSurfaceUpdated(
             CSceneVehicleCar &car,
             CSceneVehicleCar::SSimulationWheel &wheel) override;
+    RuntimeClone CaptureRuntimeClone() const;
+    bool CanRestoreRuntimeClone(const RuntimeClone &clone,
+                                const CSceneVehicleCar &car) const noexcept;
+    void RestoreRuntimeClone(const RuntimeClone &clone,
+                             CSceneVehicleCar &car) noexcept;
 
 private:
     struct WheelSurfaceBinding {

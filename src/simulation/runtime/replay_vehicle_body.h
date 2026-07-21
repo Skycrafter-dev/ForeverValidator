@@ -11,6 +11,7 @@
 #include "engine/scene/plug_solid.h"
 class ReplayVehicleBody {
 public:
+    using RuntimeClone = CHmsDyna::RuntimeClone;
     ReplayVehicleBody();
 
     void InitializeAtSpawn(const ReplayDynaParameters &parameters,
@@ -29,6 +30,9 @@ public:
     CHmsItem &Item();
     CPlugSolid &Solid();
     CHmsCorpus &Corpus();
+    RuntimeClone CaptureRuntimeClone() const;
+    bool PrepareRuntimeCloneRestore(const RuntimeClone &clone);
+    void RestoreRuntimeClone(RuntimeClone clone) noexcept;
 
 private:
     CHmsDyna dyna;

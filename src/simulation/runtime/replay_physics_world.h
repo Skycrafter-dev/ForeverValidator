@@ -14,6 +14,10 @@ class CTrackManiaRace;
 
 class ReplayPhysicsWorld {
 public:
+    struct RuntimeClone {
+        std::uint32_t schemePeriodMs = 0u;
+        std::uint32_t tickTimeMs = 0u;
+    };
     ReplayPhysicsWorld();
 
     ReplayMapSceneResult ConnectMapScene(
@@ -30,6 +34,8 @@ public:
 
     CHmsZoneDynamic &Zone() { return zone_; }
     CHmsCollisionManagerSZone &CollisionZone() { return *collisionZone_; }
+    RuntimeClone CaptureRuntimeClone() const noexcept;
+    void RestoreRuntimeClone(const RuntimeClone &clone) noexcept;
 
 private:
     CHmsCollisionManagerSZone localCollisionZone_{0u, nullptr};

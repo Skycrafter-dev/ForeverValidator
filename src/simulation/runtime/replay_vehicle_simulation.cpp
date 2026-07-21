@@ -230,3 +230,22 @@ std::optional<u32> ReplayVehicleSimulation::FinishTimeMs() const {
              ? std::optional<u32>(progress.lastPrepareTimeMs)
              : std::nullopt;
 }
+
+ReplayVehicleSimulation::RuntimeClone
+ReplayVehicleSimulation::CaptureRuntimeClone() const {
+    return {car_.CaptureRuntimeClone(),
+            wheelSurfaces_.CaptureRuntimeClone()};
+}
+
+bool ReplayVehicleSimulation::CanRestoreRuntimeClone(
+        const RuntimeClone &clone) const noexcept {
+    return car_.CanRestoreRuntimeClone(clone.car) &&
+           wheelSurfaces_.CanRestoreRuntimeClone(
+                   clone.wheelSurfaces, car_);
+}
+
+void ReplayVehicleSimulation::RestoreRuntimeClone(
+        const RuntimeClone &clone) noexcept {
+    car_.RestoreRuntimeClone(clone.car);
+    wheelSurfaces_.RestoreRuntimeClone(clone.wheelSurfaces, car_);
+}

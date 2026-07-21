@@ -53,6 +53,10 @@ private:
 
 class CSceneMobil : public CSceneObject {
 public:
+    struct RuntimeClone {
+        bool absorbContactEnabled = false;
+        bool physicsUpdatesEnabled = false;
+    };
     CSceneMobil(void);
     ~CSceneMobil(void) override;
 
@@ -111,6 +115,8 @@ public:
     void SetReplayMotionChangesLocations(int changesLocations);
     void SetReplayCollisionUsesInitialTransform(int usesInitialTransform);
     int ReplayCollisionUsesInitialTransform(void) const;
+    RuntimeClone CaptureRuntimeClone(void) const noexcept;
+    void RestoreRuntimeClone(const RuntimeClone &clone) noexcept;
 
 protected:
     virtual void HmsComputeForces(float dt);

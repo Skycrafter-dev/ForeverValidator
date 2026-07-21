@@ -681,3 +681,12 @@ CSceneMobil::InitialItemProperties(void) const {
 const std::vector<CMwNodRef<CSceneObjectLink>> &CSceneMobil::Links(void) const {
     return links;
 }
+CSceneMobil::RuntimeClone CSceneMobil::CaptureRuntimeClone(void) const noexcept {
+    return {absorbContactEnabled, physicsUpdatesEnabled};
+}
+
+void CSceneMobil::RestoreRuntimeClone(
+        const RuntimeClone &clone) noexcept {
+    EnableAbsorbContactCallback(clone.absorbContactEnabled ? 1 : 0);
+    EnablePhysicsUpdates(clone.physicsUpdatesEnabled ? 1 : 0);
+}

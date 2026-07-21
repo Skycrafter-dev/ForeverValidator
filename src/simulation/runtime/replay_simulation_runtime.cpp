@@ -64,6 +64,7 @@ struct ReplaySimulationRuntime::State {
     bool staticSceneReady = false;
     bool firstStep = true;
     bool stuntsEnabled = false;
+    Phase phase = Phase::Detached;
 };
 
 ReplaySimulationRuntime::ReplaySimulationRuntime(CTrackManiaRace &race)
@@ -116,6 +117,7 @@ ReplaySimulationRunResult ReplaySimulationRuntime::Start(
             BuildReplayValidationSpawnLocation(
                     spawnLocation, validationSeed));
     state.firstStep = true;
+    state.phase = Phase::Idle;
     return ReplaySimulationRunResult::Success;
 }
 
@@ -123,10 +125,11 @@ ReplaySimulationStepExecution ReplaySimulationRuntime::Step(
         const ReplayControlTick &tick) {
     State &state = *state_;
     ReplaySimulationStepExecution execution;
-    if (state.definition == nullptr) {
+    if (state.definition == nullptr || state.phase != Phase::Idle) {
         execution.result = ReplaySimulationRunResult::InvalidControlTimeline;
         return execution;
     }
+    state.phase = Phase::Stepping;
 
     if (!state.firstStep) {
         state.vehicle.PrepareStep(tick, state.body);
@@ -164,6 +167,7 @@ ReplaySimulationStepExecution ReplaySimulationRuntime::Step(
     }
     execution.finishTickMs = state.vehicle.FinishTimeMs();
     state.firstStep = false;
+    state.phase = Phase::Idle;
     return execution;
 }
 
@@ -200,4 +204,41 @@ ReplaySimulationRuntime::ApplyReplayStuntTimePenalty(
     }
     state_->race.ApplyReplayStuntTimePenalty(overtimeMs);
     return state_->race.StuntsScore();
+}
+
+std::optional<ReplaySimulationRuntime::RuntimeClone>
+ReplaySimulationRuntime::CaptureRuntimeClone() const {
+    if (state_->phase != Phase::Idle || state_->definition == nullptr) {
+        return std::nullopt;
+    }
+    RuntimeClone clone;
+    clone.world = state_->world.CaptureRuntimeClone();
+    clone.body = state_->body.CaptureRuntimeClone();
+    clone.vehicle = state_->vehicle.CaptureRuntimeClone();
+    clone.firstStep = state_->firstStep;
+    clone.stuntsEnabled = state_->stuntsEnabled;
+    return clone;
+}
+
+bool ReplaySimulationRuntime::PrepareRuntimeCloneRestore(
+        const RuntimeClone &clone) {
+    return state_->phase == Phase::Idle &&
+           state_->definition != nullptr &&
+           state_->body.PrepareRuntimeCloneRestore(clone.body) &&
+           state_->vehicle.CanRestoreRuntimeClone(clone.vehicle);
+}
+
+void ReplaySimulationRuntime::RestoreRuntimeClone(
+        RuntimeClone clone) noexcept {
+    state_->world.RestoreRuntimeClone(clone.world);
+    state_->body.RestoreRuntimeClone(std::move(clone.body));
+    state_->vehicle.RestoreRuntimeClone(clone.vehicle);
+    state_->firstStep = clone.firstStep;
+    state_->stuntsEnabled = clone.stuntsEnabled;
+    state_->phase = Phase::Idle;
+}
+
+ReplaySimulationRuntime::Phase
+ReplaySimulationRuntime::CurrentPhase() const noexcept {
+    return state_->phase;
 }

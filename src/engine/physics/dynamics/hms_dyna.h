@@ -40,6 +40,17 @@ struct CHmsDyna {
         void Reset(void);
     };
 
+    struct RuntimeClone {
+        std::optional<float> maxAngularSpeed;
+        CHmsDynaParams dynaParams{};
+        CHmsStateDyna tempState{};
+        CHmsStateDyna writeState{};
+        CHmsStateDyna currentState{};
+        std::vector<GmVec3> pendingCollisionReplacements;
+        bool isDynamicActive = false;
+        EDynamicType dynamicType = EDynamicType_LinearOnly;
+    };
+
     CHmsDyna(void);
     ~CHmsDyna(void);
     CHmsDynaParams &Parameters(void) { return dynaParams; }
@@ -158,6 +169,9 @@ struct CHmsDyna {
             const GmVec3 &replacement);
     void ComputeSynthetizedReplacement(
             GmVec3 &out);
+    RuntimeClone CaptureRuntimeClone(void) const;
+    bool PrepareRuntimeCloneRestore(const RuntimeClone &clone);
+    void RestoreRuntimeClone(RuntimeClone clone) noexcept;
 
 private:
     std::optional<float> maxAngularSpeed;

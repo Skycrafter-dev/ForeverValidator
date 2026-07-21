@@ -87,6 +87,71 @@ CSceneVehicleCar::CSceneVehicleCar(void)
 
 CSceneVehicleCar::~CSceneVehicleCar(void) { DetachPhysicsItem(); }
 
+CSceneVehicleCar::RuntimeClone
+CSceneVehicleCar::CaptureRuntimeClone(void) const {
+  RuntimeClone clone;
+  clone.vehicle = CSceneVehicle::CaptureRuntimeClone();
+  clone.wheels = wheels;
+  for (SSimulationWheel &wheel : clone.wheels) {
+    wheel.surfaceHandler.BindTree(nullptr);
+  }
+  clone.controls = controls;
+  clone.feedback = feedback;
+  clone.linearSpeedCap = linearSpeedCap;
+  clone.integration = integration;
+  clone.frameHistory = frameHistory;
+  clone.engine = engine;
+  clone.reverseGearSpeedThreshold = reverseGearSpeedThreshold;
+  clone.turbo = turbo;
+  clone.airControl = airControl;
+  clone.contacts = contacts;
+  clone.radiusSteering = radiusSteering;
+  clone.slipMemory = slipMemory;
+  clone.gearedDrive = gearedDrive;
+  clone.lastComputeForcesTick = lastComputeForcesTick;
+  for (std::size_t index = 0u; index < dynaParts.size(); ++index) {
+    clone.dynaPartSprings[index] = dynaParts[index].spring;
+  }
+  clone.forceAccumulators = forceAccumulators;
+  return clone;
+}
+
+bool CSceneVehicleCar::CanRestoreRuntimeClone(
+    const RuntimeClone &clone) const noexcept {
+  return clone.wheels.size() == wheels.size();
+}
+
+void CSceneVehicleCar::RestoreRuntimeClone(
+    const RuntimeClone &clone) noexcept {
+  CSceneVehicle::RestoreRuntimeClone(clone.vehicle);
+  for (std::size_t index = 0u; index < wheels.size(); ++index) {
+    CPlugTree *targetTree = wheels[index].surfaceHandler.Tree();
+    wheels[index] = clone.wheels[index];
+    wheels[index].surfaceHandler.BindTree(targetTree);
+    if (targetTree != nullptr) {
+      targetTree->SetLocation(wheels[index].surfaceHandler.CurrentPose());
+    }
+  }
+  controls = clone.controls;
+  feedback = clone.feedback;
+  linearSpeedCap = clone.linearSpeedCap;
+  integration = clone.integration;
+  frameHistory = clone.frameHistory;
+  engine = clone.engine;
+  reverseGearSpeedThreshold = clone.reverseGearSpeedThreshold;
+  turbo = clone.turbo;
+  airControl = clone.airControl;
+  contacts = clone.contacts;
+  radiusSteering = clone.radiusSteering;
+  slipMemory = clone.slipMemory;
+  gearedDrive = clone.gearedDrive;
+  lastComputeForcesTick = clone.lastComputeForcesTick;
+  for (std::size_t index = 0u; index < dynaParts.size(); ++index) {
+    dynaParts[index].spring = clone.dynaPartSprings[index];
+  }
+  forceAccumulators = clone.forceAccumulators;
+}
+
 void CSceneVehicleCar::SetTurboRouletteTickOrigin(unsigned long tick) {
   turbo.rouletteTickOrigin = static_cast<u32>(tick);
 }

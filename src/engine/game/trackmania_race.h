@@ -69,6 +69,47 @@ struct ReplayStuntEvent {
 
 class CTrackManiaRace : public ReplayCheckpointContactObserver {
 public:
+    struct ReplayStuntInputSnapshot {
+        u32 tickTimeMs = 0u;
+        std::array<u32, 6u> lastChangeTimeMs{};
+    };
+
+    struct RuntimeClone {
+        CTrackManiaPlayer player{};
+        std::vector<std::uint8_t> checkpointSlotsPassed;
+        std::optional<GmIso4> playerSpawnLocation;
+        std::optional<GmIso4> lastAcceptedSpawnLocation;
+        bool currentSpawnLocationInitialized = false;
+        u32 preparedEventTimeMs = 0u;
+        EChallengePlayMode replayPlayMode = EChallengePlayMode::Race;
+        u32 replayNbLaps = 1u;
+        ReplayRaceProgress progress{};
+        bool replayStuntsEnabled = false;
+        bool replayStuntStateAvailable = false;
+        u32 replayStuntsTimeLimitMs = 0u;
+        u32 replayStuntsRaceStartTimeMs = 0u;
+        ReplayStuntSimulationState replayStuntState{};
+        std::array<ReplayStuntInputSnapshot, 32u> replayStuntInputHistory{};
+        std::size_t replayStuntInputHistorySize = 0u;
+        std::array<GmIso4, 20u> replayStuntLocationHistory{};
+        std::size_t replayStuntLocationHistorySize = 0u;
+        GmIso4 replayStuntPreviousLocation{};
+        GmIso4 replayStuntTakeoffLocation{};
+        GmVec3 replayStuntRotation{};
+        float replayStuntLandingDirection = 0.0f;
+        u32 replayStuntTakeoffTick = UINT32_MAX;
+        u32 replayStuntLandingTick = UINT32_MAX;
+        u32 replayStuntPreviousLandingTick = UINT32_MAX;
+        u32 replayStuntChain = 0u;
+        u32 replayStuntComboWindowMs = 0u;
+        bool replayStuntInProgress = false;
+        bool replayStuntMasterJump = false;
+        bool replayStuntBadLanding = false;
+        std::optional<u32> replayStuntScoreAtTimeLimit;
+        std::array<u32, 39u> replayStuntFigureScores{};
+        u32 stuntsScore = 0u;
+        std::vector<ReplayStuntEvent> stuntEvents;
+    };
     static float s_MasterJumpFactor;
     static unsigned long s_ReverseBonus;
     static unsigned long s_TimeBonus;
@@ -150,15 +191,13 @@ public:
 
     void OnCheckpointContact(CHmsItem &item,
                              CHmsPhysicalContact &contact) override;
+    RuntimeClone CaptureRuntimeClone() const;
+    bool PrepareRuntimeCloneRestore(const RuntimeClone &clone);
+    void RestoreRuntimeClone(RuntimeClone clone) noexcept;
 
 private:
     static constexpr std::size_t ReplayStuntInputHistoryCount = 32u;
     static constexpr std::size_t ReplayStuntLocationHistoryCount = 20u;
-
-    struct ReplayStuntInputSnapshot {
-        u32 tickTimeMs = 0u;
-        std::array<u32, 6u> lastChangeTimeMs{};
-    };
 
     void StoreSpawnLocation(const GmIso4 &spawnIso);
     void EnsurePreviousSpawnLocationInitialized(const GmIso4 &spawnIso);

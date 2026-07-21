@@ -6,7 +6,10 @@
 
 #include "simulation/control/replay_control_timeline.h"
 #include "simulation/runtime/replay_dyna_frame_state.h"
+#include "simulation/runtime/replay_physics_world.h"
 #include "simulation/runtime/replay_simulation_result.h"
+#include "simulation/runtime/replay_vehicle_body.h"
+#include "simulation/runtime/replay_vehicle_simulation.h"
 #include "engine/game/trackmania_race.h"
 #include "engine/scene/scene_vehicle_car.h"
 class CTrackManiaRace;
@@ -28,6 +31,19 @@ ReplayStuntSimulationState BuildReplayStuntSimulationState(
 
 class ReplaySimulationRuntime {
 public:
+    enum class Phase : std::uint8_t {
+        Detached,
+        Idle,
+        Stepping,
+    };
+
+    struct RuntimeClone {
+        ReplayPhysicsWorld::RuntimeClone world{};
+        ReplayVehicleBody::RuntimeClone body{};
+        ReplayVehicleSimulation::RuntimeClone vehicle{};
+        bool firstStep = true;
+        bool stuntsEnabled = false;
+    };
     explicit ReplaySimulationRuntime(CTrackManiaRace &race);
     ~ReplaySimulationRuntime();
 
@@ -49,6 +65,10 @@ public:
     const ReplayRaceProgress &RaceProgress() const;
     std::optional<std::uint32_t> ApplyReplayStuntTimePenalty(
             std::uint32_t overtimeMs);
+    std::optional<RuntimeClone> CaptureRuntimeClone() const;
+    bool PrepareRuntimeCloneRestore(const RuntimeClone &clone);
+    void RestoreRuntimeClone(RuntimeClone clone) noexcept;
+    Phase CurrentPhase() const noexcept;
 
 private:
     struct State;

@@ -216,6 +216,27 @@ public:
     SVehicleCarState asyncPrevious;
   };
 
+  struct RuntimeClone {
+    CSceneVehicle::RuntimeClone vehicle{};
+    std::vector<SSimulationWheel> wheels;
+    SControls controls{};
+    SFeedback feedback{};
+    float linearSpeedCap = 0.0f;
+    SIntegration integration{};
+    SFrameHistory frameHistory{};
+    SEngine engine{};
+    float reverseGearSpeedThreshold = 0.0f;
+    STurbo turbo{};
+    SAirControl airControl{};
+    SContacts contacts{};
+    SRadiusSteeringState radiusSteering{};
+    SSlipMemoryState slipMemory{};
+    SGearedDriveState gearedDrive{};
+    u32 lastComputeForcesTick = 0u;
+    std::array<GmSpring<float>, 4> dynaPartSprings{};
+    SForceAccumulators forceAccumulators{};
+  };
+
 private:
   friend struct CSceneVehicleCarLegacyEngineTestPeer;
   friend struct CSceneVehicleCarGearedEngineTestPeer;
@@ -285,6 +306,9 @@ public:
   void BindTurboSound(CSceneSoundSource &source, CHmsSoundSource &sound);
   void BindWheelSurfaceObserver(CSceneVehicleCarWheelSurfaceObserver &observer);
   void ClearWheelSurfaceObserver(void);
+  RuntimeClone CaptureRuntimeClone(void) const;
+  bool CanRestoreRuntimeClone(const RuntimeClone &clone) const noexcept;
+  void RestoreRuntimeClone(const RuntimeClone &clone) noexcept;
 
 protected:
   void HmsComputeForces(float dt) override;

@@ -285,3 +285,98 @@ void CTrackManiaRace::OnCheckpointContact(
         return;
     }
 }
+
+CTrackManiaRace::RuntimeClone
+CTrackManiaRace::CaptureRuntimeClone() const {
+    RuntimeClone clone;
+    clone.player = player;
+    clone.checkpointSlotsPassed = checkpointSlotsPassed_;
+    clone.playerSpawnLocation = playerSpawnLocation_;
+    clone.lastAcceptedSpawnLocation = lastAcceptedSpawnLocation_;
+    clone.currentSpawnLocationInitialized = currentSpawnLocationInitialized_;
+    clone.preparedEventTimeMs = preparedEventTimeMs_;
+    clone.replayPlayMode = replayPlayMode_;
+    clone.replayNbLaps = replayNbLaps_;
+    clone.progress = progress_;
+    clone.replayStuntsEnabled = replayStuntsEnabled_;
+    clone.replayStuntStateAvailable = replayStuntStateAvailable_;
+    clone.replayStuntsTimeLimitMs = replayStuntsTimeLimitMs_;
+    clone.replayStuntsRaceStartTimeMs = replayStuntsRaceStartTimeMs_;
+    clone.replayStuntState = replayStuntState_;
+    clone.replayStuntInputHistory = replayStuntInputHistory_;
+    clone.replayStuntInputHistorySize = replayStuntInputHistorySize_;
+    clone.replayStuntLocationHistory = replayStuntLocationHistory_;
+    clone.replayStuntLocationHistorySize = replayStuntLocationHistorySize_;
+    clone.replayStuntPreviousLocation = replayStuntPreviousLocation_;
+    clone.replayStuntTakeoffLocation = replayStuntTakeoffLocation_;
+    clone.replayStuntRotation = replayStuntRotation_;
+    clone.replayStuntLandingDirection = replayStuntLandingDirection_;
+    clone.replayStuntTakeoffTick = replayStuntTakeoffTick_;
+    clone.replayStuntLandingTick = replayStuntLandingTick_;
+    clone.replayStuntPreviousLandingTick = replayStuntPreviousLandingTick_;
+    clone.replayStuntChain = replayStuntChain_;
+    clone.replayStuntComboWindowMs = replayStuntComboWindowMs_;
+    clone.replayStuntInProgress = replayStuntInProgress_;
+    clone.replayStuntMasterJump = replayStuntMasterJump_;
+    clone.replayStuntBadLanding = replayStuntBadLanding_;
+    clone.replayStuntScoreAtTimeLimit = replayStuntScoreAtTimeLimit_;
+    clone.replayStuntFigureScores = replayStuntFigureScores_;
+    clone.stuntsScore = stuntsScore_;
+    clone.stuntEvents = stuntEvents_;
+    return clone;
+}
+
+bool CTrackManiaRace::PrepareRuntimeCloneRestore(
+        const RuntimeClone &clone) {
+    if (clone.checkpointSlotsPassed.size() !=
+            checkpointSlotsPassed_.size()) {
+        return false;
+    }
+    try {
+        checkpointSlotsPassed_.reserve(clone.checkpointSlotsPassed.size());
+        stuntEvents_.reserve(clone.stuntEvents.size());
+        return clone.replayStuntInputHistorySize <=
+                       replayStuntInputHistory_.size() &&
+               clone.replayStuntLocationHistorySize <=
+                       replayStuntLocationHistory_.size();
+    } catch (const std::bad_alloc &) {
+        return false;
+    }
+}
+
+void CTrackManiaRace::RestoreRuntimeClone(RuntimeClone clone) noexcept {
+    player = clone.player;
+    checkpointSlotsPassed_.swap(clone.checkpointSlotsPassed);
+    playerSpawnLocation_ = clone.playerSpawnLocation;
+    lastAcceptedSpawnLocation_ = clone.lastAcceptedSpawnLocation;
+    currentSpawnLocationInitialized_ = clone.currentSpawnLocationInitialized;
+    preparedEventTimeMs_ = clone.preparedEventTimeMs;
+    replayPlayMode_ = clone.replayPlayMode;
+    replayNbLaps_ = clone.replayNbLaps;
+    progress_ = clone.progress;
+    replayStuntsEnabled_ = clone.replayStuntsEnabled;
+    replayStuntStateAvailable_ = clone.replayStuntStateAvailable;
+    replayStuntsTimeLimitMs_ = clone.replayStuntsTimeLimitMs;
+    replayStuntsRaceStartTimeMs_ = clone.replayStuntsRaceStartTimeMs;
+    replayStuntState_ = clone.replayStuntState;
+    replayStuntInputHistory_ = clone.replayStuntInputHistory;
+    replayStuntInputHistorySize_ = clone.replayStuntInputHistorySize;
+    replayStuntLocationHistory_ = clone.replayStuntLocationHistory;
+    replayStuntLocationHistorySize_ = clone.replayStuntLocationHistorySize;
+    replayStuntPreviousLocation_ = clone.replayStuntPreviousLocation;
+    replayStuntTakeoffLocation_ = clone.replayStuntTakeoffLocation;
+    replayStuntRotation_ = clone.replayStuntRotation;
+    replayStuntLandingDirection_ = clone.replayStuntLandingDirection;
+    replayStuntTakeoffTick_ = clone.replayStuntTakeoffTick;
+    replayStuntLandingTick_ = clone.replayStuntLandingTick;
+    replayStuntPreviousLandingTick_ = clone.replayStuntPreviousLandingTick;
+    replayStuntChain_ = clone.replayStuntChain;
+    replayStuntComboWindowMs_ = clone.replayStuntComboWindowMs;
+    replayStuntInProgress_ = clone.replayStuntInProgress;
+    replayStuntMasterJump_ = clone.replayStuntMasterJump;
+    replayStuntBadLanding_ = clone.replayStuntBadLanding;
+    replayStuntScoreAtTimeLimit_ = clone.replayStuntScoreAtTimeLimit;
+    replayStuntFigureScores_ = clone.replayStuntFigureScores;
+    stuntsScore_ = clone.stuntsScore;
+    stuntEvents_.swap(clone.stuntEvents);
+}

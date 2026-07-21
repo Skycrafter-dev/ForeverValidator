@@ -111,6 +111,8 @@ struct PhysicsSandboxStateView {
     std::optional<std::uint32_t> stuntsScore;
 };
 
+// An opaque in-process runtime clone. States are not serializable and are not
+// compatible across ForeverValidator builds.
 class PhysicsSandboxState {
 public:
     PhysicsSandboxState(const PhysicsSandboxState &);

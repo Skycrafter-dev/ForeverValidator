@@ -40,3 +40,19 @@ void ReplayPhysicsWorld::SetSimulationTime(const ReplayControlTick &tick) {
 void ReplayPhysicsWorld::Step() {
     zone_.PhysicsStep2();
 }
+
+ReplayPhysicsWorld::RuntimeClone
+ReplayPhysicsWorld::CaptureRuntimeClone() const noexcept {
+    return {
+            static_cast<std::uint32_t>(
+                    commandBuffer_.Timer().GetSchemePeriod()),
+            static_cast<std::uint32_t>(
+                    commandBuffer_.Timer().GetTickTime()),
+    };
+}
+
+void ReplayPhysicsWorld::RestoreRuntimeClone(
+        const RuntimeClone &clone) noexcept {
+    commandBuffer_.SetSimulationTime(
+            clone.schemePeriodMs, clone.tickTimeMs);
+}

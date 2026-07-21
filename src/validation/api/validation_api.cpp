@@ -1024,6 +1024,7 @@ namespace experimental {
 namespace {
 
 constexpr std::uint32_t SandboxInputTimeBaseMs = 100000u;
+constexpr std::uint32_t SandboxRuntimeCloneSchema = 1u;
 
 PhysicsSandboxError SandboxError(
         PhysicsSandboxErrorCode code,
@@ -1154,12 +1155,15 @@ std::uint64_t Fingerprint(ByteView bytes) {
 
 struct PhysicsSandboxState::Impl {
     PhysicsSandboxStateView view{};
+    std::shared_ptr<const ReplaySimulationInstanceClone> runtimeClone;
     std::vector<PhysicsSandboxInputEvent> inputs;
     std::uint64_t scenarioFingerprint = 0u;
     std::uint32_t validationSeed = 0u;
     SimulationBackend backend = SimulationBackend::Reference;
     std::uint32_t tickDurationMs = 0u;
     std::uint32_t prestartDurationMs = 0u;
+    std::size_t cursor = 0u;
+    std::uint32_t runtimeCloneSchema = 0u;
 };
 
 struct PhysicsSandbox::Impl {
@@ -1632,6 +1636,12 @@ PhysicsSandboxResult<PhysicsSandboxState> PhysicsSandbox::CaptureState()
                     std::move(view).Error());
         }
         auto state = std::make_shared<PhysicsSandboxState::Impl>();
+        state->runtimeClone = impl_->session->CaptureRuntimeClone();
+        if (!state->runtimeClone) {
+            return PhysicsSandboxResult<PhysicsSandboxState>::Failure(
+                    SandboxError(PhysicsSandboxErrorCode::InvalidSandbox,
+                                 "sandbox runtime is not at a capture boundary"));
+        }
         state->view = view.Value();
         state->inputs = impl_->inputs;
         state->scenarioFingerprint = impl_->scenarioFingerprint;
@@ -1639,6 +1649,8 @@ PhysicsSandboxResult<PhysicsSandboxState> PhysicsSandbox::CaptureState()
         state->backend = impl_->options.backend;
         state->tickDurationMs = impl_->options.tickDurationMs;
         state->prestartDurationMs = impl_->options.prestartDurationMs;
+        state->cursor = impl_->cursor;
+        state->runtimeCloneSchema = SandboxRuntimeCloneSchema;
         return PhysicsSandboxResult<PhysicsSandboxState>::Success(
                 PhysicsSandboxState(std::move(state)));
     } catch (const std::bad_alloc &) {
@@ -1656,6 +1668,7 @@ PhysicsSandboxResult<PhysicsSandboxStateView> PhysicsSandbox::RestoreState(
         const PhysicsSandboxState &state) noexcept {
     try {
         if (!impl_ || !impl_->loaded || !state.impl_ ||
+            state.impl_->runtimeCloneSchema != SandboxRuntimeCloneSchema ||
             state.impl_->scenarioFingerprint != impl_->scenarioFingerprint ||
             state.impl_->validationSeed != impl_->inputMetadata.validationSeed ||
             state.impl_->backend != impl_->options.backend ||
@@ -1666,23 +1679,39 @@ PhysicsSandboxResult<PhysicsSandboxStateView> PhysicsSandbox::RestoreState(
                     SandboxError(PhysicsSandboxErrorCode::IncompatibleState,
                                  "sandbox state is incompatible"));
         }
+        if (!state.impl_->runtimeClone) {
+            return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                    SandboxError(PhysicsSandboxErrorCode::IncompatibleState,
+                                 "sandbox state has no runtime clone"));
+        }
         PhysicsSandboxResult<ReplayControlPlan> plan =
                 impl_->BuildControlPlan(state.impl_->inputs);
         if (!plan) {
             return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
                     std::move(plan).Error());
         }
-        std::vector<PhysicsSandboxInputEvent> previousInputs = impl_->inputs;
-        ReplayControlPlan previousPlan = std::move(impl_->controlPlan);
-        impl_->inputs = state.impl_->inputs;
-        impl_->controlPlan = std::move(plan).Value();
-        PhysicsSandboxResult<PhysicsSandboxStateView> restored =
-                impl_->Restart(state.impl_->view.tick);
-        if (!restored) {
-            impl_->inputs = std::move(previousInputs);
-            impl_->controlPlan = std::move(previousPlan);
+        ReplayControlPlan restoredPlan = std::move(plan).Value();
+        if (state.impl_->cursor > restoredPlan.ticks.size() ||
+            state.impl_->cursor < impl_->prestartTicks) {
+            return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                    SandboxError(PhysicsSandboxErrorCode::IncompatibleState,
+                                 "sandbox state cursor is incompatible"));
         }
-        return restored;
+        std::vector<PhysicsSandboxInputEvent> restoredInputs =
+                state.impl_->inputs;
+        ReplaySimulationInstanceClone runtimeClone =
+                *state.impl_->runtimeClone;
+        if (!impl_->session->PrepareRuntimeCloneRestore(runtimeClone)) {
+            return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                    SandboxError(PhysicsSandboxErrorCode::AllocationFailed,
+                                 "sandbox runtime clone could not be prepared"));
+        }
+
+        impl_->session->RestoreRuntimeClone(std::move(runtimeClone));
+        impl_->inputs.swap(restoredInputs);
+        impl_->controlPlan = std::move(restoredPlan);
+        impl_->cursor = state.impl_->cursor;
+        return impl_->ReadView();
     } catch (const std::bad_alloc &) {
         return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
                 SandboxError(PhysicsSandboxErrorCode::AllocationFailed,

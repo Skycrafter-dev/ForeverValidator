@@ -11,6 +11,7 @@
 #include "simulation/control/replay_control_timeline.h"
 #include "simulation/runtime/replay_simulation_definition.h"
 #include "simulation/runtime/replay_simulation_result.h"
+#include "simulation/runtime/replay_simulation_runtime.h"
 #include "simulation/runtime/replay_trajectory_observation.h"
 #include "simulation/runtime/replay_dyna_frame_state.h"
 #include "engine/scene/static_scene_model.h"
@@ -32,6 +33,12 @@ struct ReplaySimulationStateView {
     std::optional<std::uint32_t> finishTimeMs;
     std::optional<std::uint32_t> stuntsScore;
     std::uint32_t respawnCount = 0u;
+};
+
+struct ReplaySimulationInstanceClone {
+    CTrackManiaRace::RuntimeClone race;
+    ReplaySimulationRuntime::RuntimeClone runtime;
+    std::uint32_t incrementalRespawnCount = 0u;
 };
 
 class ReplaySimulationSession {
@@ -65,6 +72,11 @@ public:
     std::optional<ReplaySimulationStateView> CurrentState() const;
     std::optional<std::uint32_t> ApplyReplayStuntTimePenalty(
             std::uint32_t overtimeMs);
+    std::shared_ptr<const ReplaySimulationInstanceClone>
+            CaptureRuntimeClone() const;
+    bool PrepareRuntimeCloneRestore(
+            const ReplaySimulationInstanceClone &clone);
+    void RestoreRuntimeClone(ReplaySimulationInstanceClone clone) noexcept;
 
 private:
     struct Impl;
