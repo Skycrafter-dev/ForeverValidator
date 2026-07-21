@@ -114,7 +114,7 @@ CPlugMaterial *CPlugSurface::MaterialAt(u32 localIndex) const {
 }
 
 CPlugMaterial *CPlugSurface::SingleMaterial(void) const {
-    return materials.size() == 1u ? materials.front() : nullptr;
+    return materials.size() == 1u ? materials.front().Get() : nullptr;
 }
 
 int CPlugSurface::AllowsStaticCollisionRecordAppend(void) const {

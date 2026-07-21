@@ -132,6 +132,50 @@ TMInterface replays use the `tminterface_replay` status and expose
 `replay_file_metadata.replay_provenance` plus `input_ghost_match`; the CLI also
 prints the TMInterface classification to stderr.
 
+## Container image
+
+The multi-stage `Dockerfile` builds `forevervalidator` on Debian and runs it
+as an unprivileged, non-root user. Build the image from the repository root:
+
+```sh
+docker build -t forevervalidator .
+```
+
+The image's `ENTRYPOINT` is the `forevervalidator` binary, so any arguments
+given to `docker run` are the same command-line
+arguments documented above. Mount the `Packs` directory and your replay(s)
+into the container, then reference the in-container mount paths:
+
+```sh
+docker run --rm \
+  -v "/path/to/TmUnitedForever/Packs:/packs:ro" \
+  -v "/path/to/replays:/replays:ro" \
+  forevervalidator \
+  --pak-dir /packs \
+  "/replays/run.Replay.Gbx"
+```
+
+To batch-validate a directory and write JSON reports back to the host, mount
+an output directory and use `--out-dir` (and optionally `--backend` /
+`--batch-size`) exactly as on the command line:
+
+```sh
+docker run --rm \
+  -v "/path/to/TmUnitedForever/Packs:/packs:ro" \
+  -v "/path/to/replays:/replays:ro" \
+  -v "/path/to/results:/results" \
+  forevervalidator \
+  --pak-dir /packs \
+  --out-dir /results \
+  --backend batched \
+  "/replays"
+```
+
+Because the container runs as a non-root user, host-mounted directories that
+the process writes to (such as `/results`) must be writable by that user.
+Either relax the host directory permissions or run the container with
+`--user "$(id -u):$(id -g)"` to match your host user.
+
 ## Library API
 
 The public API separates portable validation from native file access:

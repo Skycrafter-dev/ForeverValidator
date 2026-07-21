@@ -352,6 +352,15 @@ std::optional<DefaultVehiclePackData>
 DefaultVehiclePackArchive::LoadFromPack(
         CPlugFilePack &pack,
         const InstalledVehicleAssetGraph &assets) {
+// GCC's -Wmaybe-uninitialized produces a false positive here: it cannot prove
+// that the nested std::optional<VehicleMaterialSetDefinition> inside `result`
+// only ever holds a fully constructed VehicleFakeContactTextureDefinition
+// vector. Clang does not emit this warning and does not support the flag, so
+// the suppression is scoped to GCC only.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
     if (!assets.IsComplete()) {
         return std::nullopt;
     }
@@ -392,4 +401,7 @@ DefaultVehiclePackArchive::LoadFromPack(
     } catch (const std::bad_alloc &) {
         return std::nullopt;
     }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 }

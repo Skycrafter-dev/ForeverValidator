@@ -2,6 +2,7 @@
 #define TMNF_STATIC_SOLID_ARCHIVE_FEEDBACK_H
 
 #include "engine/core/engine_types.h"
+#include <cstddef>
 #include <vector>
 
 
