@@ -41,6 +41,10 @@ void ReplayPhysicsWorld::Step() {
     zone_.PhysicsStep2();
 }
 
+void ReplayPhysicsWorld::StepOptimizedCpu() {
+    zone_.PhysicsStep2OptimizedCpu();
+}
+
 ReplayPhysicsWorld::RuntimeClone
 ReplayPhysicsWorld::CaptureRuntimeClone() const noexcept {
     return {

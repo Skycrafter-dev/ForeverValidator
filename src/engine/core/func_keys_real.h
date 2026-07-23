@@ -4,6 +4,8 @@
 
 #include "engine/core/cmw_nod.h"
 #include "engine/core/mw_id.h"
+struct OptimizedCpuModel3VehicleForceAccess;
+
 class CFunc : public CMwNod {
 public:
     CFunc(void);
@@ -33,6 +35,8 @@ public:
     float XAt(unsigned long index) const;
 
 protected:
+    friend struct OptimizedCpuModel3VehicleForceAccess;
+
     std::vector<float> keyPositions;
     CMwId id;
 };
@@ -71,6 +75,8 @@ public:
     void SetKeys(std::vector<Key> keys, ERealInterp interpolation);
 
 private:
+    friend struct OptimizedCpuModel3VehicleForceAccess;
+
     std::vector<float> values;
     ERealInterp interpolationMode = Linear;
 };

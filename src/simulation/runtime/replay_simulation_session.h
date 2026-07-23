@@ -43,7 +43,8 @@ struct ReplaySimulationInstanceClone {
 
 class ReplaySimulationSession {
 public:
-    ReplaySimulationSession();
+    explicit ReplaySimulationSession(
+            forevervalidator::SimulationBackend backend);
     ~ReplaySimulationSession();
 
     ReplaySimulationSession(const ReplaySimulationSession &) = delete;
@@ -70,6 +71,9 @@ public:
             std::size_t begin,
             std::size_t count);
     std::optional<ReplaySimulationStateView> CurrentState() const;
+    std::optional<OptimizedCpuStaticSceneFingerprint>
+            CaptureOptimizedCpuStaticSceneFingerprintForTesting(
+                    void) const noexcept;
     std::optional<std::uint32_t> ApplyReplayStuntTimePenalty(
             std::uint32_t overtimeMs);
     std::shared_ptr<const ReplaySimulationInstanceClone>

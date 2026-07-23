@@ -4,6 +4,9 @@
 #include <memory>
 #include <optional>
 
+#include <forevervalidator/validation.h>
+
+#include "simulation/backends/optimized_cpu/optimized_cpu_static_scene_fingerprint.h"
 #include "simulation/control/replay_control_timeline.h"
 #include "simulation/runtime/replay_dyna_frame_state.h"
 #include "simulation/runtime/replay_physics_world.h"
@@ -44,7 +47,9 @@ public:
         bool firstStep = true;
         bool stuntsEnabled = false;
     };
-    explicit ReplaySimulationRuntime(CTrackManiaRace &race);
+    ReplaySimulationRuntime(
+            CTrackManiaRace &race,
+            forevervalidator::SimulationBackend backend);
     ~ReplaySimulationRuntime();
 
     ReplaySimulationRuntime(const ReplaySimulationRuntime &) = delete;
@@ -58,6 +63,16 @@ public:
             std::uint32_t validationSeed);
     ReplaySimulationStepExecution Step(
             const ReplayControlTick &tick);
+    ReplaySimulationStepExecution StepOptimizedCpu(
+            const ReplayControlTick &tick);
+    ReplaySimulationStepExecution StepOptimizedCpuNativeBinary32(
+            const ReplayControlTick &tick);
+    void PrepareOptimizedCpuStaticTransforms(void) noexcept;
+    void CertifyOptimizedCpuStaticTransformsForAdvance(void) noexcept;
+    std::optional<OptimizedCpuStaticSceneFingerprint>
+            CaptureOptimizedCpuStaticSceneFingerprintForTesting(
+                    const CHmsCollisionManagerSZone &expectedPersistentZone)
+                    const noexcept;
     std::optional<std::uint32_t> FinishTimeMs() const;
     std::optional<std::uint32_t> StuntsScore() const;
     ReplayDynaFrameState CurrentFrame() const;

@@ -11,6 +11,10 @@
 class CHmsCorpus;
 class CSceneVehicleCar;
 class CTrackManiaRace;
+class OptimizedCpuStaticSurfaceTransformCache;
+namespace forevervalidator::simulation {
+class OptimizedCpuModel3VehicleForceContext;
+}
 
 class ReplayPhysicsWorld {
 public:
@@ -31,6 +35,16 @@ public:
     void AddVehicleBody(CHmsCorpus &corpus);
     void SetSimulationTime(const ReplayControlTick &tick);
     void Step();
+    void StepOptimizedCpu();
+    void StepOptimizedCpuNativeBinary32(
+            forevervalidator::simulation::
+                    OptimizedCpuModel3VehicleForceContext &model3Context);
+    void StepOptimizedCpuCached(
+            const OptimizedCpuStaticSurfaceTransformCache &transforms);
+    void StepOptimizedCpuNativeBinary32Cached(
+            const OptimizedCpuStaticSurfaceTransformCache &transforms,
+            forevervalidator::simulation::
+                    OptimizedCpuModel3VehicleForceContext &model3Context);
 
     CHmsZoneDynamic &Zone() { return zone_; }
     CHmsCollisionManagerSZone &CollisionZone() { return *collisionZone_; }

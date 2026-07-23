@@ -16,6 +16,8 @@ struct CHmsCorpus;
 struct CHmsZoneDynamic;
 struct CPlugSurface;
 struct CPlugTree;
+class OptimizedCpuStaticSurfaceTransformCache;
+class OptimizedCpuStaticSurfaceTransformGroup;
 
 struct CHmsCollisionManager {
     struct SZone;
@@ -96,6 +98,7 @@ struct CHmsCollisionManager {
 
     private:
         friend struct SZone;
+        friend class OptimizedCpuStaticSurfaceTransformCache;
 
         std::vector<CHmsCorpus *> allCorpuses;
         struct MovingCorpusState {
@@ -177,10 +180,40 @@ struct CHmsCollisionManager {
         void DetectCollisionBetweenTreeAndStaticCollisionTree(
                 const GmIso4 &movingIso,
                 const CPlugTree &movingTree);
+        void DetectCollisionBetweenTreeAndStaticCollisionTreeOptimizedCpu(
+                const GmIso4 &movingIso,
+                const CPlugTree &movingTree);
+        void DetectCollisionBetweenTreeAndStaticCollisionTreeOptimizedCpuNativeBinary32(
+                const GmIso4 &movingIso,
+                const CPlugTree &movingTree);
+        void DetectCollisionBetweenTreeAndStaticCollisionTreeOptimizedCpuCached(
+                const GmIso4 &movingIso,
+                const CPlugTree &movingTree,
+                u32 &nextTemporalSlotOrdinal,
+                const OptimizedCpuStaticSurfaceTransformGroup &transforms);
+        void DetectCollisionBetweenTreeAndStaticCollisionTreeOptimizedCpuNativeBinary32Cached(
+                const GmIso4 &movingIso,
+                const CPlugTree &movingTree,
+                u32 &nextTemporalSlotOrdinal,
+                const OptimizedCpuStaticSurfaceTransformGroup &transforms);
         void DetectCollisionBetween(CHmsCorpus *a, CHmsCorpus *b);
         void DetectCollisionsCorpus(
                 CHmsCollisionBuffer &collisionBuffer,
                 CHmsCorpus *corpus);
+        void DetectCollisionsCorpusOptimizedCpu(
+                CHmsCollisionBuffer &collisionBuffer,
+                CHmsCorpus *corpus);
+        void DetectCollisionsCorpusOptimizedCpuNativeBinary32(
+                CHmsCollisionBuffer &collisionBuffer,
+                CHmsCorpus *corpus);
+        void DetectCollisionsCorpusOptimizedCpuCached(
+                CHmsCollisionBuffer &collisionBuffer,
+                CHmsCorpus *corpus,
+                const OptimizedCpuStaticSurfaceTransformCache &transforms);
+        void DetectCollisionsCorpusOptimizedCpuNativeBinary32Cached(
+                CHmsCollisionBuffer &collisionBuffer,
+                CHmsCorpus *corpus,
+                const OptimizedCpuStaticSurfaceTransformCache &transforms);
 
     private:
         friend struct CHmsZoneDynamic;

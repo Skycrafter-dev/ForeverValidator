@@ -25,6 +25,7 @@
 #include "simulation/backends/simulation_backend.h"
 #include "simulation/control/replay_control_plan.h"
 #include "validation/evaluation/replay_validation_session.h"
+#include "validation/api/physics_sandbox_static_scene_test_access.h"
 #include "validation/planning/replay_asset_route.h"
 #include "validation/planning/replay_challenge_map_preload.h"
 
@@ -982,7 +983,7 @@ Result<ValidationReport> RunReplayValidation(
     }
     const PreparedAssets prepared = preparedResult.Value();
 
-    ReplaySimulationSession simulationSession;
+    ReplaySimulationSession simulationSession(options.backend);
     CGameCtnReplayChallengeMapPreload preload;
     const ReplayChallengePreloadResult preloadResult = preload.Preload(
             replayFile.MapInput(),
@@ -1429,7 +1430,8 @@ PhysicsSandboxResult<PhysicsSandboxStateView> PhysicsSandbox::LoadReplay(
                             std::move(prepared).Error()));
         }
 
-        auto session = std::make_unique<ReplaySimulationSession>();
+        auto session = std::make_unique<ReplaySimulationSession>(
+                impl_->options.backend);
         CGameCtnReplayChallengeMapPreload preload;
         const ReplayChallengePreloadResult preloadResult = preload.Preload(
                 replay.MapInput(),
@@ -1793,6 +1795,40 @@ AdvancePhysicsSandboxes(
         results.clear();
     }
     return results;
+}
+
+std::optional<OptimizedCpuStaticSceneFingerprint>
+static_scene_test::PhysicsSandboxStaticSceneTestAccess::
+        CaptureStaticSceneFingerprint(
+                const PhysicsSandbox &sandbox) noexcept {
+    if (!sandbox.impl_ || !sandbox.impl_->loaded ||
+        !sandbox.impl_->session) {
+        return std::nullopt;
+    }
+    return sandbox.impl_->session->
+            CaptureOptimizedCpuStaticSceneFingerprintForTesting();
+}
+
+PhysicsSandboxResult<PhysicsSandboxStateView>
+static_scene_test::PhysicsSandboxStaticSceneTestAccess::RestartAtRaceTick(
+        PhysicsSandbox &sandbox,
+        std::uint64_t raceTick) noexcept {
+    try {
+        if (!sandbox.impl_) {
+            return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                    SandboxError(PhysicsSandboxErrorCode::InvalidSandbox,
+                                 "sandbox is moved-from"));
+        }
+        return sandbox.impl_->Restart(raceTick);
+    } catch (const std::bad_alloc &) {
+        return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                SandboxError(PhysicsSandboxErrorCode::AllocationFailed,
+                             "allocation failed while restarting sandbox"));
+    } catch (...) {
+        return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                SandboxError(PhysicsSandboxErrorCode::UnexpectedFailure,
+                             "unexpected sandbox restart failure"));
+    }
 }
 
 }  // namespace experimental

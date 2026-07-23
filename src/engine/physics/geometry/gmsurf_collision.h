@@ -27,11 +27,19 @@ int GmCollision_Sphere_Mesh(
         const LocatedGmSurf &sphere,
         const LocatedGmSurf &mesh,
         CGmCollisionBuffer &collisionBuffer);
+int GmCollision_Sphere_Mesh_OptimizedCpu(
+        const LocatedGmSurf &sphere,
+        const LocatedGmSurf &mesh,
+        CGmCollisionBuffer &collisionBuffer);
 int GmCollision_Ellipsoid_Polygon(
         const LocatedGmSurf &ellipsoid,
         const LocatedGmSurf &polygon,
         CGmCollisionBuffer &collisionBuffer);
 int GmCollision_Ellipsoid_Mesh(
+        const LocatedGmSurf &ellipsoid,
+        const LocatedGmSurf &mesh,
+        CGmCollisionBuffer &collisionBuffer);
+int GmCollision_Ellipsoid_Mesh_OptimizedCpu(
         const LocatedGmSurf &ellipsoid,
         const LocatedGmSurf &mesh,
         CGmCollisionBuffer &collisionBuffer);

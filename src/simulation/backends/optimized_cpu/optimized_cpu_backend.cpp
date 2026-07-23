@@ -3,10 +3,9 @@
 namespace forevervalidator::simulation {
 
 SimulationBackend ResolveLeafBackend(SimulationBackend backend) noexcept {
-    // The optimized implementation deliberately forwards while its independent
-    // physics kernels are developed behind this boundary.
     switch (backend) {
     case SimulationBackend::OptimizedCpu:
+        return SimulationBackend::OptimizedCpu;
     case SimulationBackend::Batched:
         return SimulationBackend::Reference;
     case SimulationBackend::Reference:

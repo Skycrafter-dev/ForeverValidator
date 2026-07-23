@@ -81,6 +81,9 @@ struct CPlugSurface : CPlug {
             GmLocalMaterialIndex localIndex) const;
     static int ComputeCollision(const SPlugSurfaceLocatedPair &pair,
                                 CGmCollisionBuffer &collisionBuffer);
+    static int ComputeCollisionOptimizedCpu(
+            const SPlugSurfaceLocatedPair &pair,
+            CGmCollisionBuffer &collisionBuffer);
 
 private:
     CMwNodRef<CPlugSurfaceGeom> geom;

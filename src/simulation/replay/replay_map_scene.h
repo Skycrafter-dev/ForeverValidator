@@ -44,6 +44,10 @@ public:
             CTrackManiaRace &race,
             CHmsCollisionManagerSZone *&selectedZone);
     bool FirstStartLineSpawnLocation(GmIso4 &location) const;
+    const CHmsCollisionManagerSZone &PersistentCollisionZoneForTesting(
+            void) const noexcept {
+        return persistentCollisionZone_;
+    }
 
 private:
     ReplayMapSceneResult BuildStaticCorpuses();

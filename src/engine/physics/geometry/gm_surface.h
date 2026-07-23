@@ -13,6 +13,9 @@ struct CGmCollisionBuffer;
 struct GmSurf;
 struct GmSurfPolygon;
 struct GmSurfMesh;
+struct GmSurfMeshOptimizedCpuAccess;
+struct GmSurfMeshEllipsoidOptimizedCpuAccess;
+struct GmSurfMeshStaticInverseOptimizedCpuAccess;
 
 struct LocatedGmSurf {
     const GmSurf *surf = nullptr;
@@ -235,6 +238,10 @@ protected:
                 CGmCollisionBuffer &collisionBuffer) const override;
 
 private:
+    friend struct GmSurfMeshOptimizedCpuAccess;
+    friend struct GmSurfMeshEllipsoidOptimizedCpuAccess;
+    friend struct GmSurfMeshStaticInverseOptimizedCpuAccess;
+
     GmVec3 &MutableVertex(u32 index);
     GmSurfMeshTriangle &MutableTriangle(u32 index);
     void RecomputeAllPlanes(void);

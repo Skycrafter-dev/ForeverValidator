@@ -4,6 +4,7 @@
 
 #include "engine/core/binary32_math.h"
 #include "simulation/replay/replay_map_scene.h"
+#include "simulation/backends/optimized_cpu/optimized_cpu_binary32_math.h"
 #include "simulation/runtime/replay_environment.h"
 #include "simulation/runtime/replay_physics_world.h"
 #include "simulation/runtime/replay_simulation_runtime.h"
@@ -54,14 +55,19 @@ struct ReplaySimulationInstance {
 };
 
 struct ReplaySimulationSession::Impl {
+    explicit Impl(forevervalidator::SimulationBackend requestedBackend)
+        : backend(requestedBackend) {}
+
+    forevervalidator::SimulationBackend backend;
     ReplayMapScene mapScene;
     ReplaySimulationInstance instance;
 
     void ResetRuntime() { instance.ResetRuntime(); }
 };
 
-ReplaySimulationSession::ReplaySimulationSession()
-    : impl(std::make_unique<Impl>()) {}
+ReplaySimulationSession::ReplaySimulationSession(
+        forevervalidator::SimulationBackend backend)
+    : impl(std::make_unique<Impl>(backend)) {}
 
 ReplaySimulationSession::~ReplaySimulationSession() = default;
 
@@ -124,7 +130,7 @@ ReplaySimulationTimelineResult ReplaySimulationSession::SimulateTimeline(
     }
 
     impl->instance.runtime = std::make_unique<ReplaySimulationRuntime>(
-            impl->instance.race);
+            impl->instance.race, impl->backend);
     result.result = impl->instance.runtime->Start(
             simulationDefinition,
             impl->mapScene,
@@ -135,24 +141,80 @@ ReplaySimulationTimelineResult ReplaySimulationSession::SimulateTimeline(
         return result;
     }
 
-    for (const ReplayControlTick &tick : controlTicks) {
-        const ReplaySimulationStepExecution execution =
-                impl->instance.runtime->Step(tick);
-        if (execution.result != ReplaySimulationRunResult::Success) {
-            result.result = execution.result;
-            return result;
-        }
-        result.executedRespawnCount +=
-                execution.respawnExecutedCount;
+    if (impl->backend == forevervalidator::SimulationBackend::OptimizedCpu) {
+        impl->instance.runtime->PrepareOptimizedCpuStaticTransforms();
+        impl->instance.runtime->
+                CertifyOptimizedCpuStaticTransformsForAdvance();
+        const forevervalidator::simulation::OptimizedCpuBinary32MathPath
+                binary32MathPath = forevervalidator::simulation::
+                        SelectOptimizedCpuBinary32MathPathForActiveExecution();
+        if (binary32MathPath == forevervalidator::simulation::
+                                        OptimizedCpuBinary32MathPath::X86Sse2) {
+            for (const ReplayControlTick &tick : controlTicks) {
+                const ReplaySimulationStepExecution execution =
+                        impl->instance.runtime->
+                                StepOptimizedCpuNativeBinary32(tick);
+                if (execution.result != ReplaySimulationRunResult::Success) {
+                    result.result = execution.result;
+                    return result;
+                }
+                result.executedRespawnCount +=
+                        execution.respawnExecutedCount;
 
-        if (tick.observe) {
-            try {
-                result.observations.push_back(
-                        ObserveReplayTrajectory(execution, tick));
-            } catch (const std::bad_alloc &) {
-                result.result =
-                        ReplaySimulationRunResult::ObservationAllocationFailed;
+                if (tick.observe) {
+                    try {
+                        result.observations.push_back(
+                                ObserveReplayTrajectory(execution, tick));
+                    } catch (const std::bad_alloc &) {
+                        result.result =
+                                ReplaySimulationRunResult::ObservationAllocationFailed;
+                        return result;
+                    }
+                }
+            }
+        } else {
+            for (const ReplayControlTick &tick : controlTicks) {
+                const ReplaySimulationStepExecution execution =
+                        impl->instance.runtime->StepOptimizedCpu(tick);
+                if (execution.result != ReplaySimulationRunResult::Success) {
+                    result.result = execution.result;
+                    return result;
+                }
+                result.executedRespawnCount +=
+                        execution.respawnExecutedCount;
+
+                if (tick.observe) {
+                    try {
+                        result.observations.push_back(
+                                ObserveReplayTrajectory(execution, tick));
+                    } catch (const std::bad_alloc &) {
+                        result.result =
+                                ReplaySimulationRunResult::ObservationAllocationFailed;
+                        return result;
+                    }
+                }
+            }
+        }
+    } else {
+        for (const ReplayControlTick &tick : controlTicks) {
+            const ReplaySimulationStepExecution execution =
+                    impl->instance.runtime->Step(tick);
+            if (execution.result != ReplaySimulationRunResult::Success) {
+                result.result = execution.result;
                 return result;
+            }
+            result.executedRespawnCount +=
+                    execution.respawnExecutedCount;
+
+            if (tick.observe) {
+                try {
+                    result.observations.push_back(
+                            ObserveReplayTrajectory(execution, tick));
+                } catch (const std::bad_alloc &) {
+                    result.result =
+                            ReplaySimulationRunResult::ObservationAllocationFailed;
+                    return result;
+                }
             }
         }
     }
@@ -181,13 +243,18 @@ ReplaySimulationRunResult ReplaySimulationSession::StartIncremental(
         return ReplaySimulationRunResult::MapStartUnavailable;
     }
     impl->instance.runtime = std::make_unique<ReplaySimulationRuntime>(
-            impl->instance.race);
-    return impl->instance.runtime->Start(
+            impl->instance.race, impl->backend);
+    const ReplaySimulationRunResult result = impl->instance.runtime->Start(
             simulationDefinition,
             impl->mapScene,
             startLocation,
             firstTick,
             validationSeed);
+    if (result == ReplaySimulationRunResult::Success &&
+        impl->backend == forevervalidator::SimulationBackend::OptimizedCpu) {
+        impl->instance.runtime->PrepareOptimizedCpuStaticTransforms();
+    }
+    return result;
 }
 
 ReplaySimulationTimelineResult ReplaySimulationSession::AdvanceIncremental(
@@ -199,16 +266,51 @@ ReplaySimulationTimelineResult ReplaySimulationSession::AdvanceIncremental(
         count > controlTicks.size() - begin) {
         return result;
     }
-    for (std::size_t index = begin; index < begin + count; ++index) {
-        const ReplayControlTick &tick = controlTicks[index];
-        const ReplaySimulationStepExecution execution =
-                impl->instance.runtime->Step(tick);
-        if (execution.result != ReplaySimulationRunResult::Success) {
-            result.result = execution.result;
-            return result;
+    if (impl->backend == forevervalidator::SimulationBackend::OptimizedCpu) {
+        impl->instance.runtime->
+                CertifyOptimizedCpuStaticTransformsForAdvance();
+        const forevervalidator::simulation::OptimizedCpuBinary32MathPath
+                binary32MathPath = forevervalidator::simulation::
+                        SelectOptimizedCpuBinary32MathPathForActiveExecution();
+        if (binary32MathPath == forevervalidator::simulation::
+                                        OptimizedCpuBinary32MathPath::X86Sse2) {
+            for (std::size_t index = begin; index < begin + count; ++index) {
+                const ReplayControlTick &tick = controlTicks[index];
+                const ReplaySimulationStepExecution execution =
+                        impl->instance.runtime->
+                                StepOptimizedCpuNativeBinary32(tick);
+                if (execution.result != ReplaySimulationRunResult::Success) {
+                    result.result = execution.result;
+                    return result;
+                }
+                impl->instance.incrementalRespawnCount +=
+                        execution.respawnExecutedCount;
+            }
+        } else {
+            for (std::size_t index = begin; index < begin + count; ++index) {
+                const ReplayControlTick &tick = controlTicks[index];
+                const ReplaySimulationStepExecution execution =
+                        impl->instance.runtime->StepOptimizedCpu(tick);
+                if (execution.result != ReplaySimulationRunResult::Success) {
+                    result.result = execution.result;
+                    return result;
+                }
+                impl->instance.incrementalRespawnCount +=
+                        execution.respawnExecutedCount;
+            }
         }
-        impl->instance.incrementalRespawnCount +=
-                execution.respawnExecutedCount;
+    } else {
+        for (std::size_t index = begin; index < begin + count; ++index) {
+            const ReplayControlTick &tick = controlTicks[index];
+            const ReplaySimulationStepExecution execution =
+                    impl->instance.runtime->Step(tick);
+            if (execution.result != ReplaySimulationRunResult::Success) {
+                result.result = execution.result;
+                return result;
+            }
+            impl->instance.incrementalRespawnCount +=
+                    execution.respawnExecutedCount;
+        }
     }
     result.finishTimeMs = impl->instance.runtime->FinishTimeMs();
     result.stuntsScore = impl->instance.runtime->StuntsScore();
@@ -274,4 +376,16 @@ void ReplaySimulationSession::RestoreRuntimeClone(
     impl->instance.race.RestoreRuntimeClone(std::move(clone.race));
     impl->instance.runtime->RestoreRuntimeClone(std::move(clone.runtime));
     impl->instance.incrementalRespawnCount = clone.incrementalRespawnCount;
+}
+
+std::optional<OptimizedCpuStaticSceneFingerprint>
+ReplaySimulationSession::
+        CaptureOptimizedCpuStaticSceneFingerprintForTesting(
+                void) const noexcept {
+    if (!impl->instance.runtime) {
+        return std::nullopt;
+    }
+    return impl->instance.runtime->
+            CaptureOptimizedCpuStaticSceneFingerprintForTesting(
+                    impl->mapScene.PersistentCollisionZoneForTesting());
 }
