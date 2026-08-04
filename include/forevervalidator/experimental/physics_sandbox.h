@@ -649,6 +649,8 @@ public:
             std::int64_t minimumTimeMs,
             std::int64_t maximumTimeMs,
             std::vector<PhysicsSandboxInputEvent> events) noexcept;
+    PhysicsSandboxResult<PhysicsSandboxStateView> SetSimulationHorizonMs(
+            std::uint32_t simulationHorizonMs) noexcept;
     PhysicsSandboxResult<PhysicsSandboxStateView> AdvanceTicks(
             std::uint32_t count) noexcept;
     PhysicsSandboxResult<PhysicsSandboxState> CaptureState() const noexcept;

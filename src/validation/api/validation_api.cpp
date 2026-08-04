@@ -2640,6 +2640,54 @@ PhysicsSandboxResult<PhysicsSandboxStateView> PhysicsSandbox::AdvanceTicks(
     }
 }
 
+PhysicsSandboxResult<PhysicsSandboxStateView>
+PhysicsSandbox::SetSimulationHorizonMs(
+        std::uint32_t simulationHorizonMs) noexcept {
+    try {
+        constexpr std::uint32_t maximumHorizonMs =
+                static_cast<std::uint32_t>(
+                        std::numeric_limits<std::int32_t>::max());
+        const std::uint32_t maximumCanonicalHorizonMs =
+                impl_ && impl_->options.prestartDurationMs <= maximumHorizonMs
+                ? maximumHorizonMs - impl_->options.prestartDurationMs
+                : 0u;
+        if (!impl_ || !impl_->loaded ||
+            impl_->options.timelineMode !=
+                    PhysicsSandboxTimelineMode::Canonical ||
+            simulationHorizonMs < impl_->options.tickDurationMs ||
+            simulationHorizonMs > maximumCanonicalHorizonMs ||
+            simulationHorizonMs % impl_->options.tickDurationMs != 0u ||
+            impl_->cursor > impl_->prestartTicks +
+                    simulationHorizonMs / impl_->options.tickDurationMs) {
+            return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                    SandboxError(PhysicsSandboxErrorCode::InvalidRequest,
+                                 "invalid canonical simulation horizon"));
+        }
+        PhysicsSandboxResult<ReplayControlPlan> rebuilt =
+                impl_->BuildControlPlan(
+                        impl_->inputs->Materialize(),
+                        simulationHorizonMs);
+        if (!rebuilt) {
+            return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                    std::move(rebuilt).Error());
+        }
+        impl_->simulationHorizonMs = simulationHorizonMs;
+        impl_->options.simulationHorizonMs = simulationHorizonMs;
+        impl_->inputMetadata.durationMs = simulationHorizonMs;
+        impl_->controlPlan = SandboxControlPlanStorage::Full(
+                std::move(rebuilt).Value());
+        return impl_->ReadView();
+    } catch (const std::bad_alloc &) {
+        return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                SandboxError(PhysicsSandboxErrorCode::AllocationFailed,
+                             "could not resize canonical simulation horizon"));
+    } catch (...) {
+        return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                SandboxError(PhysicsSandboxErrorCode::UnexpectedFailure,
+                             "unexpected canonical horizon resize failure"));
+    }
+}
+
 PhysicsSandboxResult<PhysicsSandboxState> PhysicsSandbox::CaptureState()
         const noexcept {
     try {
@@ -2696,8 +2744,10 @@ PhysicsSandboxResult<PhysicsSandboxStateView> PhysicsSandbox::RestoreState(
             state.impl_->tickDurationMs != impl_->options.tickDurationMs ||
             state.impl_->prestartDurationMs !=
                     impl_->options.prestartDurationMs ||
-            state.impl_->simulationHorizonMs !=
-                    impl_->simulationHorizonMs ||
+            (state.impl_->simulationHorizonMs !=
+                     impl_->simulationHorizonMs &&
+             impl_->options.timelineMode !=
+                     PhysicsSandboxTimelineMode::Canonical) ||
             state.impl_->timelineMode != impl_->options.timelineMode) {
             return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
                     SandboxError(PhysicsSandboxErrorCode::IncompatibleState,
@@ -2715,7 +2765,10 @@ PhysicsSandboxResult<PhysicsSandboxStateView> PhysicsSandbox::RestoreState(
                                  "sandbox state cursor is incompatible"));
         }
         std::shared_ptr<const SandboxControlPlanStorage> restoredControlPlan =
-                state.impl_->controlPlan;
+                state.impl_->simulationHorizonMs ==
+                                impl_->simulationHorizonMs
+                ? state.impl_->controlPlan
+                : nullptr;
         if (!restoredControlPlan) {
             PhysicsSandboxResult<ReplayControlPlan> rebuilt =
                     impl_->BuildControlPlan(
