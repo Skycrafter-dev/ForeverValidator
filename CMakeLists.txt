@@ -819,6 +819,13 @@ if(FOREVERVALIDATOR_BUILD_TESTS)
         target_link_libraries(
             forevervalidator-cuda-search-prefix-integration-tests PRIVATE
             forevervalidator_core CUDA::cudart)
+        if(MSVC)
+            # The real NVRTC + nvJitLink session-specialization lookup test
+            # needs more than the PE default 1 MiB stack while linking LTO IR.
+            target_link_options(
+                forevervalidator-cuda-search-prefix-integration-tests
+                PRIVATE /STACK:8388608)
+        endif()
         forevervalidator_configure_target(
             forevervalidator-cuda-search-prefix-integration-tests)
         add_test(NAME forevervalidator-cuda-search-prefix-integration
