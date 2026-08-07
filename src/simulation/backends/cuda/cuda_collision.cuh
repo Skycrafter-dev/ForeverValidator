@@ -1936,7 +1936,7 @@ __device__ inline Status Detect(
     detail::Clear<TrackDiagnostics>(scratch);
     if constexpr (!TrustedInputs) {
         if (scene == nullptr || configuration == nullptr ||
-            scene->magic != CudaPackedSceneHeader::Magic ||
+            !ValidCudaPackedSceneHeader(*scene) ||
             configuration->magic !=
                     CudaPackedStaticConfigurationHeader::Magic) {
             return Status::InvalidScene;

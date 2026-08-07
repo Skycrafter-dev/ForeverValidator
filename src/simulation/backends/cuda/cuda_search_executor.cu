@@ -1787,8 +1787,7 @@ __device__ bool ValidPackedInputs(
     const auto *configuration =
             static_cast<const CudaPackedStaticConfigurationHeader *>(
                     configurationData);
-    return scene->magic == CudaPackedSceneHeader::Magic &&
-            scene->schemaVersion == CudaPackedSceneHeader::SchemaVersion &&
+    return ValidCudaPackedSceneHeader(*scene) &&
             configuration->magic ==
                     CudaPackedStaticConfigurationHeader::Magic &&
             configuration->schemaVersion ==

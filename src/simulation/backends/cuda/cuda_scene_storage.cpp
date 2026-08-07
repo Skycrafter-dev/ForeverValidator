@@ -79,6 +79,9 @@ bool PackCudaScene(
             return false;
         }
         packed.totalSize = bytes.size();
+        if (!ValidCudaPackedSceneHeader(packed)) {
+            return false;
+        }
         std::memcpy(bytes.data(), &packed, sizeof(packed));
         *destination = std::move(bytes);
         if (header != nullptr) {

@@ -112,7 +112,7 @@ struct CudaSceneAccelerationRange {
 };
 
 struct CudaHostScene {
-    static constexpr std::uint32_t SchemaVersion = 2u;
+    static constexpr std::uint32_t SchemaVersion = 3u;
 
     std::uint32_t schemaVersion = SchemaVersion;
     std::uint64_t deterministicHash = 0u;

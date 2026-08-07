@@ -17,7 +17,7 @@ struct CudaSceneSection {
 };
 
 struct CudaPackedSceneHeader {
-    static constexpr std::uint32_t SchemaVersion = 1u;
+    static constexpr std::uint32_t SchemaVersion = 2u;
     static constexpr std::uint64_t Magic = 0x4656435544415343ull;
 
     std::uint64_t magic = Magic;
@@ -34,6 +34,61 @@ struct CudaPackedSceneHeader {
     CudaSceneAccelerationRange accelerationGroups[5]{};
     CudaSceneSection accelerationCells{};
 };
+
+#if defined(__CUDACC__)
+#define FOREVERVALIDATOR_CUDA_SCENE_HD __host__ __device__
+#else
+#define FOREVERVALIDATOR_CUDA_SCENE_HD
+#endif
+
+FOREVERVALIDATOR_CUDA_SCENE_HD inline bool ValidCudaSceneSection(
+        const CudaSceneSection &section,
+        std::uint64_t totalSize,
+        std::uint32_t expectedStride) noexcept {
+    if (section.count == 0u) {
+        return true;
+    }
+    return section.stride == expectedStride &&
+            section.offset >= sizeof(CudaPackedSceneHeader) &&
+            section.offset <= totalSize &&
+            static_cast<std::uint64_t>(section.count) <=
+                    (totalSize - section.offset) / expectedStride;
+}
+
+// Packed scenes cross an untrusted host/device boundary.  Validate every
+// section before a kernel derives pointers from its offset and stride.
+FOREVERVALIDATOR_CUDA_SCENE_HD inline bool ValidCudaPackedSceneHeader(
+        const CudaPackedSceneHeader &scene) noexcept {
+    if (scene.magic != CudaPackedSceneHeader::Magic ||
+        scene.schemaVersion != CudaPackedSceneHeader::SchemaVersion ||
+        scene.headerSize != sizeof(CudaPackedSceneHeader) ||
+        scene.totalSize < sizeof(CudaPackedSceneHeader)) {
+        return false;
+    }
+    return ValidCudaSceneSection(
+                   scene.actors, scene.totalSize,
+                   sizeof(CudaSceneActor)) &&
+            ValidCudaSceneSection(
+                    scene.surfaces, scene.totalSize,
+                    sizeof(CudaSceneSurface)) &&
+            ValidCudaSceneSection(
+                    scene.materials, scene.totalSize,
+                    sizeof(std::uint32_t)) &&
+            ValidCudaSceneSection(
+                    scene.vertices, scene.totalSize,
+                    sizeof(GmVec3)) &&
+            ValidCudaSceneSection(
+                    scene.triangles, scene.totalSize,
+                    sizeof(CudaSceneTriangle)) &&
+            ValidCudaSceneSection(
+                    scene.octreeCells, scene.totalSize,
+                    sizeof(CudaSceneOctreeCell)) &&
+            ValidCudaSceneSection(
+                    scene.accelerationCells, scene.totalSize,
+                    sizeof(CudaSceneAccelerationCell));
+}
+
+#undef FOREVERVALIDATOR_CUDA_SCENE_HD
 
 #if defined(__CUDACC__) && \
         defined(FOREVERVALIDATOR_CUDA_RESEARCH_CONSTANT_SCENE)
