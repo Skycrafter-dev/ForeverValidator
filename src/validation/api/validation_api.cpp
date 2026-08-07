@@ -1143,6 +1143,38 @@ PhysicsSandboxError SandboxError(
     return error;
 }
 
+const char *SandboxBackendName(SimulationBackend backend) noexcept {
+    switch (backend) {
+    case SimulationBackend::Reference: return "reference";
+    case SimulationBackend::OptimizedCpu: return "optimized_cpu";
+    case SimulationBackend::Batched: return "batched";
+    case SimulationBackend::SpeculativeTicking:
+        return "speculative_ticking";
+    case SimulationBackend::Cuda: return "cuda";
+    }
+    return "unknown";
+}
+
+const char *SandboxTimelineModeName(
+        PhysicsSandboxTimelineMode mode) noexcept {
+    switch (mode) {
+    case PhysicsSandboxTimelineMode::RecordedReplay:
+        return "recorded_replay";
+    case PhysicsSandboxTimelineMode::Canonical: return "canonical";
+    }
+    return "unknown";
+}
+
+void AppendSandboxStateMismatch(std::string &diagnostic,
+                                std::string mismatch) {
+    if (diagnostic.empty()) {
+        diagnostic = "sandbox state is incompatible: mismatches=[";
+    } else {
+        diagnostic += ", ";
+    }
+    diagnostic += std::move(mismatch);
+}
+
 PhysicsSandboxInputAction ToSandboxAction(ReplayInputActionKind action) {
     switch (action) {
     case ReplayInputActionKind::Accelerate:
@@ -2747,33 +2779,140 @@ PhysicsSandboxResult<PhysicsSandboxState> PhysicsSandbox::CaptureState()
 PhysicsSandboxResult<PhysicsSandboxStateView> PhysicsSandbox::RestoreState(
         const PhysicsSandboxState &state) noexcept {
     try {
-        if (!impl_ || !impl_->loaded || !state.impl_ ||
-            state.impl_->runtimeCloneSchema != SandboxRuntimeCloneSchema ||
-            state.impl_->scenarioFingerprint != impl_->scenarioFingerprint ||
-            state.impl_->validationSeed != impl_->inputMetadata.validationSeed ||
-            state.impl_->backend != impl_->options.backend ||
-            state.impl_->tickDurationMs != impl_->options.tickDurationMs ||
-            state.impl_->prestartDurationMs !=
-                    impl_->options.prestartDurationMs ||
-            (state.impl_->simulationHorizonMs !=
-                     impl_->simulationHorizonMs &&
-             impl_->options.timelineMode !=
-                     PhysicsSandboxTimelineMode::Canonical) ||
-            state.impl_->timelineMode != impl_->options.timelineMode) {
+        if (!impl_) {
             return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
                     SandboxError(PhysicsSandboxErrorCode::IncompatibleState,
-                                 "sandbox state is incompatible"));
+                                 "sandbox state is incompatible: "
+                                 "current_sandbox_present(expected=true,"
+                                 "actual=false)"));
+        }
+        if (!impl_->loaded) {
+            return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                    SandboxError(PhysicsSandboxErrorCode::IncompatibleState,
+                                 "sandbox state is incompatible: "
+                                 "current_sandbox_loaded(expected=true,"
+                                 "actual=false)"));
+        }
+        if (!state.impl_) {
+            return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                    SandboxError(PhysicsSandboxErrorCode::IncompatibleState,
+                                 "sandbox state is incompatible: "
+                                 "captured_state_present(expected=true,"
+                                 "actual=false)"));
+        }
+
+        std::string mismatchDiagnostic;
+        if (state.impl_->runtimeCloneSchema != SandboxRuntimeCloneSchema) {
+            AppendSandboxStateMismatch(
+                    mismatchDiagnostic,
+                    "runtime_clone_schema(expected=" +
+                            std::to_string(SandboxRuntimeCloneSchema) +
+                            ",actual=" +
+                            std::to_string(
+                                    state.impl_->runtimeCloneSchema) +
+                            ")");
+        }
+        if (state.impl_->scenarioFingerprint != impl_->scenarioFingerprint) {
+            AppendSandboxStateMismatch(
+                    mismatchDiagnostic,
+                    "scenario_fingerprint(expected=current_replay,"
+                    "actual=different_replay)");
+        }
+        if (state.impl_->validationSeed !=
+            impl_->inputMetadata.validationSeed) {
+            AppendSandboxStateMismatch(
+                    mismatchDiagnostic,
+                    "validation_seed(expected=" +
+                            std::to_string(
+                                    impl_->inputMetadata.validationSeed) +
+                            ",actual=" +
+                            std::to_string(state.impl_->validationSeed) +
+                            ")");
+        }
+        if (state.impl_->backend != impl_->options.backend) {
+            AppendSandboxStateMismatch(
+                    mismatchDiagnostic,
+                    "backend(expected=" +
+                            std::string(SandboxBackendName(
+                                    impl_->options.backend)) +
+                            ",actual=" +
+                            SandboxBackendName(state.impl_->backend) +
+                            ")");
+        }
+        if (state.impl_->tickDurationMs !=
+            impl_->options.tickDurationMs) {
+            AppendSandboxStateMismatch(
+                    mismatchDiagnostic,
+                    "tick_duration_ms(expected=" +
+                            std::to_string(
+                                    impl_->options.tickDurationMs) +
+                            ",actual=" +
+                            std::to_string(state.impl_->tickDurationMs) +
+                            ")");
+        }
+        if (state.impl_->prestartDurationMs !=
+            impl_->options.prestartDurationMs) {
+            AppendSandboxStateMismatch(
+                    mismatchDiagnostic,
+                    "prestart_duration_ms(expected=" +
+                            std::to_string(
+                                    impl_->options.prestartDurationMs) +
+                            ",actual=" +
+                            std::to_string(
+                                    state.impl_->prestartDurationMs) +
+                            ")");
+        }
+        if (impl_->options.timelineMode !=
+                    PhysicsSandboxTimelineMode::Canonical &&
+            state.impl_->simulationHorizonMs !=
+                    impl_->simulationHorizonMs) {
+            AppendSandboxStateMismatch(
+                    mismatchDiagnostic,
+                    "simulation_horizon_ms(expected=" +
+                            std::to_string(impl_->simulationHorizonMs) +
+                            ",actual=" +
+                            std::to_string(
+                                    state.impl_->simulationHorizonMs) +
+                            ")");
+        }
+        if (state.impl_->timelineMode != impl_->options.timelineMode) {
+            AppendSandboxStateMismatch(
+                    mismatchDiagnostic,
+                    "timeline_mode(expected=" +
+                            std::string(SandboxTimelineModeName(
+                                    impl_->options.timelineMode)) +
+                            ",actual=" +
+                            SandboxTimelineModeName(
+                                    state.impl_->timelineMode) +
+                            ")");
+        }
+        if (!mismatchDiagnostic.empty()) {
+            mismatchDiagnostic += "]";
+            return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                    SandboxError(PhysicsSandboxErrorCode::IncompatibleState,
+                                 mismatchDiagnostic.c_str()));
         }
         if (!state.impl_->runtimeClone) {
             return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
                     SandboxError(PhysicsSandboxErrorCode::IncompatibleState,
-                                 "sandbox state has no runtime clone"));
+                                 "sandbox state is incompatible: "
+                                 "runtime_clone_present(expected=true,"
+                                 "actual=false)"));
         }
-        if (!state.impl_->inputs ||
-            state.impl_->cursor < impl_->prestartTicks) {
+        if (!state.impl_->inputs) {
             return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
                     SandboxError(PhysicsSandboxErrorCode::IncompatibleState,
-                                 "sandbox state cursor is incompatible"));
+                                 "sandbox state is incompatible: "
+                                 "inputs_present(expected=true,actual=false)"));
+        }
+        if (state.impl_->cursor < impl_->prestartTicks) {
+            const std::string diagnostic =
+                    "sandbox state is incompatible: cursor(expected_min=" +
+                    std::to_string(impl_->prestartTicks) +
+                    ",actual=" + std::to_string(state.impl_->cursor) + ")";
+            return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                    SandboxError(PhysicsSandboxErrorCode::IncompatibleState,
+                                 diagnostic.c_str()));
         }
         std::shared_ptr<const SandboxControlPlanStorage> restoredControlPlan =
                 state.impl_->simulationHorizonMs ==
@@ -2792,9 +2931,13 @@ PhysicsSandboxResult<PhysicsSandboxStateView> PhysicsSandbox::RestoreState(
                     std::move(rebuilt).Value());
         }
         if (state.impl_->cursor > restoredControlPlan->Size()) {
+            const std::string diagnostic =
+                    "sandbox state is incompatible: cursor(expected_max=" +
+                    std::to_string(restoredControlPlan->Size()) +
+                    ",actual=" + std::to_string(state.impl_->cursor) + ")";
             return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
                     SandboxError(PhysicsSandboxErrorCode::IncompatibleState,
-                                 "sandbox state cursor is incompatible"));
+                                 diagnostic.c_str()));
         }
         ReplaySimulationInstanceClone runtimeClone =
                 *state.impl_->runtimeClone;
