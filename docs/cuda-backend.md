@@ -29,8 +29,10 @@ The generic runtime requires an NVIDIA device with compute capability 6.1 or
 newer. The optional per-map session-specialized search kernel requires compute
 capability 7.5; supported older devices automatically use the precompiled
 generic search kernel.
-The default CMake configuration compiles for the build machine's native
-architecture; release builders can set `CMAKE_CUDA_ARCHITECTURES` explicitly.
+The default CMake configuration emits real `sm_61` code for Pascal plus
+forward-compatible `compute_61` PTX for newer GPUs. Release builders can set
+`CMAKE_CUDA_ARCHITECTURES` explicitly to select a native or multi-architecture
+matrix.
 Device discovery reports the selected device, compute capability, driver and
 runtime versions, and global memory. A missing toolkit, runtime, device, or
 supported architecture produces a typed CUDA error. A CPU-only executable
