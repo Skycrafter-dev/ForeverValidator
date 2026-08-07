@@ -187,7 +187,92 @@ bool ValidHotPathAccounting(
             metrics.waterForcePassCount <=
                     metrics.groundForcePassCount +
                             metrics.airForcePassCount &&
+            metrics.emptyAirProbeSuccessCount +
+                            metrics.emptyAirProbeBlockedCount ==
+                    metrics.emptyAirProbeAttemptCount &&
             firstTickBoundsValid;
+}
+
+bool CheckEmptyAirToggleMatrix(
+        const void *deviceScene,
+        const void *deviceConfiguration) {
+    if (CudaSearchExecutorConfiguration{}.useEmptyAirCertificate) {
+        std::cerr << "empty-air certificate is not default-off\n";
+        return false;
+    }
+    for (const std::uint32_t minimumBlocks : {16u, 12u, 8u}) {
+        for (const bool collectMetrics : {false, true}) {
+            CudaSearchExecutorConfiguration disabled =
+                    Configuration(
+                            deviceScene, deviceConfiguration, 5u);
+            disabled.simulationMinimumBlocksPerMultiprocessorForTesting =
+                    minimumBlocks;
+            disabled.collectHotPathMetrics = collectMetrics;
+            CudaSearchExecutorConfiguration enabled = disabled;
+            enabled.useEmptyAirCertificate = true;
+
+            auto disabledExecutor = Create(
+                    disabled, "empty-air disabled executor");
+            auto enabledExecutor = Create(
+                    enabled, "empty-air enabled executor");
+            if (!disabledExecutor || !enabledExecutor) return false;
+
+            const CudaSearchBatchExecution disabledBaseline =
+                    disabledExecutor->EvaluateBaseline();
+            const CudaSearchBatchExecution enabledBaseline =
+                    enabledExecutor->EvaluateBaseline();
+            const CudaSearchBatchExecution disabledBatch =
+                    disabledExecutor->RunBatch(400u, 5u, false);
+            const CudaSearchBatchExecution enabledBatch =
+                    enabledExecutor->RunBatch(400u, 5u, false);
+            if (!Successful(
+                        disabledBaseline,
+                        "empty-air disabled baseline") ||
+                !Successful(
+                        enabledBaseline,
+                        "empty-air enabled baseline") ||
+                !Successful(
+                        disabledBatch,
+                        "empty-air disabled batch") ||
+                !Successful(
+                        enabledBatch,
+                        "empty-air enabled batch") ||
+                !SameSemantics(disabledBaseline, enabledBaseline) ||
+                !SameSemantics(disabledBatch, enabledBatch) ||
+                !SameProductionStorageTuple(
+                        disabledBaseline, enabledBaseline) ||
+                !SameProductionStorageTuple(
+                        disabledBatch, enabledBatch) ||
+                disabledBaseline.residentDeviceBytes !=
+                        enabledBaseline.residentDeviceBytes ||
+                disabledBatch.residentDeviceBytes !=
+                        enabledBatch.residentDeviceBytes ||
+                disabledBaseline.deviceToHostBytes !=
+                        enabledBaseline.deviceToHostBytes ||
+                disabledBatch.deviceToHostBytes !=
+                        enabledBatch.deviceToHostBytes ||
+                disabledBatch.
+                                simulationSelectedMinimumBlocksPerMultiprocessor !=
+                        minimumBlocks ||
+                enabledBatch.
+                                simulationSelectedMinimumBlocksPerMultiprocessor !=
+                        minimumBlocks ||
+                disabledBatch.hotPath.collected != collectMetrics ||
+                enabledBatch.hotPath.collected != collectMetrics ||
+                (collectMetrics &&
+                 (!ValidHotPathAccounting(disabledBatch, 6u) ||
+                  !ValidHotPathAccounting(enabledBatch, 6u))) ||
+                (!collectMetrics &&
+                 (disabledBatch.hotPath.emptyAirOpportunityCount != 0u ||
+                  enabledBatch.hotPath.emptyAirOpportunityCount != 0u))) {
+                std::cerr << "empty-air toggle matrix failed for "
+                          << minimumBlocks << " blocks, profiling="
+                          << collectMetrics << '\n';
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 bool CheckHotPathMetrics(
@@ -631,9 +716,12 @@ bool CheckSessionSpecializationLookupAndProfilingBypass(
                         reinterpret_cast<std::uintptr_t>(deviceScene)),
                 &diagnostic) ||
         !module->Ready() ||
-        module->Kernel(16u) == nullptr ||
-        module->Kernel(12u) == nullptr ||
-        module->Kernel(8u) == nullptr) {
+        module->Kernel(16u, false) == nullptr ||
+        module->Kernel(12u, false) == nullptr ||
+        module->Kernel(8u, false) == nullptr ||
+        module->Kernel(16u, true) == nullptr ||
+        module->Kernel(12u, true) == nullptr ||
+        module->Kernel(8u, true) == nullptr) {
         std::cerr << "session specialization lookup failed: "
                   << diagnostic << '\n';
         return false;
@@ -649,6 +737,9 @@ bool CheckSessionSpecializationLookupAndProfilingBypass(
     CudaSearchExecutorConfiguration profilingConfiguration =
             specializedConfiguration;
     profilingConfiguration.collectHotPathMetrics = true;
+    CudaSearchExecutorConfiguration certificateConfiguration =
+            specializedConfiguration;
+    certificateConfiguration.useEmptyAirCertificate = true;
 
     auto specialized = Create(
             specializedConfiguration,
@@ -656,7 +747,10 @@ bool CheckSessionSpecializationLookupAndProfilingBypass(
     auto profiling = Create(
             profilingConfiguration,
             "session-bypass profiling executor");
-    if (!specialized || !profiling) return false;
+    auto certificate = Create(
+            certificateConfiguration,
+            "empty-air session-specialized executor");
+    if (!specialized || !profiling || !certificate) return false;
     const CudaSearchBatchExecution specializedBaseline =
             specialized->EvaluateBaseline();
     const CudaSearchBatchExecution profilingBaseline =
@@ -665,8 +759,14 @@ bool CheckSessionSpecializationLookupAndProfilingBypass(
             specialized->RunBatch(200u, 5u, false);
     const CudaSearchBatchExecution profilingBatch =
             profiling->RunBatch(200u, 5u, false);
+    const CudaSearchBatchExecution certificateBaseline =
+            certificate->EvaluateBaseline();
+    const CudaSearchBatchExecution certificateBatch =
+            certificate->RunBatch(200u, 5u, false);
     const cuda::specialization::KernelMetrics &moduleMetrics =
-            module->Metrics(16u);
+            module->Metrics(16u, false);
+    const cuda::specialization::KernelMetrics &certificateMetrics =
+            module->Metrics(16u, true);
     if (!Successful(
                 specializedBaseline,
                 "supplied session-specialized baseline") ||
@@ -679,8 +779,16 @@ bool CheckSessionSpecializationLookupAndProfilingBypass(
         !Successful(
                 profilingBatch,
                 "session-bypass profiling batch") ||
+        !Successful(
+                certificateBaseline,
+                "empty-air session-specialized baseline") ||
+        !Successful(
+                certificateBatch,
+                "empty-air session-specialized batch") ||
         !SameSemantics(specializedBaseline, profilingBaseline) ||
         !SameSemantics(specializedBatch, profilingBatch) ||
+        !SameSemantics(specializedBaseline, certificateBaseline) ||
+        !SameSemantics(specializedBatch, certificateBatch) ||
         specializedBaseline.hotPath.collected ||
         specializedBatch.hotPath.collected ||
         specializedBaseline.simulationRegistersPerThread !=
@@ -690,6 +798,13 @@ bool CheckSessionSpecializationLookupAndProfilingBypass(
         specializedBaseline.
                         simulationActiveBlocksPerMultiprocessor !=
                 moduleMetrics.activeBlocksPerMultiprocessor ||
+        certificateBaseline.simulationRegistersPerThread !=
+                certificateMetrics.registersPerThread ||
+        certificateBaseline.simulationLocalBytesPerThread !=
+                certificateMetrics.localBytesPerThread ||
+        certificateBaseline.
+                        simulationActiveBlocksPerMultiprocessor !=
+                certificateMetrics.activeBlocksPerMultiprocessor ||
         !ValidHotPathAccounting(profilingBaseline, 6u) ||
         !ValidHotPathAccounting(profilingBatch, 6u) ||
         !profilingBaseline.hotPath.forcedRuntimeGenericKernel ||
@@ -796,6 +911,8 @@ int main() {
     if (!CheckPrefixAndDeduplicationParity(
                 deviceScene.Get(), deviceConfiguration.Get())) return 1;
     if (!CheckHotPathMetrics(
+                deviceScene.Get(), deviceConfiguration.Get())) return 1;
+    if (!CheckEmptyAirToggleMatrix(
                 deviceScene.Get(), deviceConfiguration.Get())) return 1;
     if (!CheckDisabledEligibility(
                 deviceScene.Get(), deviceConfiguration.Get())) return 1;

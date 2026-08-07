@@ -61,6 +61,7 @@ PARITY_KEYS = (
     "candidate_deduplication_active",
     "simulated_candidate_count",
     "deduplicated_candidate_count",
+    "empty_air_certificate_requested",
 )
 
 # Profiling legitimately changes these totals or kernel characteristics. They
@@ -142,6 +143,15 @@ HOT_PATH_COUNTER_KEYS = (
     "hot_path_water_force_pass_count",
     "hot_path_physics_callback_disabled_force_pass_count",
     "hot_path_zero_dynamics_force_pass_count",
+    "hot_path_empty_air_opportunity_count",
+    "hot_path_empty_air_probe_attempt_count",
+    "hot_path_empty_air_probe_success_count",
+    "hot_path_empty_air_probe_blocked_count",
+    "hot_path_empty_air_certificate_reuse_count",
+    "hot_path_empty_air_certificate_invalidation_count",
+    "hot_path_empty_air_probe_acceleration_cell_visit_count",
+    "hot_path_empty_air_probe_octree_cell_visit_count",
+    "hot_path_empty_air_zero_hit_fast_return_count",
 )
 
 REQUIRED_BASE_KEYS = (
@@ -280,11 +290,11 @@ def validate_pair(
             key
             for key in row
             if key.startswith("hot_path_")
-            and ("empty_air" in key or "mesh_shape_mask" in key)
+            and "mesh_shape_mask" in key
         )
         if forbidden:
             problems.append(
-                f"{label} row contains PR13/discarded counters: "
+                f"{label} row contains discarded counters: "
                 + ", ".join(forbidden)
             )
 
@@ -369,6 +379,27 @@ def validate_pair(
         "hot_path_physics_callback_disabled_force_pass_count"
     ]
     zero_dynamics = counters["hot_path_zero_dynamics_force_pass_count"]
+    empty_air_opportunities = counters[
+        "hot_path_empty_air_opportunity_count"
+    ]
+    empty_air_attempts = counters[
+        "hot_path_empty_air_probe_attempt_count"
+    ]
+    empty_air_successes = counters[
+        "hot_path_empty_air_probe_success_count"
+    ]
+    empty_air_blocked = counters[
+        "hot_path_empty_air_probe_blocked_count"
+    ]
+    empty_air_reuses = counters[
+        "hot_path_empty_air_certificate_reuse_count"
+    ]
+    empty_air_invalidations = counters[
+        "hot_path_empty_air_certificate_invalidation_count"
+    ]
+    empty_air_fast_returns = counters[
+        "hot_path_empty_air_zero_hit_fast_return_count"
+    ]
 
     if physical > evaluated:
         problems.append(
@@ -423,6 +454,28 @@ def validate_pair(
         problems.append(
             "maximum response-sort items exceed total sorted items: "
             f"{maximum_sort_items} > {sort_items}"
+        )
+    if empty_air_attempts != empty_air_successes + empty_air_blocked:
+        problems.append(
+            "empty-air probe accounting must satisfy attempts = successes "
+            f"+ blocked: {empty_air_attempts} != {empty_air_successes} + "
+            f"{empty_air_blocked}"
+        )
+    if empty_air_attempts > empty_air_opportunities:
+        problems.append(
+            "empty-air probe attempts exceed opportunities: "
+            f"{empty_air_attempts} > {empty_air_opportunities}"
+        )
+    if empty_air_invalidations > empty_air_successes:
+        problems.append(
+            "empty-air certificate invalidations exceed successes: "
+            f"{empty_air_invalidations} > {empty_air_successes}"
+        )
+    if empty_air_fast_returns != empty_air_successes + empty_air_reuses:
+        problems.append(
+            "empty-air fast returns must equal successful probes + contained "
+            f"reuses: {empty_air_fast_returns} != {empty_air_successes} + "
+            f"{empty_air_reuses}"
         )
 
     if physical == 0:

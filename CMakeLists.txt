@@ -810,6 +810,27 @@ if(FOREVERVALIDATOR_BUILD_TESTS)
         add_test(NAME forevervalidator-cuda-search-branch-state
                  COMMAND forevervalidator-cuda-search-branch-state-tests)
 
+        add_executable(forevervalidator-cuda-empty-air-certificate-tests
+            tests/cuda_empty_air_certificate_tests.cu)
+        target_include_directories(
+            forevervalidator-cuda-empty-air-certificate-tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_link_libraries(
+            forevervalidator-cuda-empty-air-certificate-tests PRIVATE
+            CUDA::cudart)
+        forevervalidator_configure_target(
+            forevervalidator-cuda-empty-air-certificate-tests)
+        add_test(NAME forevervalidator-cuda-empty-air-certificate
+                 COMMAND forevervalidator-cuda-empty-air-certificate-tests)
+        set_tests_properties(
+            forevervalidator-cuda-empty-air-certificate PROPERTIES
+            RUN_SERIAL TRUE
+            RESOURCE_LOCK forevervalidator_cuda
+            SKIP_RETURN_CODE 77
+            TIMEOUT 60
+            LABELS cuda)
+
         add_executable(forevervalidator-cuda-search-prefix-integration-tests
             tests/cuda_search_prefix_integration_tests.cpp)
         target_include_directories(

@@ -63,6 +63,7 @@ def valid_rows():
             "candidate_deduplication_active": True,
             "simulated_candidate_count": 3,
             "deduplicated_candidate_count": 1,
+            "empty_air_certificate_requested": False,
             **pair.REFERENCE_PROVENANCE,
         }
     )
@@ -200,11 +201,38 @@ class HotPathPairTests(unittest.TestCase):
         ):
             pair.parse_single_row("{}\n{}\n", "profiled")
 
-    def test_rejects_pr13_empty_air_counter(self):
+    def test_validates_enabled_empty_air_accounting(self):
         reference, profiled = valid_rows()
-        profiled["hot_path_empty_air_certificate_success_count"] = 1
+        reference["empty_air_certificate_requested"] = True
+        profiled["empty_air_certificate_requested"] = True
+        profiled.update(
+            {
+                "hot_path_empty_air_opportunity_count": 12,
+                "hot_path_empty_air_probe_attempt_count": 4,
+                "hot_path_empty_air_probe_success_count": 3,
+                "hot_path_empty_air_probe_blocked_count": 1,
+                "hot_path_empty_air_certificate_reuse_count": 7,
+                "hot_path_empty_air_certificate_invalidation_count": 2,
+                "hot_path_empty_air_probe_acceleration_cell_visit_count": 20,
+                "hot_path_empty_air_probe_octree_cell_visit_count": 5,
+                "hot_path_empty_air_zero_hit_fast_return_count": 10,
+            }
+        )
+        pair.validate_pair(reference, profiled)
+
+    def test_rejects_invalid_empty_air_probe_accounting(self):
+        reference, profiled = valid_rows()
+        profiled["hot_path_empty_air_probe_attempt_count"] = 1
         with self.assertRaisesRegex(
-            pair.PairValidationError, "PR13/discarded counters"
+            pair.PairValidationError, r"attempts = successes \+ blocked"
+        ):
+            pair.validate_pair(reference, profiled)
+
+    def test_rejects_discarded_mesh_shape_mask_counter(self):
+        reference, profiled = valid_rows()
+        profiled["hot_path_cached_mesh_shape_mask_reject_count"] = 1
+        with self.assertRaisesRegex(
+            pair.PairValidationError, "discarded counters"
         ):
             pair.validate_pair(reference, profiled)
 
