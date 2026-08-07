@@ -762,6 +762,7 @@ if(FOREVERVALIDATOR_BUILD_TESTS)
             tests/cuda_search_winner_reduction_tests.cu)
         target_include_directories(
             forevervalidator-cuda-search-winner-reduction-tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
             "${CMAKE_CURRENT_SOURCE_DIR}/src")
         forevervalidator_configure_target(
             forevervalidator-cuda-search-winner-reduction-tests)

@@ -47,6 +47,8 @@ bool SameBatch(const PhysicsSandboxCudaSearchBatch &left,
         left.candidateCount != right.candidateCount ||
         left.evaluatedCandidateCount != right.evaluatedCandidateCount ||
         left.evaluatorCalls != right.evaluatorCalls ||
+        left.qualifyingCandidateCount != right.qualifyingCandidateCount ||
+        left.closestTargetDistance != right.closestTargetDistance ||
         left.totalMutationCount != right.totalMutationCount ||
         left.mutationImprovementCount != right.mutationImprovementCount ||
         left.cancelled != right.cancelled ||
@@ -55,6 +57,7 @@ bool SameBatch(const PhysicsSandboxCudaSearchBatch &left,
         left.bestIsMutation != right.bestIsMutation ||
         left.bestCandidateId != right.bestCandidateId ||
         left.bestMutationCount != right.bestMutationCount ||
+        left.bestEvaluationTick != right.bestEvaluationTick ||
         left.bestScore != right.bestScore ||
         left.bestTimeMs != right.bestTimeMs ||
         left.bestDetail0 != right.bestDetail0 ||
@@ -175,7 +178,8 @@ std::uint64_t InputFingerprint(
 
 bool IsPipeline(const std::string &value) {
     return value == "optimized" || value == "legacy" ||
-           value == "differential";
+           value == "differential" ||
+           value == "prefix-differential";
 }
 
 bool IsEvaluator(const std::string &value) {
@@ -291,12 +295,16 @@ int main(int argc, char **argv) {
                 "input-insertion|dense-insertion|input-deletion|mixed|"
                 "cancelled] "
                 "[optimized|legacy|differential|"
+                "prefix-differential|"
                 "velocity|point|pose|volume-entry|finish-time] "
                 "[velocity|point|pose|volume-entry|finish-time] "
                 "[--input-rate EVENTS_PER_SECOND] "
                 "[--boundary-offset-ticks TICKS] "
                 "[--existing-min COUNT] [--existing-max COUNT] "
-                "[--no-winner-state]");
+                "[--no-winner-state] [--no-locality-sort] "
+                "[--no-prefix-reuse] [--no-dedup] "
+                "[--minimum-blocks 8|12|16] "
+                "[--batch-capacity COUNT]");
     }
     const std::uint32_t candidateCount =
             static_cast<std::uint32_t>(std::stoul(argv[3]));
@@ -332,10 +340,27 @@ int main(int argc, char **argv) {
     std::uint32_t existingMinimumCount = 1u;
     std::uint32_t existingMaximumCount = 16u;
     bool captureBestState = true;
+    bool sortCandidatesByLocality = true;
+    bool reuseBaselinePrefixes = true;
+    bool deduplicateLowEntropyCandidateInputs = true;
+    std::uint32_t simulationMinimumBlocks = 0u;
+    std::uint32_t batchCapacity = candidateCount;
     for (int argument = 10; argument < argc; ++argument) {
         const std::string option = argv[argument];
         if (option == "--no-winner-state") {
             captureBestState = false;
+            continue;
+        }
+        if (option == "--no-locality-sort") {
+            sortCandidatesByLocality = false;
+            continue;
+        }
+        if (option == "--no-prefix-reuse") {
+            reuseBaselinePrefixes = false;
+            continue;
+        }
+        if (option == "--no-dedup") {
+            deduplicateLowEntropyCandidateInputs = false;
             continue;
         }
         if (argument + 1 >= argc) {
@@ -353,6 +378,13 @@ int main(int argc, char **argv) {
         } else if (option == "--existing-max") {
             existingMaximumCount = static_cast<std::uint32_t>(
                     std::stoul(argv[++argument]));
+        } else if (option == "--minimum-blocks") {
+            simulationMinimumBlocks =
+                    static_cast<std::uint32_t>(
+                            std::stoul(argv[++argument]));
+        } else if (option == "--batch-capacity") {
+            batchCapacity = static_cast<std::uint32_t>(
+                    std::stoul(argv[++argument]));
         } else {
             return Fail("unknown benchmark option: " + option);
         }
@@ -362,6 +394,11 @@ int main(int argc, char **argv) {
     }
     if (candidateCount == 0u || timelineTicks == 0u ||
         repetitions == 0u ||
+        batchCapacity < candidateCount ||
+        (simulationMinimumBlocks != 0u &&
+         simulationMinimumBlocks != 16u &&
+         simulationMinimumBlocks != 12u &&
+         simulationMinimumBlocks != 8u) ||
         existingMinimumCount > existingMaximumCount) {
         return Fail("benchmark dimensions must be positive");
     }
@@ -446,7 +483,7 @@ int main(int argc, char **argv) {
 
     PhysicsSandboxCudaSearchConfiguration configuration;
     configuration.maximumBatchSize =
-            pipeline == "differential" ? 1u : candidateCount;
+            pipeline == "differential" ? 1u : batchCapacity;
     configuration.earliestMutationTimeMs = firstTickTimeMs;
     configuration.evaluationStartTimeMs = firstTickTimeMs;
     configuration.evaluationEndTimeMs = evaluationEndTimeMs;
@@ -549,6 +586,13 @@ int main(int argc, char **argv) {
     }
     configuration.useLegacyMutationPipelineForTesting =
             pipeline == "legacy";
+    configuration.sortCandidatesByLocality =
+            sortCandidatesByLocality;
+    configuration.reuseBaselinePrefixes = reuseBaselinePrefixes;
+    configuration.deduplicateLowEntropyCandidateInputs =
+            deduplicateLowEntropyCandidateInputs;
+    configuration.simulationMinimumBlocksPerMultiprocessorForTesting =
+            simulationMinimumBlocks;
     configuration.captureBestState = captureBestState;
 
     auto session = CreatePhysicsSandboxCudaSearchSession(
@@ -559,6 +603,7 @@ int main(int argc, char **argv) {
     }
     std::uint32_t reservedBatchCapacity = configuration.maximumBatchSize;
     std::optional<PhysicsSandboxCudaSearchSession> legacySession;
+    std::optional<PhysicsSandboxCudaSearchSession> fullSimulationSession;
     if (pipeline == "differential") {
         configuration.useLegacyMutationPipelineForTesting = true;
         auto created = CreatePhysicsSandboxCudaSearchSession(
@@ -593,6 +638,18 @@ int main(int argc, char **argv) {
         }
         reservedBatchCapacity = optimizedCapacity.Value();
     }
+    if (pipeline == "prefix-differential") {
+        configuration.reuseBaselinePrefixes = false;
+        configuration.sortCandidatesByLocality = false;
+        configuration.deduplicateLowEntropyCandidateInputs = false;
+        auto created = CreatePhysicsSandboxCudaSearchSession(
+                sandbox.Value(), configuration);
+        if (!created) {
+            return Fail("could not create full-simulation CUDA search session: " +
+                        Diagnostic(created.Error()));
+        }
+        fullSimulationSession.emplace(std::move(created).Value());
+    }
     auto baseline = session.Value().EvaluateBaseline();
     if (!baseline) {
         return Fail("could not evaluate baseline: " +
@@ -601,6 +658,23 @@ int main(int argc, char **argv) {
     if (!baseline.Value().bestValid ||
         baseline.Value().bestSnapshot.has_value() != captureBestState) {
         return Fail("CUDA baseline winner-state capture policy was not honored");
+    }
+    if (evaluatorName == "finish-time" &&
+        (baseline.Value().metrics.baselinePrefixDeviceBytes != 0u ||
+         baseline.Value().metrics.candidatePrefixDeviceBytes != 0u ||
+         baseline.Value().metrics.candidateDeduplicationDeviceBytes != 0u)) {
+        return Fail("FinishTime unexpectedly allocated prefix/dedup storage");
+    }
+    if (fullSimulationSession.has_value()) {
+        auto fullBaseline = fullSimulationSession->EvaluateBaseline();
+        if (!fullBaseline ||
+            !SameBatch(baseline.Value(), fullBaseline.Value()) ||
+            fullBaseline.Value().metrics.baselinePrefixDeviceBytes != 0u ||
+            fullBaseline.Value().metrics.candidatePrefixDeviceBytes != 0u ||
+            fullBaseline.Value().metrics.
+                    candidateDeduplicationDeviceBytes != 0u) {
+            return Fail("prefix and full-simulation CUDA baselines differ");
+        }
     }
     if (legacySession.has_value()) {
         auto legacyBaseline = legacySession->EvaluateBaseline();
@@ -689,11 +763,31 @@ int main(int argc, char **argv) {
                         "optimized and legacy CUDA mutation batches differ");
             }
         }
+        if (fullSimulationSession.has_value() &&
+            modifier != "cancelled") {
+            auto fullBatch = fullSimulationSession->RunBatch(
+                    firstCandidateId, candidateCount, false);
+            if (!fullBatch ||
+                !SameBatch(batch.Value(), fullBatch.Value()) ||
+                fullBatch.Value().metrics.baselinePrefixDeviceBytes != 0u ||
+                fullBatch.Value().metrics.candidatePrefixDeviceBytes != 0u ||
+                fullBatch.Value().metrics.
+                        candidateDeduplicationDeviceBytes != 0u) {
+                return Fail(
+                        "prefix-reused and full-simulation CUDA batches differ");
+            }
+        }
         if ((modifier == "cancelled" && !batch.Value().cancelled) ||
             (modifier != "cancelled" &&
              (batch.Value().cancelled ||
               batch.Value().evaluatedCandidateCount == 0u))) {
             return Fail("CUDA search batch was incomplete");
+        }
+        if (simulationMinimumBlocks != 0u &&
+            batch.Value().metrics.
+                            simulationSelectedMinimumBlocksPerMultiprocessor !=
+                    simulationMinimumBlocks) {
+            return Fail("forced CUDA launch-bounds variant was not selected");
         }
         const double simulatedTicks =
                 static_cast<double>(
@@ -727,6 +821,15 @@ int main(int argc, char **argv) {
                   << "\"candidates\":" << candidateCount << ","
                   << "\"evaluated_candidates\":"
                   << batch.Value().evaluatedCandidateCount << ","
+                  << "\"qualifying_candidates\":"
+                  << batch.Value().qualifyingCandidateCount << ","
+                  << "\"closest_target_distance\":";
+        if (batch.Value().closestTargetDistance) {
+            std::cout << *batch.Value().closestTargetDistance;
+        } else {
+            std::cout << "null";
+        }
+        std::cout << ","
                   << "\"calibrated_batch_size\":"
                   << reservedBatchCapacity << ","
                   << "\"baseline_input_events\":"
@@ -746,6 +849,16 @@ int main(int argc, char **argv) {
                   << loaded.Value().timeMs << ","
                   << "\"normalized_input_events\":"
                   << normalizedInputCount << ","
+                  << "\"batch_capacity\":" << batchCapacity << ","
+                  << "\"sort_candidates_by_locality\":"
+                  << (sortCandidatesByLocality ? "true" : "false") << ","
+                  << "\"reuse_baseline_prefixes\":"
+                  << (reuseBaselinePrefixes ? "true" : "false") << ","
+                  << "\"deduplicate_low_entropy_inputs\":"
+                  << (deduplicateLowEntropyCandidateInputs
+                              ? "true" : "false") << ","
+                  << "\"forced_minimum_blocks_per_sm\":"
+                  << simulationMinimumBlocks << ","
                   << "\"existing_minimum_count\":"
                   << existingMinimumCount << ","
                   << "\"existing_maximum_count\":"
@@ -839,6 +952,10 @@ int main(int argc, char **argv) {
                   << ticksPerSecond << ","
                   << "\"simulation_threads_per_block\":"
                   << batch.Value().metrics.simulationThreadsPerBlock << ","
+                  << "\"simulation_minimum_blocks_per_sm\":"
+                  << batch.Value().metrics
+                             .simulationSelectedMinimumBlocksPerMultiprocessor
+                  << ","
                   << "\"simulation_registers_per_thread\":"
                   << batch.Value().metrics.simulationRegistersPerThread << ","
                   << "\"simulation_local_bytes_per_thread\":"
@@ -858,6 +975,14 @@ int main(int argc, char **argv) {
                   << batch.Value().metrics.candidateInputDeviceBytes << ","
                   << "\"mutation_scratch_device_bytes\":"
                   << batch.Value().metrics.mutationScratchDeviceBytes << ","
+                  << "\"baseline_prefix_device_bytes\":"
+                  << batch.Value().metrics.baselinePrefixDeviceBytes << ","
+                  << "\"candidate_prefix_device_bytes\":"
+                  << batch.Value().metrics.candidatePrefixDeviceBytes << ","
+                  << "\"candidate_deduplication_device_bytes\":"
+                  << batch.Value().metrics
+                             .candidateDeduplicationDeviceBytes
+                  << ","
                   << "\"winner_selection_device_bytes\":"
                   << batch.Value().metrics.winnerSelectionDeviceBytes << ","
                   << "\"host_to_device_bytes\":"

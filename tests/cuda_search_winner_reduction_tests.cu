@@ -1,5 +1,6 @@
 #include "simulation/backends/cuda/cuda_search_winner_selection.cuh"
 #include "simulation/backends/cuda/cuda_search_progress.cuh"
+#include "simulation/backends/cuda/cuda_search_executor.h"
 
 #include <cstdint>
 #include <iostream>
@@ -10,6 +11,7 @@
 namespace {
 
 using forevervalidator::simulation::cuda_search_detail::BetterSample;
+using forevervalidator::simulation::cuda_search_detail::BindSampleToCandidate;
 using forevervalidator::simulation::cuda_search_detail::DeviceSample;
 using forevervalidator::simulation::cuda_search_detail::InvalidCandidateSlot;
 using forevervalidator::simulation::cuda_search_detail::StrictlyBetter;
@@ -21,6 +23,12 @@ using forevervalidator::simulation::cuda_search_progress_detail::
         SquaredDistanceToTargetVolume;
 using forevervalidator::simulation::cuda_search_progress_detail::
         UpdateClosestTargetDistanceSquared;
+using forevervalidator::simulation::CudaSearchEvaluatorKind;
+using forevervalidator::simulation::CudaSearchMaximumBaselinePrefixTickCount;
+using forevervalidator::simulation::CudaSearchModifierConfiguration;
+using forevervalidator::simulation::CudaSearchModifierKind;
+using forevervalidator::simulation::IsCudaSearchSimulationMinimumBlocksValid;
+using forevervalidator::simulation::PlanCudaSearchPrefixReuse;
 
 static_assert(sizeof(DeviceSample) == 64u);
 
@@ -266,6 +274,111 @@ bool CheckTargetProgressSemantics() {
     return qualifying == 2u;
 }
 
+bool CheckBaselinePrefixInheritance() {
+    DeviceSample baseline = Sample(0u, 3u, 12u, 42.0);
+    baseline.candidateId = 0u;
+    baseline.candidateSlot = InvalidCandidateSlot;
+    baseline.logicalOrder = 0u;
+    baseline.mutation = false;
+    const DeviceSample inherited = BindSampleToCandidate(
+            baseline, 9000u, 5u, 12u);
+    if (!inherited.valid || !inherited.mutation ||
+        inherited.candidateId != 9005u ||
+        inherited.candidateSlot != 5u ||
+        inherited.evaluationTick != 3u ||
+        inherited.logicalOrder != 64u ||
+        inherited.score != baseline.score ||
+        inherited.timeMs != baseline.timeMs ||
+        !IsQualifyingSearchCandidate(true, inherited.valid)) {
+        return false;
+    }
+    double closest = 9.0;
+    closest = UpdateClosestTargetDistanceSquared(
+            closest, 16.0, false);
+    closest = UpdateClosestTargetDistanceSquared(
+            closest, 4.0, false);
+    return closest == 4.0;
+}
+
+CudaSearchModifierConfiguration LowEntropyInsertion() {
+    CudaSearchModifierConfiguration modifier;
+    modifier.kind = CudaSearchModifierKind::InputInsertion;
+    modifier.window.minimumTimeMs = 500;
+    modifier.window.maximumTimeMs = 520;
+    modifier.steering.enabled = 1u;
+    modifier.steering.minimumCount = 1u;
+    modifier.steering.maximumCount = 1u;
+    modifier.optionFlags = 1u;
+    modifier.secondaryAnalogMinimum = 1;
+    modifier.secondaryAnalogMaximum = 1;
+    return modifier;
+}
+
+bool CheckPrefixReusePlanning() {
+    const CudaSearchModifierConfiguration modifier =
+            LowEntropyInsertion();
+    const auto planFor = [&](bool reuse,
+                             bool stunts,
+                             bool condition,
+                             CudaSearchEvaluatorKind evaluator,
+                             bool deduplicate) {
+        return PlanCudaSearchPrefixReuse(
+                reuse, stunts, condition, evaluator,
+                deduplicate, 100u, 10u, &modifier, 1u);
+    };
+    auto plan = planFor(
+            true, false, false,
+            CudaSearchEvaluatorKind::Velocity, true);
+    if (!plan.enabled || plan.lowEntropyChoiceCount != 3u ||
+        !plan.DeduplicationStorageEligible(12u) ||
+        plan.DeduplicationStorageEligible(8u)) {
+        return false;
+    }
+
+    plan = planFor(
+            true, false, false,
+            CudaSearchEvaluatorKind::Velocity, false);
+    if (!plan.enabled || plan.lowEntropyChoiceCount != 0u) {
+        return false;
+    }
+    if (planFor(
+                false, false, false,
+                CudaSearchEvaluatorKind::Velocity, true).enabled) {
+        return false;
+    }
+    if (planFor(
+                true, true, false,
+                CudaSearchEvaluatorKind::Velocity, true).enabled) {
+        return false;
+    }
+    if (planFor(
+                true, false, false,
+                CudaSearchEvaluatorKind::FinishTime, true).enabled) {
+        return false;
+    }
+    if (planFor(
+                true, false, true,
+                CudaSearchEvaluatorKind::Velocity, true).enabled) {
+        return false;
+    }
+    const auto longHorizonPlan = PlanCudaSearchPrefixReuse(
+            true, false, false,
+            CudaSearchEvaluatorKind::Velocity, true,
+            CudaSearchMaximumBaselinePrefixTickCount + 1u,
+            10u, &modifier, 1u);
+    if (longHorizonPlan.enabled ||
+        longHorizonPlan.lowEntropyChoiceCount != 0u ||
+        longHorizonPlan.DeduplicationStorageEligible(UINT32_MAX)) {
+        return false;
+    }
+    return IsCudaSearchSimulationMinimumBlocksValid(0u) &&
+            IsCudaSearchSimulationMinimumBlocksValid(16u) &&
+            IsCudaSearchSimulationMinimumBlocksValid(12u) &&
+            IsCudaSearchSimulationMinimumBlocksValid(8u) &&
+            !IsCudaSearchSimulationMinimumBlocksValid(1u) &&
+            !IsCudaSearchSimulationMinimumBlocksValid(24u);
+}
+
 }  // namespace
 
 int main() {
@@ -273,7 +386,9 @@ int main() {
         !CheckTiesAndInvalidCandidates() ||
         !CheckCandidateImprovementSemantics() ||
         !CheckLargeDimensionsAndDeterminism() ||
-        !CheckTargetProgressSemantics()) {
+        !CheckTargetProgressSemantics() ||
+        !CheckBaselinePrefixInheritance() ||
+        !CheckPrefixReusePlanning()) {
         return 1;
     }
     return 0;
