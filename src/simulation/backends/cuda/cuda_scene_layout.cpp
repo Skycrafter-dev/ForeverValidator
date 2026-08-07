@@ -367,6 +367,10 @@ struct Builder {
                       source.vertexIndex.end(),
                       triangle.vertexIndices);
             triangle.material = source.material;
+            for (std::uint32_t vertex = 0u; vertex < 3u; ++vertex) {
+                triangle.vertices[vertex] =
+                        mesh.Vertex(source.vertexIndex[vertex]);
+            }
             ClearPadding(triangle);
             output.triangles.push_back(triangle);
         }

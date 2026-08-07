@@ -989,8 +989,6 @@ __device__ inline int SphereMesh(
             scratch.firstSurfaceWorldBounds = surface.worldBounds;
         }
     }
-    const GmVec3 *vertices =
-            SceneSection<GmVec3>(scene, scene->vertices);
     const CudaSceneTriangle *triangles =
             SceneSection<CudaSceneTriangle>(
                     scene, scene->triangles);
@@ -1025,12 +1023,9 @@ __device__ inline int SphereMesh(
                 triangles[surface.firstTriangle +
                           entry.triangleIndex];
         const GmVec3 triangleVertices[3] = {
-                vertices[surface.firstVertex +
-                         triangle.vertexIndices[0]],
-                vertices[surface.firstVertex +
-                         triangle.vertexIndices[1]],
-                vertices[surface.firstVertex +
-                         triangle.vertexIndices[2]],
+                triangle.vertices[0],
+                triangle.vertices[1],
+                triangle.vertices[2],
         };
         const std::uint32_t firstNew =
                 scratch.shapeCollisionCount;
@@ -1136,8 +1131,6 @@ __device__ inline int EllipsoidMesh(
             MultInverse(normalToWorld, meshToEllipsoid);
     normalToWorld =
             Compose(normalToWorld, surface.localToWorld);
-    const GmVec3 *vertices =
-            SceneSection<GmVec3>(scene, scene->vertices);
     const CudaSceneTriangle *triangles =
             SceneSection<CudaSceneTriangle>(
                     scene, scene->triangles);
@@ -1198,16 +1191,13 @@ __device__ inline int EllipsoidMesh(
         const GmVec3 unitVertices[3] = {
                 TransformPoint(
                         meshToUnit,
-                        vertices[surface.firstVertex +
-                                 triangle.vertexIndices[0]]),
+                        triangle.vertices[0]),
                 TransformPoint(
                         meshToUnit,
-                        vertices[surface.firstVertex +
-                                 triangle.vertexIndices[1]]),
+                        triangle.vertices[1]),
                 TransformPoint(
                         meshToUnit,
-                        vertices[surface.firstVertex +
-                                 triangle.vertexIndices[2]]),
+                        triangle.vertices[2]),
         };
         const GmVec3 edge01 =
                 Subtract(unitVertices[1], unitVertices[0]);
@@ -1405,8 +1395,6 @@ __device__ inline void EllipsoidMeshPairCached(
     const EllipsoidMeshContext second =
             PrepareEllipsoidMeshContext(
                     surface, secondShape, secondShapeWorld);
-    const GmVec3 *vertices =
-            SceneSection<GmVec3>(scene, scene->vertices);
     const CudaSceneTriangle *triangles =
             SceneSection<CudaSceneTriangle>(
                     scene, scene->triangles);
@@ -1453,12 +1441,9 @@ __device__ inline void EllipsoidMeshPairCached(
                 triangles[surface.firstTriangle +
                           entry.triangleIndex];
         const GmVec3 meshVertices[3] = {
-                vertices[surface.firstVertex +
-                         triangle.vertexIndices[0]],
-                vertices[surface.firstVertex +
-                         triangle.vertexIndices[1]],
-                vertices[surface.firstVertex +
-                         triangle.vertexIndices[2]],
+                triangle.vertices[0],
+                triangle.vertices[1],
+                triangle.vertices[2],
         };
         const std::uint32_t materialB =
                 SurfaceMaterial(

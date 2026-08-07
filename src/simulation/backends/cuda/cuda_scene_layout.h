@@ -85,6 +85,12 @@ struct CudaSceneTriangle {
     float planeDistance = 0.0f;
     std::uint32_t vertexIndices[3]{};
     GmLocalMaterialIndex material{};
+    // Duplicate the immutable vertex payload beside the triangle.  Collision
+    // traversal reaches a triangle through an octree-cell index, so keeping
+    // the three positions here removes three further dependent global-memory
+    // lookups from the latency-bound CUDA hot path.  Keep vertexIndices for
+    // layout diagnostics and any consumers that need the source topology.
+    GmVec3 vertices[3]{};
 };
 
 struct CudaSceneOctreeCell {
