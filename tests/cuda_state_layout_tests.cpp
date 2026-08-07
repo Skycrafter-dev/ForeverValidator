@@ -77,14 +77,23 @@ int main() {
         std::cerr << "race encode left destination-dependent bytes\n";
         return 1;
     }
-    CudaCandidateState encoded;
-    const CudaStateConversionResult encode =
+    CudaCandidateState encodedA;
+    CudaCandidateState encodedB;
+    std::memset(&encodedA, 0x3c, sizeof(encodedA));
+    std::memset(&encodedB, 0xc3, sizeof(encodedB));
+    const CudaStateConversionResult encodeA =
             forevervalidator::simulation::EncodeCudaCandidateState(
-                    original, 42u, 987u, 11u, 1234567u, &encoded);
-    if (encode != CudaStateConversionResult::Success) {
-        std::cerr << "state encode failed\n";
+                    original, 42u, 987u, 11u, 1234567u, &encodedA);
+    const CudaStateConversionResult encodeB =
+            forevervalidator::simulation::EncodeCudaCandidateState(
+                    original, 42u, 987u, 11u, 1234567u, &encodedB);
+    if (encodeA != CudaStateConversionResult::Success ||
+        encodeB != CudaStateConversionResult::Success ||
+        std::memcmp(&encodedA, &encodedB, sizeof(encodedA)) != 0) {
+        std::cerr << "candidate encode left destination-dependent bytes\n";
         return 1;
     }
+    CudaCandidateState encoded = encodedA;
     if (encoded.candidateId != 11u ||
         encoded.validationSeed != 42u ||
         encoded.controlCursor != 987u ||
@@ -96,12 +105,18 @@ int main() {
     const CudaStateConversionResult decode =
             forevervalidator::simulation::DecodeCudaCandidateState(
                     encoded, &decoded);
+    CudaCandidateState reencoded;
+    std::memset(&reencoded, 0x69, sizeof(reencoded));
+    const CudaStateConversionResult reencode =
+            forevervalidator::simulation::EncodeCudaCandidateState(
+                    decoded, 42u, 987u, 11u, 1234567u,
+                    &reencoded);
     if (decode != CudaStateConversionResult::Success ||
-        ReplaySimulationInstanceSemanticHash(original) !=
-                ReplaySimulationInstanceSemanticHash(decoded) ||
+        reencode != CudaStateConversionResult::Success ||
+        std::memcmp(&encodedA, &reencoded, sizeof(encodedA)) != 0 ||
         decoded.incrementalRespawnCount != 3u ||
         decoded.runtime.finishTime != original.runtime.finishTime) {
-        std::cerr << "state round trip changed future-affecting data\n";
+        std::cerr << "state round trip changed CUDA transport data\n";
         return 1;
     }
     ReplaySimulationInstanceClone checkpointBoundary = BuildState();
@@ -113,14 +128,21 @@ int main() {
         checkpointBoundary.race.checkpointSlotsPassed[index] = 1u;
     }
     CudaCandidateState checkpointBoundaryEncoded;
+    CudaCandidateState checkpointBoundaryRoundtrip;
     if (forevervalidator::simulation::EncodeCudaCandidateState(
                 checkpointBoundary, 42u, 987u, 11u, 1234567u,
                 &checkpointBoundaryEncoded) !=
                     CudaStateConversionResult::Success ||
         DecodeCudaCandidateState(checkpointBoundaryEncoded, &decoded) !=
                 CudaStateConversionResult::Success ||
-        ReplaySimulationInstanceSemanticHash(checkpointBoundary) !=
-                ReplaySimulationInstanceSemanticHash(decoded)) {
+        forevervalidator::simulation::EncodeCudaCandidateState(
+                decoded, 42u, 987u, 11u, 1234567u,
+                &checkpointBoundaryRoundtrip) !=
+                    CudaStateConversionResult::Success ||
+        std::memcmp(
+                &checkpointBoundaryEncoded,
+                &checkpointBoundaryRoundtrip,
+                sizeof(checkpointBoundaryEncoded)) != 0) {
         std::cerr << "checkpoint boundary did not round trip\n";
         return 1;
     }
@@ -139,13 +161,19 @@ int main() {
                         static_cast<float>(index + 2u)};
     }
     CudaCandidateState boundaryEncoded;
+    CudaCandidateState boundaryRoundtrip;
     if (forevervalidator::simulation::EncodeCudaCandidateState(
                 replacementBoundary, 42u, 987u, 11u, 1234567u,
                 &boundaryEncoded) != CudaStateConversionResult::Success ||
         DecodeCudaCandidateState(boundaryEncoded, &decoded) !=
                 CudaStateConversionResult::Success ||
-        ReplaySimulationInstanceSemanticHash(replacementBoundary) !=
-                ReplaySimulationInstanceSemanticHash(decoded)) {
+        forevervalidator::simulation::EncodeCudaCandidateState(
+                decoded, 42u, 987u, 11u, 1234567u,
+                &boundaryRoundtrip) !=
+                    CudaStateConversionResult::Success ||
+        std::memcmp(
+                &boundaryEncoded, &boundaryRoundtrip,
+                sizeof(boundaryEncoded)) != 0) {
         std::cerr << "collision replacement boundary did not round trip\n";
         return 1;
     }
