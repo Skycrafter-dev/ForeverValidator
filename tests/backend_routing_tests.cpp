@@ -1,4 +1,5 @@
 #include "simulation/backends/simulation_backend.h"
+#include "simulation/backends/cuda/cuda_backend.h"
 
 #include <forevervalidator/validation.h>
 
@@ -7,6 +8,9 @@
 int main() {
     using forevervalidator::SimulationBackend;
     using forevervalidator::simulation::IsSimulationBackendSupported;
+    using forevervalidator::simulation::IsCudaComputeCapabilitySupported;
+    using forevervalidator::simulation::
+            IsCudaSessionSpecializationSupported;
     using forevervalidator::simulation::ResolveLeafBackend;
     using forevervalidator::simulation::UsesOptimizedCpuFoundation;
 
@@ -19,6 +23,14 @@ int main() {
     static_assert(static_cast<std::uint8_t>(
                           SimulationBackend::SpeculativeTicking) == 3u);
     static_assert(static_cast<std::uint8_t>(SimulationBackend::Cuda) == 4u);
+    static_assert(!IsCudaComputeCapabilitySupported(6, 0));
+    static_assert(IsCudaComputeCapabilitySupported(6, 1));
+    static_assert(IsCudaComputeCapabilitySupported(12, 0));
+    static_assert(!IsCudaSessionSpecializationSupported(6, 1));
+    static_assert(!IsCudaSessionSpecializationSupported(7, 0));
+    static_assert(!IsCudaSessionSpecializationSupported(7, 4));
+    static_assert(IsCudaSessionSpecializationSupported(7, 5));
+    static_assert(IsCudaSessionSpecializationSupported(12, 0));
 
     if (ResolveLeafBackend(SimulationBackend::Reference) !=
         SimulationBackend::Reference) {
