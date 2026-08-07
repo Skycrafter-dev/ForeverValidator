@@ -189,12 +189,113 @@ struct CudaSearchExecutorConfiguration {
     std::size_t maximumEventCount = 0u;
     bool useLegacyMutationPipelineForTesting = false;
     bool sortCandidatesByLocality = true;
+    bool reuseBaselinePrefixes = true;
+    bool deduplicateLowEntropyCandidateInputs = true;
     std::uint32_t simulationMinimumBlocksPerMultiprocessorForTesting = 0u;
     bool captureBestState = true;
     std::optional<CudaSearchIncumbent> incumbent;
     std::shared_ptr<const cuda::specialization::SessionModule>
             sessionSpecialization;
 };
+
+struct CudaSearchPrefixReusePlan {
+    bool enabled = false;
+    std::uint64_t lowEntropyChoiceCount = 0u;
+
+    bool DeduplicationStorageEligible(
+            std::uint32_t candidateCapacity) const noexcept {
+        return enabled && lowEntropyChoiceCount != 0u &&
+                lowEntropyChoiceCount <=
+                        static_cast<std::uint64_t>(candidateCapacity) / 4u;
+    }
+};
+
+// Prefix reuse keeps one physics state, winner sample, and target-progress
+// value per baseline tick. Bound that cache so unusually long horizons fall
+// back to the allocation-free full-timeline path instead of consuming an
+// unbounded share of device memory. DeviceSample is fixed at 64 bytes.
+inline constexpr std::size_t CudaSearchMaximumBaselinePrefixDeviceBytes =
+        256u * 1024u * 1024u;
+inline constexpr std::size_t CudaSearchBaselinePrefixSampleBytes = 64u;
+inline constexpr std::size_t CudaSearchBaselinePrefixBytesPerTick =
+        sizeof(CudaCandidatePhysicsState) +
+        CudaSearchBaselinePrefixSampleBytes + sizeof(double);
+inline constexpr std::size_t CudaSearchMaximumBaselinePrefixTickCount =
+        CudaSearchMaximumBaselinePrefixDeviceBytes /
+        CudaSearchBaselinePrefixBytesPerTick;
+
+inline CudaSearchPrefixReusePlan PlanCudaSearchPrefixReuse(
+        bool reuseBaselinePrefixes,
+        bool stuntsEnabled,
+        bool hasConditionInstructions,
+        CudaSearchEvaluatorKind evaluatorKind,
+        bool deduplicateLowEntropyCandidateInputs,
+        std::size_t baselineTickCount,
+        std::uint32_t tickDurationMs,
+        const CudaSearchModifierConfiguration *modifiers,
+        std::size_t modifierCount) noexcept {
+    CudaSearchPrefixReusePlan plan;
+    plan.enabled = reuseBaselinePrefixes && !stuntsEnabled &&
+            !hasConditionInstructions &&
+            evaluatorKind != CudaSearchEvaluatorKind::FinishTime &&
+            baselineTickCount != 0u &&
+            baselineTickCount <=
+                    CudaSearchMaximumBaselinePrefixTickCount;
+    if (!plan.enabled ||
+        !deduplicateLowEntropyCandidateInputs ||
+        tickDurationMs == 0u || modifierCount != 1u ||
+        modifiers == nullptr) {
+        return plan;
+    }
+    const CudaSearchModifierConfiguration &modifier =
+            modifiers[0];
+    const bool lowEntropyInsertion =
+            modifier.kind == CudaSearchModifierKind::InputInsertion &&
+            modifier.steering.enabled != 0u &&
+            modifier.steering.minimumCount == 1u &&
+            modifier.steering.maximumCount == 1u &&
+            modifier.steering.maximumHoldMs == 0 &&
+            modifier.accelerate.enabled == 0u &&
+            modifier.brake.enabled == 0u &&
+            (modifier.optionFlags & 1u) != 0u &&
+            modifier.secondaryAnalogMinimum ==
+                    modifier.secondaryAnalogMaximum;
+    if (!lowEntropyInsertion) {
+        return plan;
+    }
+    const std::int64_t firstChoice =
+            modifier.window.minimumTimeMs /
+            tickDurationMs;
+    const std::int64_t lastChoice =
+            modifier.window.maximumTimeMs /
+            tickDurationMs;
+    if (lastChoice >= firstChoice) {
+        plan.lowEntropyChoiceCount =
+                static_cast<std::uint64_t>(lastChoice - firstChoice) + 1u;
+    }
+    return plan;
+}
+
+inline CudaSearchPrefixReusePlan PlanCudaSearchPrefixReuse(
+        const CudaSearchExecutorConfiguration &configuration) noexcept {
+    return PlanCudaSearchPrefixReuse(
+            configuration.reuseBaselinePrefixes,
+            configuration.branchState.stuntsEnabled,
+            configuration.condition &&
+                    !configuration.condition->instructions.empty(),
+            configuration.evaluator.kind,
+            configuration.deduplicateLowEntropyCandidateInputs,
+            configuration.baselineTicks.size(),
+            configuration.tickDurationMs,
+            configuration.modifiers.data(),
+            configuration.modifiers.size());
+}
+
+inline bool IsCudaSearchSimulationMinimumBlocksValid(
+        std::uint32_t minimumBlocks) noexcept {
+    return minimumBlocks == 0u || minimumBlocks == 16u ||
+            minimumBlocks == 12u || minimumBlocks == 8u;
+}
 
 enum class CudaSearchStatus : std::uint32_t {
     Success,
@@ -239,6 +340,9 @@ struct CudaSearchBatchExecution {
     std::uint64_t mutationDeviceBytes = 0u;
     std::uint64_t candidateInputDeviceBytes = 0u;
     std::uint64_t mutationScratchDeviceBytes = 0u;
+    std::uint64_t baselinePrefixDeviceBytes = 0u;
+    std::uint64_t candidatePrefixDeviceBytes = 0u;
+    std::uint64_t candidateDeduplicationDeviceBytes = 0u;
     // Candidate-best and prefix-best samples, the scan output, and CUB scan
     // temporary storage. This is independent of evaluationTickCount.
     std::uint64_t winnerSelectionDeviceBytes = 0u;

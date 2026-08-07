@@ -21,6 +21,23 @@ struct DeviceSample {
     bool preciseFinish = false;
 };
 
+__host__ __device__ inline DeviceSample BindSampleToCandidate(
+        DeviceSample sample,
+        std::uint64_t firstCandidateId,
+        std::uint32_t candidateSlot,
+        std::uint32_t evaluationTickCount) {
+    if (sample.valid) {
+        sample.candidateId = firstCandidateId + candidateSlot;
+        sample.candidateSlot = candidateSlot;
+        sample.logicalOrder =
+                1u + static_cast<std::uint64_t>(candidateSlot) *
+                             evaluationTickCount +
+                sample.evaluationTick;
+        sample.mutation = true;
+    }
+    return sample;
+}
+
 struct BetterSample {
     bool maximize = false;
 

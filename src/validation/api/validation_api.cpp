@@ -3224,6 +3224,12 @@ PhysicsSandboxCudaSearchSession::Impl::Convert(
             execution.winnerStateCaptureKernelMilliseconds;
     result.metrics.finalizationKernelMilliseconds =
             execution.finalizationKernelMilliseconds;
+    result.metrics.baselinePrefixDeviceBytes =
+            execution.baselinePrefixDeviceBytes;
+    result.metrics.candidatePrefixDeviceBytes =
+            execution.candidatePrefixDeviceBytes;
+    result.metrics.candidateDeduplicationDeviceBytes =
+            execution.candidateDeduplicationDeviceBytes;
     result.metrics.simulationSelectedMinimumBlocksPerMultiprocessor =
             execution.simulationSelectedMinimumBlocksPerMultiprocessor;
     result.metrics.simulationThreadsPerBlock =
@@ -3608,6 +3614,10 @@ CreatePhysicsSandboxCudaSearchSession(
                 configuration.useLegacyMutationPipelineForTesting;
         internal.sortCandidatesByLocality =
                 configuration.sortCandidatesByLocality;
+        internal.reuseBaselinePrefixes =
+                configuration.reuseBaselinePrefixes;
+        internal.deduplicateLowEntropyCandidateInputs =
+                configuration.deduplicateLowEntropyCandidateInputs;
         internal.simulationMinimumBlocksPerMultiprocessorForTesting =
                 configuration.
                         simulationMinimumBlocksPerMultiprocessorForTesting;

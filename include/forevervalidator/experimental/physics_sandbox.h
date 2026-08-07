@@ -547,6 +547,12 @@ struct PhysicsSandboxCudaSearchConfiguration {
     bool useLegacyMutationPipelineForTesting = false;
     // Groups candidates with similar early resolved controls before simulation.
     bool sortCandidatesByLocality = true;
+    // Reuses the evaluated baseline before each candidate's first changed
+    // input. Disable this for exact full-timeline differential checks.
+    bool reuseBaselinePrefixes = true;
+    // Collapses identical low-entropy insertion candidates while retaining
+    // their logical candidate results and ordering.
+    bool deduplicateLowEntropyCandidateInputs = true;
     // Selects a compiled CUDA launch-bounds variant for performance tests.
     // Zero retains automatic selection.
     std::uint32_t simulationMinimumBlocksPerMultiprocessorForTesting = 0u;
@@ -582,6 +588,9 @@ struct PhysicsSandboxCudaSearchMetrics {
     std::uint64_t mutationDeviceBytes = 0u;
     std::uint64_t candidateInputDeviceBytes = 0u;
     std::uint64_t mutationScratchDeviceBytes = 0u;
+    std::uint64_t baselinePrefixDeviceBytes = 0u;
+    std::uint64_t candidatePrefixDeviceBytes = 0u;
+    std::uint64_t candidateDeduplicationDeviceBytes = 0u;
     // Winner-selection storage only; independent of the evaluation window.
     std::uint64_t winnerSelectionDeviceBytes = 0u;
     std::uint64_t hostToDeviceBytes = 0u;

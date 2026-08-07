@@ -132,6 +132,7 @@ enum class DeviceCandidateStatus : std::uint32_t {
 };
 
 using cuda_search_detail::BetterSample;
+using cuda_search_detail::BindSampleToCandidate;
 using cuda_search_detail::ControlsFromState;
 using cuda_search_detail::DeviceControlState;
 using cuda_search_detail::DeviceSample;
@@ -139,6 +140,10 @@ using cuda_search_detail::InvalidCandidateSlot;
 using cuda_search_detail::ApplyControlEvent;
 using cuda_search_detail::StuntsFromState;
 using cuda_search_detail::StrictlyBetter;
+
+static_assert(
+        sizeof(DeviceSample) == CudaSearchBaselinePrefixSampleBytes,
+        "update the CUDA prefix-cache memory bound when DeviceSample changes");
 namespace modifier_ops = cuda_search_modifier_detail;
 namespace sparse_events = cuda::sparse_candidate_events;
 
@@ -3068,15 +3073,9 @@ __global__ void ExpandDeduplicatedSearchSamplesKernel(
     if (slot >= candidateCount) return;
     const std::uint32_t representative = representativeSlots[slot];
     if (representative == slot) return;
-    DeviceSample sample = candidateBestSamples[representative + 1u];
-    if (sample.valid) {
-        sample.candidateId = firstCandidateId + slot;
-        sample.candidateSlot = slot;
-        sample.logicalOrder =
-                1u + static_cast<std::uint64_t>(slot) *
-                             evaluationTickCount +
-                sample.evaluationTick;
-    }
+    const DeviceSample sample = BindSampleToCandidate(
+            candidateBestSamples[representative + 1u],
+            firstCandidateId, slot, evaluationTickCount);
     candidateBestSamples[slot + 1u] = sample;
     statuses[slot] = statuses[representative];
 }
@@ -3123,6 +3122,9 @@ __global__ __launch_bounds__(
         std::uint32_t candidateCount,
         bool baseline,
         CudaCandidatePhysicsState *__restrict__ baselinePrefixStates,
+        DeviceSample *__restrict__ baselinePrefixBestSamples,
+        double *__restrict__
+                baselinePrefixClosestTargetDistanceSquared,
         const std::uint32_t *__restrict__ simulationCandidateSlots,
         const std::uint64_t *__restrict__ simulationKeys,
         std::uint32_t eventCapacity,
@@ -3267,6 +3269,15 @@ __global__ __launch_bounds__(
     double closestTargetDistanceSquared =
             cuda_search_progress_detail::
                     InvalidClosestTargetDistanceSquared;
+    if (!baseline && simulationKeys != nullptr &&
+        firstSimulationTick != 0u) {
+        localBest = BindSampleToCandidate(
+                baselinePrefixBestSamples[firstSimulationTick - 1u],
+                firstCandidateId, slot, evaluationTickCount);
+        closestTargetDistanceSquared =
+                baselinePrefixClosestTargetDistanceSquared[
+                        firstSimulationTick - 1u];
+    }
     const std::int64_t firstSimulationPublicTimeMs =
             branchTimeMs +
             static_cast<std::int64_t>(firstSimulationTick + 1u) *
@@ -3386,11 +3397,16 @@ __global__ __launch_bounds__(
         state.firstStep = false;
         ++state.controlCursor;
         if constexpr (!SimulateStunts) {
-            if (baseline) {
+            if (baseline && baselinePrefixStates != nullptr) {
                 baselinePrefixStates[tickIndex] = state;
             }
         }
         if (publicTime < evaluationStartTimeMs) {
+            if (baseline && baselinePrefixBestSamples != nullptr) {
+                baselinePrefixBestSamples[tickIndex] = localBest;
+                baselinePrefixClosestTargetDistanceSquared[tickIndex] =
+                        closestTargetDistanceSquared;
+            }
             continue;
         }
         if (configuredEvaluator.kind ==
@@ -3447,6 +3463,11 @@ __global__ __launch_bounds__(
         sample.mutation = !baseline;
         if (StrictlyBetter(sample, localBest, maximize)) {
             localBest = sample;
+        }
+        if (baseline && baselinePrefixBestSamples != nullptr) {
+            baselinePrefixBestSamples[tickIndex] = localBest;
+            baselinePrefixClosestTargetDistanceSquared[tickIndex] =
+                    closestTargetDistanceSquared;
         }
         if (sample.valid &&
             configuredEvaluator.kind ==
@@ -4159,6 +4180,7 @@ struct CudaSearchExecutor::Impl {
     std::uint64_t initialUploadBytes = 0u;
     bool baselineEvaluated = false;
     bool baselinePrefixesValid = false;
+    bool baselinePrefixReuseEligible = false;
     bool baselineInputsCanonical = false;
     bool compactRandomSteeringPipeline = false;
     bool compactEditPipeline = false;
@@ -4171,7 +4193,7 @@ struct CudaSearchExecutor::Impl {
     bool needsTemporaryEvents = true;
     bool needsPassBaselineEvents = true;
     bool needsEligibleIndices = true;
-    bool deduplicatesLowEntropyInsertions = false;
+    CudaSearchPrefixReusePlan prefixReusePlan;
     bool steadyTimeline = false;
     // Mirrors the resident winner so unchanged batches only transfer summary
     // telemetry from the device.
@@ -4197,6 +4219,9 @@ struct CudaSearchExecutor::Impl {
     DeviceAllocation<CudaControlTick> baselineTicks;
     DeviceAllocation<CudaSearchInputEvent> baselineInputs;
     DeviceAllocation<CudaCandidatePhysicsState> baselinePrefixStates;
+    DeviceAllocation<DeviceSample> baselinePrefixBestSamples;
+    DeviceAllocation<double>
+            baselinePrefixClosestTargetDistanceSquared;
     DeviceAllocation<CudaSearchModifierConfiguration> modifiers;
     DeviceAllocation<double> smoothWeights;
     DeviceAllocation<CudaSearchEvaluatorConfiguration> evaluator;
@@ -4257,6 +4282,12 @@ struct CudaSearchExecutor::Impl {
     DeviceAllocation<double> closestTargetDistanceSquaredByBlock;
     CudaSearchBest hostBestCache;
 
+    bool DeduplicationStorageEligible(
+            std::uint32_t candidateCapacity) const noexcept {
+        return prefixReusePlan.DeduplicationStorageEligible(
+                candidateCapacity);
+    }
+
     void UpdateResidentBytes() {
         residentBytes = 0u;
 #define ADD_BYTES(member) residentBytes += member.Bytes()
@@ -4265,6 +4296,8 @@ struct CudaSearchExecutor::Impl {
         ADD_BYTES(baselineTicks);
         ADD_BYTES(baselineInputs);
         ADD_BYTES(baselinePrefixStates);
+        ADD_BYTES(baselinePrefixBestSamples);
+        ADD_BYTES(baselinePrefixClosestTargetDistanceSquared);
         ADD_BYTES(modifiers);
         ADD_BYTES(smoothWeights);
         ADD_BYTES(evaluator);
@@ -4762,6 +4795,11 @@ struct CudaSearchExecutor::Impl {
         const std::size_t summaryBlockCount =
                 (candidates + SimulationBlockSize - 1u) /
                 SimulationBlockSize;
+        const std::size_t prefixCandidateSlots =
+                baselinePrefixReuseEligible ? candidates : 0u;
+        const std::size_t deduplicationCandidateSlots =
+                DeduplicationStorageEligible(candidateCount)
+                ? candidates : 0u;
         DeviceAllocation<DeviceSample> nextCandidateBestSamples;
         DeviceAllocation<cuda::finish::Refinement>
                 nextFinishRefinements;
@@ -4856,13 +4894,17 @@ struct CudaSearchExecutor::Impl {
             !nextMutationCounts.Allocate(candidates) ||
             !nextStatuses.Allocate(candidates) ||
             !nextActiveCandidates.Allocate(candidates) ||
-            !nextCandidateSimulationKeys.Allocate(candidates) ||
-            !nextSortedCandidateSimulationKeys.Allocate(candidates) ||
-            !nextCandidateSlots.Allocate(candidates) ||
-            !nextSortedCandidateSlots.Allocate(candidates) ||
-            !nextCandidateInputHashes.Allocate(candidates) ||
-            !nextSortedCandidateInputHashes.Allocate(candidates) ||
-            !nextCandidateRepresentativeSlots.Allocate(candidates) ||
+            !nextCandidateSimulationKeys.Allocate(prefixCandidateSlots) ||
+            !nextSortedCandidateSimulationKeys.Allocate(
+                    prefixCandidateSlots) ||
+            !nextCandidateSlots.Allocate(prefixCandidateSlots) ||
+            !nextSortedCandidateSlots.Allocate(prefixCandidateSlots) ||
+            !nextCandidateInputHashes.Allocate(
+                    deduplicationCandidateSlots) ||
+            !nextSortedCandidateInputHashes.Allocate(
+                    deduplicationCandidateSlots) ||
+            !nextCandidateRepresentativeSlots.Allocate(
+                    deduplicationCandidateSlots) ||
             !nextPrefixBestSamples.Allocate(winnerSlots) ||
             !nextCollisionScratch.Allocate(collisionTileSlots) ||
             !nextShapeCollisionScratch.Allocate(
@@ -4906,16 +4948,19 @@ struct CudaSearchExecutor::Impl {
         }
 
         std::size_t candidateSortBytes = 0u;
-        cudaError_t candidateSortError =
-                cub::DeviceRadixSort::SortPairs(
-                        nullptr, candidateSortBytes,
-                        nextCandidateSimulationKeys.Get(),
-                        nextSortedCandidateSimulationKeys.Get(),
-                        nextCandidateSlots.Get(),
-                        nextSortedCandidateSlots.Get(),
-                        candidates);
+        cudaError_t candidateSortError = cudaSuccess;
         std::size_t candidateHashSortBytes = 0u;
-        if (candidateSortError == cudaSuccess) {
+        if (baselinePrefixReuseEligible) {
+            candidateSortError = cub::DeviceRadixSort::SortPairs(
+                    nullptr, candidateSortBytes,
+                    nextCandidateSimulationKeys.Get(),
+                    nextSortedCandidateSimulationKeys.Get(),
+                    nextCandidateSlots.Get(),
+                    nextSortedCandidateSlots.Get(),
+                    candidates);
+        }
+        if (candidateSortError == cudaSuccess &&
+            DeduplicationStorageEligible(candidateCount)) {
             candidateSortError = cub::DeviceRadixSort::SortPairs(
                     nullptr, candidateHashSortBytes,
                     nextCandidateInputHashes.Get(),
@@ -5047,6 +5092,20 @@ struct CudaSearchExecutor::Impl {
                 sortedCandidateInputHashes.Bytes() +
                 candidateRepresentativeSlots.Bytes() +
                 candidateSortTemporary.Bytes();
+        result.baselinePrefixDeviceBytes =
+                baselinePrefixStates.Bytes() +
+                baselinePrefixBestSamples.Bytes() +
+                baselinePrefixClosestTargetDistanceSquared.Bytes();
+        result.candidatePrefixDeviceBytes =
+                candidateSimulationKeys.Bytes() +
+                sortedCandidateSimulationKeys.Bytes() +
+                candidateSlots.Bytes() +
+                sortedCandidateSlots.Bytes() +
+                candidateSortTemporary.Bytes();
+        result.candidateDeduplicationDeviceBytes =
+                candidateInputHashes.Bytes() +
+                sortedCandidateInputHashes.Bytes() +
+                candidateRepresentativeSlots.Bytes();
         result.mutationDeviceBytes =
                 baselineInputs.Bytes() +
                 modifiers.Bytes() +
@@ -5383,64 +5442,33 @@ struct CudaSearchExecutor::Impl {
                 ? static_cast<std::uint32_t>(
                           configuration.condition->instructions.size())
                 : 0u;
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_WATER_ONLY)
-        constexpr bool simulatesStunts = false;
-#else
-        const bool simulatesStunts =
-                configuration.branchState.stuntsEnabled &&
-                configuration.evaluator.kind !=
-                        CudaSearchEvaluatorKind::FinishTime;
-#endif
         const bool useBaselinePrefixes =
-                !baseline && baselinePrefixesValid &&
-                !simulatesStunts && conditionInstructionCount == 0u &&
-                configuration.evaluator.kind !=
-                        CudaSearchEvaluatorKind::FinishTime;
-        bool deduplicateCandidateInputs = false;
+                !baseline && baselinePrefixesValid;
+        const bool deduplicateCandidateInputs =
+                useBaselinePrefixes &&
+                DeduplicationStorageEligible(candidateCount);
         std::uint32_t deduplicationReplicaLimit = 1u;
-        if (useBaselinePrefixes &&
-            deduplicatesLowEntropyInsertions &&
-            !configuration.modifiers.empty()) {
-            const CudaSearchWindow &window =
-                    configuration.modifiers[0].window;
-            const std::int64_t firstChoice =
-                    window.minimumTimeMs /
-                    configuration.tickDurationMs;
-            const std::int64_t lastChoice =
-                    window.maximumTimeMs /
-                    configuration.tickDurationMs;
-            if (lastChoice >= firstChoice) {
-                const std::uint64_t choiceCount =
-                        static_cast<std::uint64_t>(
-                                lastChoice - firstChoice) +
-                        1u;
-                deduplicateCandidateInputs =
-                        choiceCount <=
-                        static_cast<std::uint64_t>(
-                                candidateCount) /
-                                4u;
-                if (deduplicateCandidateInputs) {
-                    const std::uint64_t residentWorkers =
-                            static_cast<std::uint64_t>(
-                                    (simulationMetrics->
-                                                     activeBlocksPerMultiprocessor *
-                                             3u +
-                                     7u) /
-                                            8u) *
-                            multiprocessorCount *
-                            SimulationBlockSize;
-                    const std::uint64_t replicas =
-                            (residentWorkers + choiceCount - 1u) /
-                            choiceCount;
-                    deduplicationReplicaLimit =
-                            static_cast<std::uint32_t>(
-                                    replicas == 0u
-                                    ? 1u
-                                    : replicas > UINT32_MAX
-                                    ? UINT32_MAX
-                                    : replicas);
-                }
-            }
+        if (deduplicateCandidateInputs) {
+            const std::uint64_t residentWorkers =
+                    static_cast<std::uint64_t>(
+                            (simulationMetrics->
+                                             activeBlocksPerMultiprocessor *
+                                     3u +
+                             7u) /
+                                    8u) *
+                    multiprocessorCount *
+                    SimulationBlockSize;
+            const std::uint64_t replicas =
+                    (residentWorkers +
+                     prefixReusePlan.lowEntropyChoiceCount - 1u) /
+                    prefixReusePlan.lowEntropyChoiceCount;
+            deduplicationReplicaLimit =
+                    static_cast<std::uint32_t>(
+                            replicas == 0u
+                            ? 1u
+                            : replicas > UINT32_MAX
+                            ? UINT32_MAX
+                            : replicas);
         }
         const std::uint32_t *simulationCandidateSlots = nullptr;
         const std::uint64_t *simulationKeys = nullptr;
@@ -5592,10 +5620,12 @@ struct CudaSearchExecutor::Impl {
                     configuration.evaluationStartTimeMs,
                     evaluationTickCount,
                     firstCandidateId,
-                    candidateCount,
-                    baseline,
-                    baselinePrefixStates.Get(),
-                    simulationCandidateSlots,
+                     candidateCount,
+                     baseline,
+                     baselinePrefixStates.Get(),
+                     baselinePrefixBestSamples.Get(),
+                     baselinePrefixClosestTargetDistanceSquared.Get(),
+                     simulationCandidateSlots,
                     simulationKeys,
                     static_cast<std::uint32_t>(
                             configuration.maximumEventCount),
@@ -5676,10 +5706,12 @@ struct CudaSearchExecutor::Impl {
                     configuration.evaluationStartTimeMs,
                     evaluationTickCount,
                     firstCandidateId,
-                    candidateCount,
-                    baseline,
-                    baselinePrefixStates.Get(),
-                    simulationCandidateSlots,
+                     candidateCount,
+                     baseline,
+                     baselinePrefixStates.Get(),
+                     baselinePrefixBestSamples.Get(),
+                     baselinePrefixClosestTargetDistanceSquared.Get(),
+                     simulationCandidateSlots,
                     simulationKeys,
                     static_cast<std::uint32_t>(
                             configuration.maximumEventCount),
@@ -6168,7 +6200,7 @@ struct CudaSearchExecutor::Impl {
             // case; misses and non-terminating evaluators populate every
             // prefix state and remain safe to reuse.
             baselinePrefixesValid =
-                    !simulatesStunts &&
+                    baselinePrefixReuseEligible &&
                     !(configuration.evaluator.kind ==
                                       CudaSearchEvaluatorKind::VolumeEntry &&
                       hostSummary.bestValid);
@@ -6212,18 +6244,9 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
                             configuration.tickDurationMs ||
              configuration.evaluationEndTimeMs <
                      configuration.evaluationStartTimeMs ||
-            (configuration.
-                         simulationMinimumBlocksPerMultiprocessorForTesting !=
-                     0u &&
-             configuration.
-                         simulationMinimumBlocksPerMultiprocessorForTesting !=
-                     ThroughputKernelMinimumBlocksPerSm &&
-             configuration.
-                         simulationMinimumBlocksPerMultiprocessorForTesting !=
-                     TailKernelMinimumBlocksPerSm &&
-             configuration.
-                         simulationMinimumBlocksPerMultiprocessorForTesting !=
-                     DenseTailKernelMinimumBlocksPerSm) ||
+            !IsCudaSearchSimulationMinimumBlocksValid(
+                    configuration.
+                            simulationMinimumBlocksPerMultiprocessorForTesting) ||
             (configuration.incumbent &&
              configuration.incumbent->evaluationTick >=
                      static_cast<std::uint64_t>(
@@ -6796,22 +6819,10 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
         impl->directExistingEventPipeline =
                 impl->compactEditPipeline &&
                 directExistingEventPipeline;
-        if (preparedConfiguration.modifiers.size() == 1u) {
-            const CudaSearchModifierConfiguration &modifier =
-                    preparedConfiguration.modifiers[0];
-            impl->deduplicatesLowEntropyInsertions =
-                    modifier.kind ==
-                            CudaSearchModifierKind::InputInsertion &&
-                    modifier.steering.enabled != 0u &&
-                    modifier.steering.minimumCount == 1u &&
-                    modifier.steering.maximumCount == 1u &&
-                    modifier.steering.maximumHoldMs == 0 &&
-                    modifier.accelerate.enabled == 0u &&
-                    modifier.brake.enabled == 0u &&
-                    (modifier.optionFlags & 1u) != 0u &&
-                    modifier.secondaryAnalogMinimum ==
-                            modifier.secondaryAnalogMaximum;
-        }
+        impl->prefixReusePlan =
+                PlanCudaSearchPrefixReuse(preparedConfiguration);
+        impl->baselinePrefixReuseEligible =
+                impl->prefixReusePlan.enabled;
         impl->materializesCandidateEvents =
                 preparedConfiguration.
                         useLegacyMutationPipelineForTesting ||
@@ -6967,6 +6978,15 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
                 impl->compactRandomSteeringPipeline
                 ? candidates * impl->compactInputCount
                 : 0u;
+        const std::size_t prefixCandidateSlots =
+                impl->baselinePrefixReuseEligible ? candidates : 0u;
+        const std::size_t deduplicationCandidateSlots =
+                impl->DeduplicationStorageEligible(
+                        preparedConfiguration.maximumBatchSize)
+                ? candidates : 0u;
+        const std::size_t baselinePrefixSlots =
+                impl->baselinePrefixReuseEligible
+                ? preparedConfiguration.baselineTicks.size() : 0u;
         impl->editStorageBytes =
                 impl->compactEditPipeline
                 ? Impl::EditStorageSize(
@@ -6993,7 +7013,11 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
             !impl->baselineInputs.Allocate(
                     preparedConfiguration.baselineInputs.size()) ||
             !impl->baselinePrefixStates.Allocate(
-                    preparedConfiguration.baselineTicks.size()) ||
+                    baselinePrefixSlots) ||
+            !impl->baselinePrefixBestSamples.Allocate(
+                    baselinePrefixSlots) ||
+            !impl->baselinePrefixClosestTargetDistanceSquared.Allocate(
+                    baselinePrefixSlots) ||
             !impl->modifiers.Allocate(
                     preparedConfiguration.modifiers.size()) ||
             !impl->smoothWeights.Allocate(
@@ -7056,13 +7080,19 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
             !impl->mutationCounts.Allocate(candidates) ||
             !impl->statuses.Allocate(candidates) ||
             !impl->activeCandidates.Allocate(candidates) ||
-            !impl->candidateSimulationKeys.Allocate(candidates) ||
-            !impl->sortedCandidateSimulationKeys.Allocate(candidates) ||
-            !impl->candidateSlots.Allocate(candidates) ||
-            !impl->sortedCandidateSlots.Allocate(candidates) ||
-            !impl->candidateInputHashes.Allocate(candidates) ||
-            !impl->sortedCandidateInputHashes.Allocate(candidates) ||
-            !impl->candidateRepresentativeSlots.Allocate(candidates) ||
+            !impl->candidateSimulationKeys.Allocate(
+                    prefixCandidateSlots) ||
+            !impl->sortedCandidateSimulationKeys.Allocate(
+                    prefixCandidateSlots) ||
+            !impl->candidateSlots.Allocate(prefixCandidateSlots) ||
+            !impl->sortedCandidateSlots.Allocate(
+                    prefixCandidateSlots) ||
+            !impl->candidateInputHashes.Allocate(
+                    deduplicationCandidateSlots) ||
+            !impl->sortedCandidateInputHashes.Allocate(
+                    deduplicationCandidateSlots) ||
+            !impl->candidateRepresentativeSlots.Allocate(
+                    deduplicationCandidateSlots) ||
             !impl->prefixBestSamples.Allocate(winnerSampleSlots) ||
             !impl->reducedBest.Allocate(1u) ||
             !impl->collisionScratch.Allocate(collisionTileSlots) ||
@@ -7107,15 +7137,20 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
             return {};
         }
         std::size_t candidateSortBytes = 0u;
-        error = cub::DeviceRadixSort::SortPairs(
-                nullptr, candidateSortBytes,
-                impl->candidateSimulationKeys.Get(),
-                impl->sortedCandidateSimulationKeys.Get(),
-                impl->candidateSlots.Get(),
-                impl->sortedCandidateSlots.Get(),
-                candidates);
+        error = cudaSuccess;
         std::size_t candidateHashSortBytes = 0u;
-        if (error == cudaSuccess) {
+        if (impl->baselinePrefixReuseEligible) {
+            error = cub::DeviceRadixSort::SortPairs(
+                    nullptr, candidateSortBytes,
+                    impl->candidateSimulationKeys.Get(),
+                    impl->sortedCandidateSimulationKeys.Get(),
+                    impl->candidateSlots.Get(),
+                    impl->sortedCandidateSlots.Get(),
+                    candidates);
+        }
+        if (error == cudaSuccess &&
+            impl->DeduplicationStorageEligible(
+                    preparedConfiguration.maximumBatchSize)) {
             error = cub::DeviceRadixSort::SortPairs(
                     nullptr, candidateHashSortBytes,
                     impl->candidateInputHashes.Get(),
