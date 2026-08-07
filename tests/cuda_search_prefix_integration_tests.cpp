@@ -727,6 +727,52 @@ bool CheckSessionSpecializationLookupAndProfilingBypass(
         return false;
     }
 
+    const auto sameCertificateSpecialization =
+            [&](std::uint32_t minimumBlocks) {
+        const char *disabledName = nullptr;
+        const char *enabledName = nullptr;
+        if (cuFuncGetName(
+                    &disabledName,
+                    module->Kernel(minimumBlocks, false)) != CUDA_SUCCESS ||
+            cuFuncGetName(
+                    &enabledName,
+                    module->Kernel(minimumBlocks, true)) != CUDA_SUCCESS ||
+            disabledName == nullptr || enabledName == nullptr) {
+            std::cerr << "reading session-specialized kernel names failed\n";
+            return false;
+        }
+        std::string normalizedEnabledName(enabledName);
+        const std::string enabledSuffix =
+                "ELj" + std::to_string(minimumBlocks) +
+                "ELb1ELb0EE";
+        const std::string disabledSuffix =
+                "ELj" + std::to_string(minimumBlocks) +
+                "ELb0ELb0EE";
+        const std::size_t suffixPosition =
+                normalizedEnabledName.find(enabledSuffix);
+        if (suffixPosition == std::string::npos) {
+            std::cerr << "enabled certificate kernel has an unexpected name: "
+                      << enabledName << '\n';
+            return false;
+        }
+        normalizedEnabledName.replace(
+                suffixPosition,
+                enabledSuffix.size(),
+                disabledSuffix);
+        if (normalizedEnabledName != disabledName) {
+            std::cerr << "certificate changed session specialization at "
+                      << minimumBlocks << " blocks per SM\ndisabled: "
+                      << disabledName << "\nenabled: " << enabledName << '\n';
+            return false;
+        }
+        return true;
+    };
+    if (!sameCertificateSpecialization(16u) ||
+        !sameCertificateSpecialization(12u) ||
+        !sameCertificateSpecialization(8u)) {
+        return false;
+    }
+
     CudaSearchExecutorConfiguration specializedConfiguration =
             Configuration(
                     deviceScene, deviceConfiguration.Get(), 8u);

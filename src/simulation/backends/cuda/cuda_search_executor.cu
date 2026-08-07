@@ -4779,15 +4779,25 @@ struct CudaSearchExecutor::Impl {
                               true>();
         }
         if (configuration.useEmptyAirCertificate) {
+#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_WATER_ONLY)
+            // Session-specialized water searches must retain the same handling
+            // specialization when the certificate is enabled. Falling back to
+            // Generic here discards the session proof and regresses throughput.
+            return SimulationKernel<
+                    MinimumBlocksPerSm,
+                    CudaHandlingSpecialization::GearedDriveWater,
+                    true,
+                    false>();
+#else
             // Keep the experimental certificate on a single generic AOT
-            // identity. This bounds the matrix to three launch-bounds values
-            // times certificate/profile off/on while the production-off
-            // handling-specialized kernels remain unchanged.
+            // identity. This bounds the ordinary build matrix to three
+            // launch-bounds values times certificate/profile off/on.
             return SimulationKernel<
                     MinimumBlocksPerSm,
                     CudaHandlingSpecialization::Generic,
                     true,
                     false>();
+#endif
         }
 #if defined(FOREVERVALIDATOR_CUDA_RESEARCH_WATER_ONLY)
         return SimulationKernel<
