@@ -23,9 +23,8 @@ namespace forevervalidator::simulation::cuda::specialization {
 namespace {
 
 constexpr std::uint32_t SimulationBlockSize = 32u;
-constexpr std::uint32_t ThroughputMinimumBlocks = 16u;
-constexpr std::uint32_t TailMinimumBlocks = 17u;
-constexpr std::uint32_t DenseTailMinimumBlocks = 24u;
+constexpr std::uint32_t TailMinimumBlocks = 12u;
+constexpr std::uint32_t DenseTailMinimumBlocks = 8u;
 std::atomic_uint64_t SessionModuleBuildCount{0u};
 
 std::string NvrtcLog(nvrtcProgram program) {
@@ -590,10 +589,10 @@ bool SessionModule::Build(
         if (functionName.find("ELj16EE") !=
             std::string_view::npos) {
             destination = &throughput_;
-        } else if (functionName.find("ELj17EE") !=
+        } else if (functionName.find("ELj12EE") !=
                    std::string_view::npos) {
             destination = &tail_;
-        } else if (functionName.find("ELj24EE") !=
+        } else if (functionName.find("ELj8EE") !=
                    std::string_view::npos) {
             destination = &denseTail_;
         }

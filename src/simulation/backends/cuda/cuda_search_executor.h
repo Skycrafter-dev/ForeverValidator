@@ -188,6 +188,8 @@ struct CudaSearchExecutorConfiguration {
     std::int64_t evaluationEndTimeMs = 0;
     std::size_t maximumEventCount = 0u;
     bool useLegacyMutationPipelineForTesting = false;
+    bool sortCandidatesByLocality = true;
+    std::uint32_t simulationMinimumBlocksPerMultiprocessorForTesting = 0u;
     bool captureBestState = true;
     std::optional<CudaSearchIncumbent> incumbent;
     std::shared_ptr<const cuda::specialization::SessionModule>
@@ -237,7 +239,7 @@ struct CudaSearchBatchExecution {
     std::uint64_t mutationDeviceBytes = 0u;
     std::uint64_t candidateInputDeviceBytes = 0u;
     std::uint64_t mutationScratchDeviceBytes = 0u;
-    // Candidate-best samples, the incumbent/reduction output, and CUB
+    // Candidate-best and prefix-best samples, the scan output, and CUB scan
     // temporary storage. This is independent of evaluationTickCount.
     std::uint64_t winnerSelectionDeviceBytes = 0u;
     std::uint64_t hostToDeviceBytes = 0u;
@@ -252,6 +254,8 @@ struct CudaSearchBatchExecution {
     double winnerReductionKernelMilliseconds = 0.0;
     double winnerStateCaptureKernelMilliseconds = 0.0;
     double finalizationKernelMilliseconds = 0.0;
+    // The minimum-blocks-per-SM launch-bounds variant actually dispatched.
+    std::uint32_t simulationSelectedMinimumBlocksPerMultiprocessor = 0u;
     std::uint32_t simulationThreadsPerBlock = 0u;
     std::uint32_t simulationRegistersPerThread = 0u;
     std::uint64_t simulationLocalBytesPerThread = 0u;

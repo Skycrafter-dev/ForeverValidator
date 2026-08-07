@@ -545,6 +545,11 @@ struct PhysicsSandboxCudaSearchConfiguration {
     bool useSessionSpecialization = false;
     // Retains the original materialization path for exact differential tests.
     bool useLegacyMutationPipelineForTesting = false;
+    // Groups candidates with similar early resolved controls before simulation.
+    bool sortCandidatesByLocality = true;
+    // Selects a compiled CUDA launch-bounds variant for performance tests.
+    // Zero retains automatic selection.
+    std::uint32_t simulationMinimumBlocksPerMultiprocessorForTesting = 0u;
     // ForeverTAS resolves improved runs on its optimized CPU worker. Other
     // callers retain the compatible CUDA winner-state capture by default.
     bool captureBestState = true;
@@ -590,6 +595,8 @@ struct PhysicsSandboxCudaSearchMetrics {
     double winnerReductionKernelMilliseconds = 0.0;
     double winnerStateCaptureKernelMilliseconds = 0.0;
     double finalizationKernelMilliseconds = 0.0;
+    // The minimum-blocks-per-SM launch-bounds variant actually dispatched.
+    std::uint32_t simulationSelectedMinimumBlocksPerMultiprocessor = 0u;
     std::uint32_t simulationThreadsPerBlock = 0u;
     std::uint32_t simulationRegistersPerThread = 0u;
     std::uint64_t simulationLocalBytesPerThread = 0u;
