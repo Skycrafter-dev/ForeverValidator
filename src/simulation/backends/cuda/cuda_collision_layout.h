@@ -178,6 +178,8 @@ struct CudaHotPathCounters {
     std::uint64_t surfaceCacheEligibleCount = 0u;
     std::uint64_t surfaceCacheReuseCount = 0u;
     std::uint64_t surfaceCacheRefreshCount = 0u;
+    // Surface-hit cache refresh failure; mesh-leaf cache construction is a
+    // distinct later stage.
     std::uint64_t surfaceCacheRefreshFailureCount = 0u;
     std::uint64_t meshCacheReuseCount = 0u;
     std::uint64_t accelerationCellVisitCount = 0u;

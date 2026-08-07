@@ -622,6 +622,9 @@ struct PhysicsSandboxCudaSearchMetrics {
     struct HotPath {
         bool collected = false;
         bool complete = false;
+        // True only after the instrumented generic runtime AOT kernel was
+        // selected; this is dispatch evidence, not a request echo.
+        bool forcedRuntimeGenericKernel = false;
         std::uint64_t physicallySimulatedCandidateCount = 0u;
         std::uint64_t firstSimulationTickSum = 0u;
         std::uint64_t firstSimulationTickMinimum = 0u;
@@ -634,6 +637,8 @@ struct PhysicsSandboxCudaSearchMetrics {
         std::uint64_t surfaceCacheEligibleCount = 0u;
         std::uint64_t surfaceCacheReuseCount = 0u;
         std::uint64_t surfaceCacheRefreshCount = 0u;
+        // Surface-hit cache refreshes that could not be completed. A later
+        // mesh-leaf cache build failure is not included in this counter.
         std::uint64_t surfaceCacheRefreshFailureCount = 0u;
         std::uint64_t meshCacheReuseCount = 0u;
         std::uint64_t accelerationCellVisitCount = 0u;

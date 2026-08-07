@@ -3250,6 +3250,68 @@ PhysicsSandboxCudaSearchSession::Impl::Convert(
             execution.simulationActiveBlocksPerMultiprocessor;
     result.metrics.simulationTheoreticalOccupancy =
             execution.simulationTheoreticalOccupancy;
+    result.metrics.hotPath.collected = execution.hotPath.collected;
+    result.metrics.hotPath.complete = execution.hotPath.complete;
+    result.metrics.hotPath.forcedRuntimeGenericKernel =
+            execution.hotPath.forcedRuntimeGenericKernel;
+    result.metrics.hotPath.physicallySimulatedCandidateCount =
+            execution.hotPath.physicallySimulatedCandidateCount;
+    result.metrics.hotPath.firstSimulationTickSum =
+            execution.hotPath.firstSimulationTickSum;
+    result.metrics.hotPath.firstSimulationTickMinimum =
+            execution.hotPath.firstSimulationTickMinimum;
+    result.metrics.hotPath.firstSimulationTickMaximum =
+            execution.hotPath.firstSimulationTickMaximum;
+    result.metrics.hotPath.executedTickCount =
+            execution.hotPath.executedTickCount;
+    result.metrics.hotPath.completedTickCount =
+            execution.hotPath.completedTickCount;
+    result.metrics.hotPath.physicsSubstepCount =
+            execution.hotPath.physicsSubstepCount;
+    result.metrics.hotPath.maximumSubstepsPerTick =
+            execution.hotPath.maximumSubstepsPerTick;
+    result.metrics.hotPath.collisionDetectCount =
+            execution.hotPath.collisionDetectCount;
+    result.metrics.hotPath.surfaceCacheEligibleCount =
+            execution.hotPath.surfaceCacheEligibleCount;
+    result.metrics.hotPath.surfaceCacheReuseCount =
+            execution.hotPath.surfaceCacheReuseCount;
+    result.metrics.hotPath.surfaceCacheRefreshCount =
+            execution.hotPath.surfaceCacheRefreshCount;
+    result.metrics.hotPath.surfaceCacheRefreshFailureCount =
+            execution.hotPath.surfaceCacheRefreshFailureCount;
+    result.metrics.hotPath.meshCacheReuseCount =
+            execution.hotPath.meshCacheReuseCount;
+    result.metrics.hotPath.accelerationCellVisitCount =
+            execution.hotPath.accelerationCellVisitCount;
+    result.metrics.hotPath.accelerationSurfaceVisitCount =
+            execution.hotPath.accelerationSurfaceVisitCount;
+    result.metrics.hotPath.octreeCellVisitCount =
+            execution.hotPath.octreeCellVisitCount;
+    result.metrics.hotPath.cachedTriangleLeafVisitCount =
+            execution.hotPath.cachedTriangleLeafVisitCount;
+    result.metrics.hotPath.triangleTestCount =
+            execution.hotPath.triangleTestCount;
+    result.metrics.hotPath.triangleHitCount =
+            execution.hotPath.triangleHitCount;
+    result.metrics.hotPath.rawContactCount =
+            execution.hotPath.rawContactCount;
+    result.metrics.hotPath.responseSortCallCount =
+            execution.hotPath.responseSortCallCount;
+    result.metrics.hotPath.responseSortItemCount =
+            execution.hotPath.responseSortItemCount;
+    result.metrics.hotPath.maximumResponseSortItemCount =
+            execution.hotPath.maximumResponseSortItemCount;
+    result.metrics.hotPath.groundForcePassCount =
+            execution.hotPath.groundForcePassCount;
+    result.metrics.hotPath.airForcePassCount =
+            execution.hotPath.airForcePassCount;
+    result.metrics.hotPath.waterForcePassCount =
+            execution.hotPath.waterForcePassCount;
+    result.metrics.hotPath.physicsCallbackDisabledForcePassCount =
+            execution.hotPath.physicsCallbackDisabledForcePassCount;
+    result.metrics.hotPath.zeroDynamicsForcePassCount =
+            execution.hotPath.zeroDynamicsForcePassCount;
     if (!execution.best.valid) {
         return PhysicsSandboxResult<
                 PhysicsSandboxCudaSearchBatch>::Success(
@@ -3630,6 +3692,8 @@ CreatePhysicsSandboxCudaSearchSession(
                 configuration.
                         simulationMinimumBlocksPerMultiprocessorForTesting;
         internal.captureBestState = configuration.captureBestState;
+        internal.collectHotPathMetrics =
+                configuration.collectHotPathMetrics;
         if (configuration.incumbent) {
             if (configuration.incumbent->mutationCount >
                         std::numeric_limits<std::uint32_t>::max() ||
@@ -3658,6 +3722,7 @@ CreatePhysicsSandboxCudaSearchSession(
             internal.incumbent = incumbent;
         }
         if (configuration.useSessionSpecialization &&
+            !configuration.collectHotPathMetrics &&
             CurrentCudaDeviceSupportsSessionSpecialization()) {
             internal.sessionSpecialization =
                     source.session->CudaSearchSpecialization();

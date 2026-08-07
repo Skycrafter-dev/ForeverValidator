@@ -586,13 +586,13 @@ bool SessionModule::Build(
         }
         KernelEntry *destination = nullptr;
         const std::string_view functionName(name);
-        if (functionName.find("ELj16EE") !=
+        if (functionName.find("ELj16ELb0EE") !=
             std::string_view::npos) {
             destination = &throughput_;
-        } else if (functionName.find("ELj12EE") !=
+        } else if (functionName.find("ELj12ELb0EE") !=
                    std::string_view::npos) {
             destination = &tail_;
-        } else if (functionName.find("ELj8EE") !=
+        } else if (functionName.find("ELj8ELb0EE") !=
                    std::string_view::npos) {
             destination = &denseTail_;
         }

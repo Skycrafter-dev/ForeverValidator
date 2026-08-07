@@ -167,6 +167,106 @@ struct DeviceBatchSummary {
     std::uint64_t lastFailure = 0u;
 };
 
+struct DeviceHotPathRecord {
+    std::uint64_t physicallySimulatedCandidateCount = 0u;
+    std::uint64_t firstSimulationTick = 0u;
+    std::uint64_t executedTickCount = 0u;
+    std::uint64_t completedTickCount = 0u;
+    cuda::collision::CudaHotPathCounters physics{};
+};
+
+template<bool CollectHotPathMetrics>
+struct DeviceHotPathStorage {};
+
+template<>
+struct DeviceHotPathStorage<true> {
+    DeviceHotPathRecord record{};
+};
+
+static_assert(std::is_empty_v<DeviceHotPathStorage<false>>);
+static_assert(!std::is_empty_v<DeviceHotPathStorage<true>>);
+
+__host__ __device__ constexpr std::size_t AlignUp(
+        std::size_t value,
+        std::size_t alignment) {
+    return (value + alignment - 1u) & ~(alignment - 1u);
+}
+
+__host__ __device__ constexpr std::size_t HotPathRecordsOffset(
+        std::uint32_t candidateCapacity) {
+    const std::size_t blockCapacity =
+            (static_cast<std::size_t>(candidateCapacity) +
+             SimulationBlockSize - 1u) /
+            SimulationBlockSize;
+    return AlignUp(
+            blockCapacity * sizeof(double),
+            alignof(DeviceHotPathRecord));
+}
+
+__host__ __device__ constexpr std::size_t HotPathScratchBytes(
+        std::uint32_t candidateCapacity) {
+    return HotPathRecordsOffset(candidateCapacity) +
+            static_cast<std::size_t>(candidateCapacity) *
+                    sizeof(DeviceHotPathRecord);
+}
+
+void AccumulateHotPathRecord(
+        CudaSearchHotPathMetrics *result,
+        const DeviceHotPathRecord &record) {
+    if (record.physicallySimulatedCandidateCount != 0u) {
+        if (result->physicallySimulatedCandidateCount == 0u) {
+            result->firstSimulationTickMinimum =
+                    record.firstSimulationTick;
+        } else {
+            result->firstSimulationTickMinimum = std::min(
+                    result->firstSimulationTickMinimum,
+                    record.firstSimulationTick);
+        }
+        result->firstSimulationTickMaximum = std::max(
+                result->firstSimulationTickMaximum,
+                record.firstSimulationTick);
+        result->firstSimulationTickSum += record.firstSimulationTick;
+        result->physicallySimulatedCandidateCount +=
+                record.physicallySimulatedCandidateCount;
+    }
+    result->executedTickCount += record.executedTickCount;
+    result->completedTickCount += record.completedTickCount;
+    const cuda::collision::CudaHotPathCounters &physics = record.physics;
+    result->physicsSubstepCount += physics.physicsSubstepCount;
+    result->maximumSubstepsPerTick = std::max(
+            result->maximumSubstepsPerTick,
+            physics.maximumSubstepsPerTick);
+    result->collisionDetectCount += physics.collisionDetectCount;
+    result->surfaceCacheEligibleCount += physics.surfaceCacheEligibleCount;
+    result->surfaceCacheReuseCount += physics.surfaceCacheReuseCount;
+    result->surfaceCacheRefreshCount += physics.surfaceCacheRefreshCount;
+    result->surfaceCacheRefreshFailureCount +=
+            physics.surfaceCacheRefreshFailureCount;
+    result->meshCacheReuseCount += physics.meshCacheReuseCount;
+    result->accelerationCellVisitCount +=
+            physics.accelerationCellVisitCount;
+    result->accelerationSurfaceVisitCount +=
+            physics.accelerationSurfaceVisitCount;
+    result->octreeCellVisitCount += physics.octreeCellVisitCount;
+    result->cachedTriangleLeafVisitCount +=
+            physics.cachedTriangleLeafVisitCount;
+    result->triangleTestCount += physics.triangleTestCount;
+    result->triangleHitCount += physics.triangleHitCount;
+    result->rawContactCount += physics.rawContactCount;
+    result->responseSortCallCount += physics.responseSortCallCount;
+    result->responseSortItemCount += physics.responseSortItemCount;
+    result->maximumResponseSortItemCount = std::max(
+            result->maximumResponseSortItemCount,
+            physics.maximumResponseSortItemCount);
+    result->groundForcePassCount += physics.groundForcePassCount;
+    result->airForcePassCount += physics.airForcePassCount;
+    result->waterForcePassCount += physics.waterForcePassCount;
+    result->physicsCallbackDisabledForcePassCount +=
+            physics.physicsCallbackDisabledForcePassCount;
+    result->zeroDynamicsForcePassCount +=
+            physics.zeroDynamicsForcePassCount;
+}
+
 template<typename T>
 class DeviceAllocation {
 public:
@@ -3096,7 +3196,8 @@ template <
         bool SimulateStunts,
         bool SteadyTimeline,
         CudaHandlingSpecialization Handling,
-        std::uint32_t MinimumBlocksPerSm>
+        std::uint32_t MinimumBlocksPerSm,
+        bool CollectHotPathMetrics = false>
 __global__ __launch_bounds__(
         SimulationBlockSize,
         MinimumBlocksPerSm) void SimulateSearchCandidatesKernel(
@@ -3191,6 +3292,13 @@ __global__ __launch_bounds__(
     if (!activeCandidates[slot]) {
         return;
     }
+    DeviceHotPathStorage<CollectHotPathMetrics> hotPathStorage;
+    cuda::collision::CudaHotPathCounters *hotPathCounters = nullptr;
+    if constexpr (CollectHotPathMetrics) {
+        hotPathStorage.record.physicallySimulatedCandidateCount = 1u;
+        hotPathStorage.record.firstSimulationTick = firstSimulationTick;
+        hotPathCounters = &hotPathStorage.record.physics;
+    }
     const std::uint64_t candidateId = firstCandidateId + slot;
     const CudaSearchInputEvent *events =
             candidateEvents == nullptr
@@ -3218,6 +3326,13 @@ __global__ __launch_bounds__(
         branchState->schemaVersion != CudaCandidateState::SchemaVersion) {
         statuses[slot] =
                 DeviceCandidateStatus::UnsupportedPhysicsTransition;
+        if constexpr (CollectHotPathMetrics) {
+            auto *records = reinterpret_cast<DeviceHotPathRecord *>(
+                    reinterpret_cast<std::byte *>(
+                            blockClosestTargetDistanceSquared) +
+                    HotPathRecordsOffset(scratchStride));
+            records[workSlot] = hotPathStorage.record;
+        }
         return;
     }
 
@@ -3360,6 +3475,9 @@ __global__ __launch_bounds__(
                 }
             }
         }
+        if constexpr (CollectHotPathMetrics) {
+            ++hotPathStorage.record.executedTickCount;
+        }
         const cuda::physics::Status physicsStatus =
                 cuda::physics::Step<
                         false,
@@ -3371,18 +3489,22 @@ __global__ __launch_bounds__(
                         (MinimumBlocksPerSm !=
                          ThroughputKernelMinimumBlocksPerSm),
                         SimulateStunts,
-                        Handling>(
+                        Handling,
+                        CollectHotPathMetrics>(
                         static_cast<const CudaPackedSceneHeader *>(
                                 sceneData),
                         static_cast<const
                                 CudaPackedStaticConfigurationHeader *>(
                                 configurationData),
-                        state, candidateScratch);
+                        state, candidateScratch, hotPathCounters);
         if (physicsStatus != cuda::physics::Status::Success) {
             statuses[slot] =
                     DeviceCandidateStatus::UnsupportedPhysicsTransition;
             candidateBestSamples[slot + 1u] = localBest;
             goto finalize;
+        }
+        if constexpr (CollectHotPathMetrics) {
+            ++hotPathStorage.record.completedTickCount;
         }
         if constexpr (SimulateStunts) {
             const cuda::stunts::Status stuntStatus =
@@ -3492,6 +3614,13 @@ __global__ __launch_bounds__(
     }
 finalize:
     candidateBestSamples[slot + 1u] = localBest;
+    if constexpr (CollectHotPathMetrics) {
+        auto *records = reinterpret_cast<DeviceHotPathRecord *>(
+                reinterpret_cast<std::byte *>(
+                        blockClosestTargetDistanceSquared) +
+                HotPathRecordsOffset(scratchStride));
+        records[workSlot] = hotPathStorage.record;
+    }
     if (closestTargetDistanceSquared !=
         cuda_search_progress_detail::
                 InvalidClosestTargetDistanceSquared) {
@@ -4294,12 +4423,28 @@ struct CudaSearchExecutor::Impl {
     DeviceAllocation<std::uint32_t> globalBestMutationCount;
     DeviceAllocation<DeviceBatchSummary> summary;
     DeviceAllocation<double> closestTargetDistanceSquaredByBlock;
+    DeviceAllocation<std::byte> hotPathScratch;
     CudaSearchBest hostBestCache;
 
     bool DeduplicationStorageEligible(
             std::uint32_t candidateCapacity) const noexcept {
         return prefixReusePlan.DeduplicationStorageEligible(
                 candidateCapacity);
+    }
+
+    double *ClosestTargetDistanceScratch() const {
+        return configuration.collectHotPathMetrics
+                ? reinterpret_cast<double *>(hotPathScratch.Get())
+                : closestTargetDistanceSquaredByBlock.Get();
+    }
+
+    DeviceHotPathRecord *HotPathRecords() const {
+        if (!configuration.collectHotPathMetrics) {
+            return nullptr;
+        }
+        return reinterpret_cast<DeviceHotPathRecord *>(
+                hotPathScratch.Get() +
+                HotPathRecordsOffset(configuration.maximumBatchSize));
     }
 
     void UpdateResidentBytes() {
@@ -4366,6 +4511,7 @@ struct CudaSearchExecutor::Impl {
         ADD_BYTES(globalBestMutationCount);
         ADD_BYTES(summary);
         ADD_BYTES(closestTargetDistanceSquaredByBlock);
+        ADD_BYTES(hotPathScratch);
 #undef ADD_BYTES
         winnerSelectionBytes =
                 candidateBestSamples.Bytes() +
@@ -4527,7 +4673,8 @@ struct CudaSearchExecutor::Impl {
 
     template <
             std::uint32_t MinimumBlocksPerSm,
-            CudaHandlingSpecialization Handling>
+            CudaHandlingSpecialization Handling,
+            bool CollectHotPathMetrics = false>
     const void *SimulationKernel() const {
 #if defined(FOREVERVALIDATOR_CUDA_RESEARCH_WATER_ONLY)
         return reinterpret_cast<const void *>(
@@ -4536,7 +4683,8 @@ struct CudaSearchExecutor::Impl {
                         false,
                         true,
                         Handling,
-                        MinimumBlocksPerSm>);
+                        MinimumBlocksPerSm,
+                        CollectHotPathMetrics>);
 #else
         if (configuration.branchState.stuntsEnabled &&
             configuration.evaluator.kind !=
@@ -4547,7 +4695,8 @@ struct CudaSearchExecutor::Impl {
                             true,
                             false,
                             Handling,
-                            MinimumBlocksPerSm>);
+                            MinimumBlocksPerSm,
+                            CollectHotPathMetrics>);
         }
         return steadyTimeline
                 ? reinterpret_cast<const void *>(
@@ -4556,19 +4705,31 @@ struct CudaSearchExecutor::Impl {
                                   false,
                                   true,
                                   Handling,
-                                  MinimumBlocksPerSm>)
+                                  MinimumBlocksPerSm,
+                                  CollectHotPathMetrics>)
                 : reinterpret_cast<const void *>(
                           SimulateSearchCandidatesKernel<
                                   CudaCandidatePhysicsState,
                                   false,
                                   false,
                                   Handling,
-                                  MinimumBlocksPerSm>);
+                                  MinimumBlocksPerSm,
+                                  CollectHotPathMetrics>);
 #endif
     }
 
-    template <std::uint32_t MinimumBlocksPerSm>
+    template <
+            std::uint32_t MinimumBlocksPerSm,
+            bool CollectHotPathMetrics = false>
     const void *SelectedSimulationKernel() const {
+        if constexpr (CollectHotPathMetrics) {
+            // Profiling is intentionally one unambiguous generic AOT kernel.
+            // It never inherits session or handling specialization identity.
+            return SimulationKernel<
+                    MinimumBlocksPerSm,
+                    CudaHandlingSpecialization::Generic,
+                    true>();
+        }
 #if defined(FOREVERVALIDATOR_CUDA_RESEARCH_WATER_ONLY)
         return SimulationKernel<
                 MinimumBlocksPerSm,
@@ -4660,7 +4821,8 @@ struct CudaSearchExecutor::Impl {
         multiprocessorCount =
                 static_cast<std::uint32_t>(
                         properties.multiProcessorCount);
-        if (specializedModule && specializedModule->Ready()) {
+        if (!configuration.collectHotPathMetrics &&
+            specializedModule && specializedModule->Ready()) {
             const auto load =
                     [&](std::uint32_t minimumBlocks,
                         SimulationKernelMetrics *metrics) {
@@ -4691,6 +4853,31 @@ struct CudaSearchExecutor::Impl {
             }
             return true;
         }
+#if !defined(FOREVERVALIDATOR_CUDA_RESEARCH_SESSION_LTO)
+        if (configuration.collectHotPathMetrics) {
+            return LoadSimulationKernelMetrics(
+                           SelectedSimulationKernel<
+                                   ThroughputKernelMinimumBlocksPerSm,
+                                   true>(),
+                           properties,
+                           &throughputKernelMetrics,
+                           diagnostic) &&
+                   LoadSimulationKernelMetrics(
+                           SelectedSimulationKernel<
+                                   TailKernelMinimumBlocksPerSm,
+                                   true>(),
+                           properties,
+                           &tailKernelMetrics,
+                           diagnostic) &&
+                   LoadSimulationKernelMetrics(
+                           SelectedSimulationKernel<
+                                   DenseTailKernelMinimumBlocksPerSm,
+                                   true>(),
+                           properties,
+                           &denseTailKernelMetrics,
+                           diagnostic);
+        }
+#endif
         return LoadSimulationKernelMetrics(
                        SelectedSimulationKernel<
                                ThroughputKernelMinimumBlocksPerSm>(),
@@ -4864,6 +5051,7 @@ struct CudaSearchExecutor::Impl {
         DeviceAllocation<std::uint32_t> nextMeshCellScratch;
         DeviceAllocation<std::uint16_t> nextResponseOrderScratch;
         DeviceAllocation<double> nextClosestTargetDistanceSquaredByBlock;
+        DeviceAllocation<std::byte> nextHotPathScratch;
         if (!nextCandidateBestSamples.Allocate(winnerSlots) ||
             !nextFinishRefinements.Allocate(
                     configuration.evaluator.kind ==
@@ -4930,7 +5118,11 @@ struct CudaSearchExecutor::Impl {
             !nextMeshCellScratch.Allocate(meshCellSlots) ||
             !nextResponseOrderScratch.Allocate(collisionSlots) ||
             !nextClosestTargetDistanceSquaredByBlock.Allocate(
-                    summaryBlockCount)) {
+                    summaryBlockCount) ||
+            !nextHotPathScratch.Allocate(
+                    configuration.collectHotPathMetrics
+                            ? HotPathScratchBytes(candidateCount)
+                            : 0u)) {
             static_cast<void>(cudaGetLastError());
             if (diagnostic != nullptr) {
                 *diagnostic =
@@ -5056,6 +5248,7 @@ struct CudaSearchExecutor::Impl {
                 std::move(nextResponseOrderScratch);
         closestTargetDistanceSquaredByBlock =
                 std::move(nextClosestTargetDistanceSquaredByBlock);
+        hotPathScratch = std::move(nextHotPathScratch);
         configuration.maximumBatchSize = candidateCount;
         UpdateResidentBytes();
         if (diagnostic != nullptr) {
@@ -5064,7 +5257,7 @@ struct CudaSearchExecutor::Impl {
         return true;
     }
 
-    CudaSearchBatchExecution Execute(
+    CudaSearchBatchExecution ExecuteImpl(
             std::uint64_t firstCandidateId,
             std::uint32_t candidateCount,
             bool baseline,
@@ -5182,7 +5375,7 @@ struct CudaSearchExecutor::Impl {
                 (candidateCount - 1u) / SimulationBlockSize + 1u;
         InitializeSearchBatchSummaryKernel<<<1u, BatchSummaryBlockSize>>>(
                 summary.Get(),
-                closestTargetDistanceSquaredByBlock.Get(),
+                ClosestTargetDistanceScratch(),
                 simulationBlocks);
         SeedCandidateBestSamplesKernel<<<1u, 1u>>>(
                 candidateBestSamples.Get(), globalBestSample.Get());
@@ -5289,6 +5482,7 @@ struct CudaSearchExecutor::Impl {
                 static_cast<std::uint64_t>(multiprocessorCount) *
                 SimulationBlockSize * 4u;
         if (!baseline &&
+            !configuration.collectHotPathMetrics &&
             configuration.
                     simulationMinimumBlocksPerMultiprocessorForTesting ==
                     0u &&
@@ -5618,7 +5812,8 @@ struct CudaSearchExecutor::Impl {
                 std::chrono::duration<double>(
                         std::chrono::system_clock::now().time_since_epoch())
                         .count();
-        if (specializedModule) {
+        if (specializedModule &&
+            !configuration.collectHotPathMetrics) {
             const CUresult simulationLaunch = LaunchDriverKernel(
                     specializedModule->Kernel(
                             selectedMinimumBlocks),
@@ -5652,7 +5847,7 @@ struct CudaSearchExecutor::Impl {
                     static_cast<std::uint32_t>(
                             configuration.maximumEventCount),
                     candidateBestSamples.Get(),
-                    closestTargetDistanceSquaredByBlock.Get(),
+                    ClosestTargetDistanceScratch(),
                     finishCheckpointStates.Get(),
                     finishCheckpointTicks.Get(),
                     baselineInputs.Get(),
@@ -5694,6 +5889,7 @@ struct CudaSearchExecutor::Impl {
             }
         } else {
             const void *simulationKernel = nullptr;
+#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_SESSION_LTO)
             if (selectedMinimumBlocks ==
                 DenseTailKernelMinimumBlocksPerSm) {
                 simulationKernel = SelectedSimulationKernel<
@@ -5706,6 +5902,32 @@ struct CudaSearchExecutor::Impl {
                 simulationKernel = SelectedSimulationKernel<
                         ThroughputKernelMinimumBlocksPerSm>();
             }
+#else
+            if (selectedMinimumBlocks ==
+                DenseTailKernelMinimumBlocksPerSm) {
+                simulationKernel = configuration.collectHotPathMetrics
+                        ? SelectedSimulationKernel<
+                                  DenseTailKernelMinimumBlocksPerSm,
+                                  true>()
+                        : SelectedSimulationKernel<
+                                  DenseTailKernelMinimumBlocksPerSm>();
+            } else if (selectedMinimumBlocks ==
+                       TailKernelMinimumBlocksPerSm) {
+                simulationKernel = configuration.collectHotPathMetrics
+                        ? SelectedSimulationKernel<
+                                  TailKernelMinimumBlocksPerSm,
+                                  true>()
+                        : SelectedSimulationKernel<
+                                  TailKernelMinimumBlocksPerSm>();
+            } else {
+                simulationKernel = configuration.collectHotPathMetrics
+                        ? SelectedSimulationKernel<
+                                  ThroughputKernelMinimumBlocksPerSm,
+                                  true>()
+                        : SelectedSimulationKernel<
+                                  ThroughputKernelMinimumBlocksPerSm>();
+            }
+#endif
             const cudaError_t simulationLaunch = LaunchRuntimeKernel(
                     simulationKernel,
                     simulationBlocks,
@@ -5738,7 +5960,7 @@ struct CudaSearchExecutor::Impl {
                     static_cast<std::uint32_t>(
                             configuration.maximumEventCount),
                     candidateBestSamples.Get(),
-                    closestTargetDistanceSquaredByBlock.Get(),
+                    ClosestTargetDistanceScratch(),
                     finishCheckpointStates.Get(),
                     finishCheckpointTicks.Get(),
                     baselineInputs.Get(),
@@ -5774,6 +5996,9 @@ struct CudaSearchExecutor::Impl {
                         "launching CUDA simulation kernel",
                         simulationLaunch);
                 return result;
+            }
+            if (configuration.collectHotPathMetrics) {
+                result.hotPath.forcedRuntimeGenericKernel = true;
             }
         }
         if (deduplicateCandidateInputs) {
@@ -5921,7 +6146,7 @@ struct CudaSearchExecutor::Impl {
                         : nullptr,
                 deduplicateCandidateInputs,
                 candidateCount, evaluationTickCount,
-                closestTargetDistanceSquaredByBlock.Get(), simulationBlocks,
+                ClosestTargetDistanceScratch(), simulationBlocks,
                 summary.Get());
         FinalizeSearchBatchKernel<<<1u, 1u>>>(
                 reducedBest.Get(),
@@ -6007,7 +6232,8 @@ struct CudaSearchExecutor::Impl {
                 mutationsGenerated.Get(),
                 simulationFinished.Get());
         result.simulationKernelMilliseconds = milliseconds;
-        if (simulationTuning != nullptr && !cancelled &&
+        if (!configuration.collectHotPathMetrics &&
+            simulationTuning != nullptr && !cancelled &&
             milliseconds > 0.0f) {
             const std::size_t tuningIndex =
                     selectedMinimumBlocks ==
@@ -6245,6 +6471,76 @@ struct CudaSearchExecutor::Impl {
                     std::string("CUDA search batch status: ") +
                     CudaSearchStatusName(result.status);
         }
+        return result;
+    }
+
+    CudaSearchBatchExecution Execute(
+            std::uint64_t firstCandidateId,
+            std::uint32_t candidateCount,
+            bool baseline,
+            const std::function<bool()> &cancellationRequested) noexcept {
+        if (!configuration.collectHotPathMetrics) {
+            return ExecuteImpl(
+                    firstCandidateId, candidateCount, baseline,
+                    cancellationRequested);
+        }
+
+        const std::uint32_t recordCount = std::min(
+                candidateCount, configuration.maximumBatchSize);
+        const std::size_t hotPathBytes =
+                static_cast<std::size_t>(recordCount) *
+                sizeof(DeviceHotPathRecord);
+        cudaError_t error = cudaSuccess;
+        if (hotPathBytes != 0u) {
+            error = cudaMemset(
+                    HotPathRecords(), 0, hotPathBytes);
+        }
+        if (error != cudaSuccess) {
+            CudaSearchBatchExecution result;
+            result.firstCandidateId = firstCandidateId;
+            result.candidateCount = candidateCount;
+            result.residentDeviceBytes = residentBytes;
+            result.status = CudaSearchStatus::DeviceFailure;
+            result.diagnostic = CudaFailure(
+                    "clearing CUDA hot-path records", error);
+            return result;
+        }
+
+        CudaSearchBatchExecution result = ExecuteImpl(
+                firstCandidateId, candidateCount, baseline,
+                cancellationRequested);
+        if (hotPathBytes == 0u) {
+            result.hotPath.collected = true;
+            result.hotPath.complete =
+                    result.status == CudaSearchStatus::Success;
+            return result;
+        }
+
+        std::unique_ptr<DeviceHotPathRecord[]> hostRecords(
+                new (std::nothrow) DeviceHotPathRecord[recordCount]);
+        if (!hostRecords) {
+            result.status = CudaSearchStatus::DeviceFailure;
+            result.diagnostic =
+                    "allocating CUDA hot-path host records failed";
+            return result;
+        }
+        error = cudaMemcpy(
+                hostRecords.get(), HotPathRecords(), hotPathBytes,
+                cudaMemcpyDeviceToHost);
+        if (error != cudaSuccess) {
+            result.status = CudaSearchStatus::DeviceFailure;
+            result.diagnostic = CudaFailure(
+                    "copying CUDA hot-path records", error);
+            return result;
+        }
+        result.deviceToHostBytes += hotPathBytes;
+        result.hotPath.collected = true;
+        for (std::uint32_t index = 0u; index < recordCount; ++index) {
+            AccumulateHotPathRecord(
+                    &result.hotPath, hostRecords[index]);
+        }
+        result.hotPath.complete =
+                result.status == CudaSearchStatus::Success;
         return result;
     }
 };
@@ -6723,8 +7019,10 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
 
         auto impl = std::make_unique<Impl>();
         impl->configuration = preparedConfiguration;
-        impl->specializedModule =
-                preparedConfiguration.sessionSpecialization;
+        if (!preparedConfiguration.collectHotPathMetrics) {
+            impl->specializedModule =
+                    preparedConfiguration.sessionSpecialization;
+        }
         switch (packedConfiguration.tuning.handlingModel) {
         case static_cast<std::uint32_t>(
                 CSceneVehicleCarHandlingModel_Standard):
@@ -7145,6 +7443,11 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
             !impl->globalBestMutationCount.Allocate(1u) ||
             !impl->closestTargetDistanceSquaredByBlock.Allocate(
                     summaryBlockCount) ||
+            !impl->hotPathScratch.Allocate(
+                    preparedConfiguration.collectHotPathMetrics
+                            ? HotPathScratchBytes(
+                                      preparedConfiguration.maximumBatchSize)
+                            : 0u) ||
             !impl->summary.Allocate(1u)) {
             if (diagnostic != nullptr) {
                 *diagnostic = "CUDA resident search allocation failed";

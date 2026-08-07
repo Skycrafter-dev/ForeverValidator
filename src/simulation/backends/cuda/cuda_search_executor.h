@@ -348,6 +348,7 @@ struct CudaSearchBest {
 struct CudaSearchHotPathMetrics {
     bool collected = false;
     bool complete = false;
+    bool forcedRuntimeGenericKernel = false;
     std::uint64_t physicallySimulatedCandidateCount = 0u;
     std::uint64_t firstSimulationTickSum = 0u;
     std::uint64_t firstSimulationTickMinimum = 0u;
@@ -360,6 +361,7 @@ struct CudaSearchHotPathMetrics {
     std::uint64_t surfaceCacheEligibleCount = 0u;
     std::uint64_t surfaceCacheReuseCount = 0u;
     std::uint64_t surfaceCacheRefreshCount = 0u;
+    // Counts failed surface-hit cache refreshes, not mesh-leaf cache builds.
     std::uint64_t surfaceCacheRefreshFailureCount = 0u;
     std::uint64_t meshCacheReuseCount = 0u;
     std::uint64_t accelerationCellVisitCount = 0u;
