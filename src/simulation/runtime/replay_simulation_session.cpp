@@ -1670,6 +1670,22 @@ bool ReplaySimulationSession::PrepareCudaSearchSpecialization(
         }
         return false;
     }
+    const forevervalidator::CudaBackendDiagnostics cudaDiagnostics =
+            forevervalidator::QueryCudaBackendDiagnostics();
+    if (cudaDiagnostics.IsReady() &&
+        !forevervalidator::simulation::
+                IsCudaSessionSpecializationSupported(
+                        cudaDiagnostics.computeCapabilityMajor,
+                        cudaDiagnostics.computeCapabilityMinor)) {
+        impl->cudaSearchSpecializationDiagnostic =
+                "Optional CUDA session specialization requires compute "
+                "capability 7.5 or newer; the regular precompiled CUDA "
+                "search kernel remains available";
+        if (diagnostic != nullptr) {
+            *diagnostic = impl->cudaSearchSpecializationDiagnostic;
+        }
+        return false;
+    }
     if (impl->cudaSearchSpecialization &&
         impl->cudaSearchSpecialization->Ready()) {
         if (diagnostic != nullptr) {

@@ -68,11 +68,11 @@ CudaBackendDiagnostics QueryCompiledCudaRuntimeDiagnostics() noexcept {
     result.totalGlobalMemoryBytes =
             static_cast<std::uint64_t>(properties.totalGlobalMem);
     result.deviceName = properties.name;
-    if (properties.major < 7 ||
-        (properties.major == 7 && properties.minor < 5)) {
+    if (!IsCudaComputeCapabilitySupported(properties.major,
+                                          properties.minor)) {
         result.status = CudaBackendStatus::UnsupportedDevice;
         result.diagnostic =
-                "CUDA backend requires compute capability 7.5 or newer";
+                "CUDA backend requires compute capability 6.1 or newer";
         return result;
     }
     error = cudaFree(nullptr);
@@ -82,14 +82,21 @@ CudaBackendDiagnostics QueryCompiledCudaRuntimeDiagnostics() noexcept {
         return result;
     }
     result.status = CudaBackendStatus::Ready;
-    char buffer[384];
+    char buffer[512];
+    const char *const specializationStatus =
+            IsCudaSessionSpecializationSupported(properties.major,
+                                                 properties.minor)
+            ? ""
+            : "; optional per-map fast kernel disabled on this device; "
+              "using the generic CUDA search kernel";
     std::snprintf(
             buffer, sizeof(buffer),
             "CUDA device %d ready: %s, compute capability %d.%d, "
-            "driver %d, runtime %d, %llu bytes global memory",
+            "driver %d, runtime %d, %llu bytes global memory%s",
             result.selectedDevice, properties.name, properties.major,
             properties.minor, result.driverVersion, result.runtimeVersion,
-            static_cast<unsigned long long>(result.totalGlobalMemoryBytes));
+            static_cast<unsigned long long>(result.totalGlobalMemoryBytes),
+            specializationStatus);
     result.diagnostic = buffer;
     return result;
 }

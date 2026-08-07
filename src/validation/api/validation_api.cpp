@@ -22,6 +22,7 @@
 #include "simulation/runtime/replay_deterministic_execution.h"
 #include "simulation/runtime/replay_simulation_definition.h"
 #include "simulation/runtime/replay_simulation_session.h"
+#include "simulation/backends/cuda/cuda_backend.h"
 #include "simulation/backends/simulation_backend.h"
 #include "simulation/control/replay_control_plan.h"
 #include "validation/evaluation/replay_validation_session.h"
@@ -1121,6 +1122,15 @@ namespace {
 
 constexpr std::uint32_t SandboxInputTimeBaseMs = 100000u;
 constexpr std::uint32_t SandboxRuntimeCloneSchema = 1u;
+
+bool CurrentCudaDeviceSupportsSessionSpecialization() noexcept {
+    const CudaBackendDiagnostics diagnostics =
+            QueryCudaBackendDiagnostics();
+    return diagnostics.IsReady() &&
+           simulation::IsCudaSessionSpecializationSupported(
+                   diagnostics.computeCapabilityMajor,
+                   diagnostics.computeCapabilityMinor);
+}
 
 PhysicsSandboxError SandboxError(
         PhysicsSandboxErrorCode code,
@@ -2292,7 +2302,8 @@ PhysicsSandboxResult<PhysicsSandboxStateView> PhysicsSandbox::LoadScenarioFile(
                 impl_->Restart(0u);
         if (restarted &&
             impl_->options.backend == SimulationBackend::Cuda &&
-            impl_->options.prepareCudaSearchSpecialization) {
+            impl_->options.prepareCudaSearchSpecialization &&
+            CurrentCudaDeviceSupportsSessionSpecialization()) {
             static_cast<void>(
                     impl_->session->PrepareCudaSearchSpecialization(
                             nullptr));
@@ -3474,7 +3485,8 @@ CreatePhysicsSandboxCudaSearchSession(
                     configuration.incumbent->preciseFinish;
             internal.incumbent = incumbent;
         }
-        if (configuration.useSessionSpecialization) {
+        if (configuration.useSessionSpecialization &&
+            CurrentCudaDeviceSupportsSessionSpecialization()) {
             internal.sessionSpecialization =
                     source.session->CudaSearchSpecialization();
             if (!internal.sessionSpecialization) {
