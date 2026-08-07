@@ -24,6 +24,7 @@ using forevervalidator::simulation::cuda_search_progress_detail::
 using forevervalidator::simulation::cuda_search_progress_detail::
         UpdateClosestTargetDistanceSquared;
 using forevervalidator::simulation::CudaSearchEvaluatorKind;
+using forevervalidator::simulation::CudaSearchConditionIterationValue;
 using forevervalidator::simulation::CudaSearchMaximumBaselinePrefixTickCount;
 using forevervalidator::simulation::CudaSearchModifierConfiguration;
 using forevervalidator::simulation::CudaSearchModifierKind;
@@ -379,6 +380,15 @@ bool CheckPrefixReusePlanning() {
             !IsCudaSearchSimulationMinimumBlocksValid(24u);
 }
 
+bool CheckIterationConditionBoundary() {
+    const double maximumMutationIteration =
+            CudaSearchConditionIterationValue(false, UINT64_MAX);
+    return CudaSearchConditionIterationValue(true, UINT64_MAX) == 0.0 &&
+            CudaSearchConditionIterationValue(false, 0u) == 1.0 &&
+            maximumMutationIteration == 18446744073709551616.0 &&
+            maximumMutationIteration > 0.0;
+}
+
 }  // namespace
 
 int main() {
@@ -388,7 +398,8 @@ int main() {
         !CheckLargeDimensionsAndDeterminism() ||
         !CheckTargetProgressSemantics() ||
         !CheckBaselinePrefixInheritance() ||
-        !CheckPrefixReusePlanning()) {
+        !CheckPrefixReusePlanning() ||
+        !CheckIterationConditionBoundary()) {
         return 1;
     }
     return 0;

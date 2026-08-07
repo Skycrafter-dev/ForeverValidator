@@ -1909,7 +1909,7 @@ __device__ DeviceConditionValue ConditionAngles(
 __device__ DeviceConditionValue ConditionSource(
         CudaSearchConditionValue source,
         const CudaCandidatePhysicsState &state,
-        std::uint64_t iterationCount,
+        double iterationCount,
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds,
         double currentTimeSeconds) {
@@ -1960,7 +1960,7 @@ __device__ DeviceConditionValue ConditionSource(
         return {state.vehicle.turbo.type == CSceneVehicleCar::ETurboType_Roulette
                 ? static_cast<double>(state.vehicle.turbo.type2Phase) + 1.0
                 : state.vehicle.turbo.impulseScale};
-    case CudaSearchConditionValue::Iterations: return {static_cast<double>(iterationCount)};
+    case CudaSearchConditionValue::Iterations: return {iterationCount};
     case CudaSearchConditionValue::LastImprovementTime: return {lastImprovementTimeSeconds};
     case CudaSearchConditionValue::LastRestartTime: return {lastRestartTimeSeconds};
     case CudaSearchConditionValue::CurrentTime: return {currentTimeSeconds};
@@ -1997,7 +1997,7 @@ __device__ __noinline__ bool EvaluateCondition(
         const CudaSearchConditionInstruction *instructions,
         std::uint32_t instructionCount,
         const CudaCandidatePhysicsState &state,
-        std::uint64_t iterationCount,
+        double iterationCount,
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds,
         double currentTimeSeconds) {
@@ -3425,7 +3425,8 @@ __global__ __launch_bounds__(
         if (conditionInstructionCount != 0u &&
             !EvaluateCondition(
                     condition, conditionInstructionCount, state,
-                    baseline ? 0u : candidateId + 1u,
+                    CudaSearchConditionIterationValue(
+                            baseline, candidateId),
                     lastImprovementTimeSeconds,
                     lastRestartTimeSeconds, currentTimeSeconds)) {
             ++evaluationIndex;

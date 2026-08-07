@@ -297,6 +297,24 @@ inline bool IsCudaSearchSimulationMinimumBlocksValid(
             minimumBlocks == 12u || minimumBlocks == 8u;
 }
 
+#if defined(__CUDACC__)
+#define FOREVERVALIDATOR_CUDA_SEARCH_HD __host__ __device__
+#else
+#define FOREVERVALIDATOR_CUDA_SEARCH_HD
+#endif
+
+// Conditions expose one-based logical mutation iterations and reserve zero
+// for the baseline. Convert before adding so UINT64_MAX remains positive and
+// represents 2^64 in double precision instead of wrapping to zero.
+FOREVERVALIDATOR_CUDA_SEARCH_HD inline double
+CudaSearchConditionIterationValue(
+        bool baseline,
+        std::uint64_t candidateId) noexcept {
+    return baseline ? 0.0 : static_cast<double>(candidateId) + 1.0;
+}
+
+#undef FOREVERVALIDATOR_CUDA_SEARCH_HD
+
 enum class CudaSearchStatus : std::uint32_t {
     Success,
     InvalidArgument,
