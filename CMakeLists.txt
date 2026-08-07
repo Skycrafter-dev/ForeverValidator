@@ -629,14 +629,36 @@ if(FOREVERVALIDATOR_BUILD_TESTS)
                 NAMES cuobjdump
                 HINTS "${CUDAToolkit_BIN_DIR}"
                 REQUIRED)
+            add_executable(forevervalidator-cuda-default-architecture-probe
+                tests/cuda_default_architecture_probe.cpp)
+            target_include_directories(
+                forevervalidator-cuda-default-architecture-probe PRIVATE
+                "${CMAKE_CURRENT_SOURCE_DIR}/src")
+            target_link_libraries(
+                forevervalidator-cuda-default-architecture-probe PRIVATE
+                forevervalidator_core)
+            forevervalidator_configure_target(
+                forevervalidator-cuda-default-architecture-probe)
+            add_executable(forevervalidator-cuobjdump-failure-probe
+                tests/cuobjdump_failure_probe.cpp)
+            forevervalidator_configure_target(
+                forevervalidator-cuobjdump-failure-probe)
             add_test(NAME forevervalidator-cuda-default-sm61-artifact
                 COMMAND "${CMAKE_COMMAND}"
                     "-DCUOBJDUMP=${FOREVERVALIDATOR_CUOBJDUMP_EXECUTABLE}"
-                    "-DARTIFACT=$<TARGET_FILE:forevervalidator_core>"
-                    "-DMEMBER=cuda_search_executor"
+                    "-DARTIFACT=$<TARGET_FILE:forevervalidator-cuda-default-architecture-probe>"
+                    "-DMEMBER=forevervalidator-cuda-default-architecture-probe"
                     "-DARCHITECTURE=sm_61"
                     -P
                     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_cuda_architecture.cmake")
+            add_test(NAME forevervalidator-cuda-artifact-verifier-failure
+                COMMAND "${CMAKE_COMMAND}"
+                    "-DCMAKE_COMMAND_PATH=${CMAKE_COMMAND}"
+                    "-DVERIFIER=${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_cuda_architecture.cmake"
+                    "-DCUOBJDUMP=$<TARGET_FILE:forevervalidator-cuobjdump-failure-probe>"
+                    "-DARTIFACT=$<TARGET_FILE:forevervalidator-cuda-default-architecture-probe>"
+                    -P
+                    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/assert_cuda_architecture_verifier_failure.cmake")
         endif()
 
         add_executable(forevervalidator-cuda-arithmetic-tests

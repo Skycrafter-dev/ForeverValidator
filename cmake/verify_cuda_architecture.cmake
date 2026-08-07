@@ -12,6 +12,12 @@ execute_process(
 set(cuobjdump_output "${cuobjdump_stdout}\n${cuobjdump_stderr}")
 string(REPLACE "\r\n" "\n" cuobjdump_output "${cuobjdump_output}")
 
+if(NOT cuobjdump_result EQUAL 0)
+    message(FATAL_ERROR
+        "cuobjdump failed with exit ${cuobjdump_result} while inspecting "
+        "${ARTIFACT}:\n${cuobjdump_output}")
+endif()
+
 string(FIND "${cuobjdump_output}" "${MEMBER}" member_offset)
 if(member_offset EQUAL -1)
     message(FATAL_ERROR
