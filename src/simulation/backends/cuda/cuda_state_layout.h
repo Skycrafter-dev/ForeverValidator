@@ -267,6 +267,7 @@ struct CudaCandidateState : CudaCandidatePhysicsState {
 
 static_assert(std::is_standard_layout_v<CudaCandidatePhysicsState>);
 static_assert(std::is_trivially_copyable_v<CudaCandidatePhysicsState>);
+static_assert(std::is_trivially_copyable_v<CudaRaceState>);
 static_assert(sizeof(CudaCandidatePhysicsState) < 8u * 1024u);
 static_assert(std::is_trivially_copyable_v<CudaCandidateState>);
 static_assert(sizeof(CudaCandidateState) < 192u * 1024u);

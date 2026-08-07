@@ -1,6 +1,7 @@
 #include "simulation/backends/cuda/cuda_state_layout.h"
 #include "simulation/runtime/replay_simulation_session.h"
 
+#include <cstring>
 #include <iostream>
 
 namespace {
@@ -56,9 +57,26 @@ ReplaySimulationInstanceClone BuildState() {
 
 int main() {
     using forevervalidator::simulation::CudaCandidateState;
+    using forevervalidator::simulation::CudaRaceState;
     using forevervalidator::simulation::CudaStateConversionResult;
     using forevervalidator::simulation::DecodeCudaCandidateState;
+    using forevervalidator::simulation::EncodeCudaRaceState;
     ReplaySimulationInstanceClone original = BuildState();
+    CudaRaceState encodedRaceA;
+    CudaRaceState encodedRaceB;
+    std::memset(&encodedRaceA, 0x5a, sizeof(encodedRaceA));
+    std::memset(&encodedRaceB, 0xa5, sizeof(encodedRaceB));
+    if (EncodeCudaRaceState(original.race, &encodedRaceA) !=
+                CudaStateConversionResult::Success ||
+        EncodeCudaRaceState(original.race, &encodedRaceB) !=
+                CudaStateConversionResult::Success ||
+        std::memcmp(
+                &encodedRaceA,
+                &encodedRaceB,
+                sizeof(encodedRaceA)) != 0) {
+        std::cerr << "race encode left destination-dependent bytes\n";
+        return 1;
+    }
     CudaCandidateState encoded;
     const CudaStateConversionResult encode =
             forevervalidator::simulation::EncodeCudaCandidateState(

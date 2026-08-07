@@ -1,6 +1,7 @@
 #include "simulation/backends/cuda/cuda_state_layout.h"
 
 #include <algorithm>
+#include <cstring>
 #include <new>
 
 #include "simulation/runtime/replay_simulation_session.h"
@@ -508,7 +509,11 @@ CudaStateConversionResult EncodeCudaRaceState(
     if (destination == nullptr) {
         return CudaStateConversionResult::InvalidArgument;
     }
-    *destination = CudaRaceState{};
+    // Value assignment initializes members but is not required to overwrite
+    // padding. Clear the complete trivially-copyable transport object first
+    // so raw state copies and fingerprints are deterministic.
+    std::memset(destination, 0, sizeof(*destination));
+    ::new (static_cast<void *>(destination)) CudaRaceState{};
     return EncodeRace(
             source, *destination, destination->stunts,
             destination->stuntEvents);
