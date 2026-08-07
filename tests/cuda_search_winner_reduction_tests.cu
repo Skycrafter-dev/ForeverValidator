@@ -1,4 +1,5 @@
 #include "simulation/backends/cuda/cuda_search_winner_selection.cuh"
+#include "simulation/backends/cuda/cuda_search_progress.cuh"
 
 #include <cstdint>
 #include <iostream>
@@ -12,6 +13,14 @@ using forevervalidator::simulation::cuda_search_detail::BetterSample;
 using forevervalidator::simulation::cuda_search_detail::DeviceSample;
 using forevervalidator::simulation::cuda_search_detail::InvalidCandidateSlot;
 using forevervalidator::simulation::cuda_search_detail::StrictlyBetter;
+using forevervalidator::simulation::cuda_search_progress_detail::
+        InvalidClosestTargetDistanceSquared;
+using forevervalidator::simulation::cuda_search_progress_detail::
+        IsQualifyingSearchCandidate;
+using forevervalidator::simulation::cuda_search_progress_detail::
+        SquaredDistanceToTargetVolume;
+using forevervalidator::simulation::cuda_search_progress_detail::
+        UpdateClosestTargetDistanceSquared;
 
 static_assert(sizeof(DeviceSample) == 64u);
 
@@ -197,7 +206,7 @@ bool CheckCandidateImprovementSemantics() {
 bool CheckLargeDimensionsAndDeterminism() {
     constexpr std::uint32_t CandidateCount = 1024u;
     constexpr std::uint32_t TickCount = 4096u;
-    const auto run = [] {
+    const auto run = [=] {
         BetterSample better{false};
         DeviceSample legacy;
         DeviceSample reduced;
@@ -224,13 +233,47 @@ bool CheckLargeDimensionsAndDeterminism() {
            Equal(first.second, second.second);
 }
 
+bool CheckTargetProgressSemantics() {
+    const double bounds[6]{-1.0, -2.0, -3.0, 1.0, 2.0, 3.0};
+    double closest = InvalidClosestTargetDistanceSquared;
+    closest = UpdateClosestTargetDistanceSquared(
+            closest,
+            SquaredDistanceToTargetVolume(bounds, 4.0, 6.0, 3.0),
+            false);
+    if (closest != 25.0 ||
+        SquaredDistanceToTargetVolume(bounds, 0.0, 0.0, 0.0) != 0.0) {
+        return false;
+    }
+    closest = UpdateClosestTargetDistanceSquared(
+            closest,
+            SquaredDistanceToTargetVolume(bounds, 8.0, 8.0, 8.0),
+            true);
+    if (closest != 0.0) {
+        return false;
+    }
+
+    // Slots 1 and 3 are deduplicated logical candidates whose representative
+    // validity has already been expanded by the search executor.
+    const bool active[]{true, true, true, true, false};
+    const bool expandedValidity[]{true, true, false, false, true};
+    std::uint64_t qualifying = 0u;
+    for (std::uint32_t slot = 0u; slot < 5u; ++slot) {
+        if (IsQualifyingSearchCandidate(
+                    active[slot], expandedValidity[slot])) {
+            ++qualifying;
+        }
+    }
+    return qualifying == 2u;
+}
+
 }  // namespace
 
 int main() {
     if (!CheckEvaluatorKinds() ||
         !CheckTiesAndInvalidCandidates() ||
         !CheckCandidateImprovementSemantics() ||
-        !CheckLargeDimensionsAndDeterminism()) {
+        !CheckLargeDimensionsAndDeterminism() ||
+        !CheckTargetProgressSemantics()) {
         return 1;
     }
     return 0;
