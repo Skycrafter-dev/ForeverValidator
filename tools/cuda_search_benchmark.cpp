@@ -16,6 +16,7 @@ namespace {
 
 using forevervalidator::experimental::PhysicsSandboxError;
 using forevervalidator::experimental::PhysicsSandboxCudaSearchBatch;
+using forevervalidator::experimental::PhysicsSandboxCudaSearchMetrics;
 using Clock = std::chrono::steady_clock;
 
 double Milliseconds(Clock::time_point begin, Clock::time_point end) {
@@ -25,6 +26,126 @@ double Milliseconds(Clock::time_point begin, Clock::time_point end) {
 int Fail(const std::string &message) {
     std::cerr << "cuda_search_benchmark: " << message << '\n';
     return 1;
+}
+
+double Ratio(std::uint64_t numerator, std::uint64_t denominator) {
+    return denominator == 0u
+            ? 0.0
+            : static_cast<double>(numerator) /
+                      static_cast<double>(denominator);
+}
+
+void WriteHotPathJson(
+        std::ostream &stream,
+        const PhysicsSandboxCudaSearchMetrics::HotPath &metrics) {
+    stream << ",\"hot_path_metrics_collected\":"
+           << (metrics.collected ? "true" : "false")
+           << ",\"hot_path_metrics_complete\":"
+           << (metrics.complete ? "true" : "false");
+    if (!metrics.collected) return;
+
+    const std::uint64_t cacheDecisions =
+            metrics.surfaceCacheReuseCount +
+            metrics.surfaceCacheRefreshCount;
+    const std::uint64_t forcePasses =
+            metrics.groundForcePassCount + metrics.airForcePassCount;
+    const std::uint64_t traversalVisits =
+            metrics.octreeCellVisitCount +
+            metrics.cachedTriangleLeafVisitCount;
+    stream << ",\"hot_path_physically_simulated_candidate_count\":"
+           << metrics.physicallySimulatedCandidateCount
+           << ",\"hot_path_first_simulation_tick_sum\":"
+           << metrics.firstSimulationTickSum
+           << ",\"hot_path_first_simulation_tick_minimum\":"
+           << metrics.firstSimulationTickMinimum
+           << ",\"hot_path_first_simulation_tick_maximum\":"
+           << metrics.firstSimulationTickMaximum
+           << ",\"hot_path_executed_tick_count\":"
+           << metrics.executedTickCount
+           << ",\"hot_path_completed_tick_count\":"
+           << metrics.completedTickCount
+           << ",\"hot_path_physics_substep_count\":"
+           << metrics.physicsSubstepCount
+           << ",\"hot_path_maximum_substeps_per_tick\":"
+           << metrics.maximumSubstepsPerTick
+           << ",\"hot_path_collision_detect_count\":"
+           << metrics.collisionDetectCount
+           << ",\"hot_path_surface_cache_eligible_count\":"
+           << metrics.surfaceCacheEligibleCount
+           << ",\"hot_path_surface_cache_reuse_count\":"
+           << metrics.surfaceCacheReuseCount
+           << ",\"hot_path_surface_cache_refresh_count\":"
+           << metrics.surfaceCacheRefreshCount
+           << ",\"hot_path_surface_cache_refresh_failure_count\":"
+           << metrics.surfaceCacheRefreshFailureCount
+           << ",\"hot_path_mesh_cache_reuse_count\":"
+           << metrics.meshCacheReuseCount
+           << ",\"hot_path_acceleration_cell_visit_count\":"
+           << metrics.accelerationCellVisitCount
+           << ",\"hot_path_acceleration_surface_visit_count\":"
+           << metrics.accelerationSurfaceVisitCount
+           << ",\"hot_path_octree_cell_visit_count\":"
+           << metrics.octreeCellVisitCount
+           << ",\"hot_path_cached_triangle_leaf_visit_count\":"
+           << metrics.cachedTriangleLeafVisitCount
+           << ",\"hot_path_triangle_test_count\":"
+           << metrics.triangleTestCount
+           << ",\"hot_path_triangle_hit_count\":"
+           << metrics.triangleHitCount
+           << ",\"hot_path_raw_contact_count\":"
+           << metrics.rawContactCount
+           << ",\"hot_path_response_sort_call_count\":"
+           << metrics.responseSortCallCount
+           << ",\"hot_path_response_sort_item_count\":"
+           << metrics.responseSortItemCount
+           << ",\"hot_path_maximum_response_sort_item_count\":"
+           << metrics.maximumResponseSortItemCount
+           << ",\"hot_path_ground_force_pass_count\":"
+           << metrics.groundForcePassCount
+           << ",\"hot_path_air_force_pass_count\":"
+           << metrics.airForcePassCount
+           << ",\"hot_path_water_force_pass_count\":"
+           << metrics.waterForcePassCount
+           << ",\"hot_path_physics_callback_disabled_force_pass_count\":"
+           << metrics.physicsCallbackDisabledForcePassCount
+           << ",\"hot_path_zero_dynamics_force_pass_count\":"
+           << metrics.zeroDynamicsForcePassCount
+           << ",\"hot_path_average_first_simulation_tick\":"
+           << Ratio(
+                      metrics.firstSimulationTickSum,
+                      metrics.physicallySimulatedCandidateCount)
+           << ",\"hot_path_executed_ticks_per_physical_candidate\":"
+           << Ratio(
+                      metrics.executedTickCount,
+                      metrics.physicallySimulatedCandidateCount)
+           << ",\"hot_path_substeps_per_executed_tick\":"
+           << Ratio(metrics.physicsSubstepCount, metrics.executedTickCount)
+           << ",\"hot_path_surface_cache_reuse_rate\":"
+           << Ratio(metrics.surfaceCacheReuseCount, cacheDecisions)
+           << ",\"hot_path_surface_cache_refresh_failure_rate\":"
+           << Ratio(
+                      metrics.surfaceCacheRefreshFailureCount,
+                      metrics.surfaceCacheRefreshCount)
+           << ",\"hot_path_acceleration_surfaces_per_cell\":"
+           << Ratio(
+                      metrics.accelerationSurfaceVisitCount,
+                      metrics.accelerationCellVisitCount)
+           << ",\"hot_path_triangle_tests_per_traversal_visit\":"
+           << Ratio(metrics.triangleTestCount, traversalVisits)
+           << ",\"hot_path_triangle_hit_rate\":"
+           << Ratio(metrics.triangleHitCount, metrics.triangleTestCount)
+           << ",\"hot_path_raw_contacts_per_substep\":"
+           << Ratio(metrics.rawContactCount, metrics.physicsSubstepCount)
+           << ",\"hot_path_average_response_sort_size\":"
+           << Ratio(
+                      metrics.responseSortItemCount,
+                      metrics.responseSortCallCount)
+           << ",\"hot_path_ground_force_share\":"
+           << Ratio(metrics.groundForcePassCount, forcePasses)
+           << ",\"hot_path_air_force_share\":"
+           << Ratio(metrics.airForcePassCount, forcePasses)
+           << ",\"hot_path_water_force_share\":"
+           << Ratio(metrics.waterForcePassCount, forcePasses);
 }
 
 std::string Diagnostic(const PhysicsSandboxError &error) {
@@ -303,6 +424,7 @@ int main(int argc, char **argv) {
                 "[--existing-min COUNT] [--existing-max COUNT] "
                 "[--no-winner-state] [--no-locality-sort] "
                 "[--no-prefix-reuse] [--no-dedup] "
+                "[--hot-path-metrics] "
                 "[--minimum-blocks 8|12|16] "
                 "[--batch-capacity COUNT]");
     }
@@ -343,6 +465,7 @@ int main(int argc, char **argv) {
     bool sortCandidatesByLocality = true;
     bool reuseBaselinePrefixes = true;
     bool deduplicateLowEntropyCandidateInputs = true;
+    bool collectHotPathMetrics = false;
     std::uint32_t simulationMinimumBlocks = 0u;
     std::uint32_t batchCapacity = candidateCount;
     for (int argument = 10; argument < argc; ++argument) {
@@ -361,6 +484,10 @@ int main(int argc, char **argv) {
         }
         if (option == "--no-dedup") {
             deduplicateLowEntropyCandidateInputs = false;
+            continue;
+        }
+        if (option == "--hot-path-metrics") {
+            collectHotPathMetrics = true;
             continue;
         }
         if (argument + 1 >= argc) {
@@ -594,6 +721,7 @@ int main(int argc, char **argv) {
     configuration.simulationMinimumBlocksPerMultiprocessorForTesting =
             simulationMinimumBlocks;
     configuration.captureBestState = captureBestState;
+    configuration.collectHotPathMetrics = collectHotPathMetrics;
 
     auto session = CreatePhysicsSandboxCudaSearchSession(
             sandbox.Value(), configuration);
@@ -658,6 +786,11 @@ int main(int argc, char **argv) {
     if (!baseline.Value().bestValid ||
         baseline.Value().bestSnapshot.has_value() != captureBestState) {
         return Fail("CUDA baseline winner-state capture policy was not honored");
+    }
+    if (collectHotPathMetrics &&
+        (!baseline.Value().metrics.hotPath.collected ||
+         !baseline.Value().metrics.hotPath.complete)) {
+        return Fail("CUDA baseline hot-path metrics are incomplete");
     }
     if (evaluatorName == "finish-time" &&
         (baseline.Value().metrics.baselinePrefixDeviceBytes != 0u ||
@@ -782,6 +915,13 @@ int main(int argc, char **argv) {
              (batch.Value().cancelled ||
               batch.Value().evaluatedCandidateCount == 0u))) {
             return Fail("CUDA search batch was incomplete");
+        }
+        if (collectHotPathMetrics &&
+            (!batch.Value().metrics.hotPath.collected ||
+             batch.Value().metrics.hotPath.complete ==
+                     (modifier == "cancelled"))) {
+            return Fail(
+                    "CUDA hot-path metrics completion does not match batch");
         }
         if (simulationMinimumBlocks != 0u &&
             batch.Value().metrics.
@@ -1004,8 +1144,17 @@ int main(int argc, char **argv) {
                   << "\"initial_host_to_device_bytes\":"
                   << baseline.Value().metrics.hostToDeviceBytes << ","
                   << "\"baseline_device_to_host_bytes\":"
-                  << baseline.Value().metrics.deviceToHostBytes
-                  << "}\n";
+                  << baseline.Value().metrics.deviceToHostBytes << ","
+                  << "\"hot_path_metrics_requested\":"
+                  << (collectHotPathMetrics ? "true" : "false") << ","
+                  << "\"hot_path_metrics_timing_is_production\":"
+                  << (collectHotPathMetrics ? "false" : "true") << ","
+                  << "\"hot_path_forced_runtime_generic_kernel\":"
+                  << (batch.Value().metrics.hotPath.
+                                      forcedRuntimeGenericKernel
+                              ? "true" : "false");
+        WriteHotPathJson(std::cout, batch.Value().metrics.hotPath);
+        std::cout << "}\n";
         firstCandidateId += candidateCount;
     }
     return 0;

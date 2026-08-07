@@ -110,7 +110,180 @@ bool NoPrefixStorage(const CudaSearchBatchExecution &execution) {
 CudaSearchExecutorConfiguration Configuration(
         const void *deviceScene,
         const void *deviceConfiguration,
-        std::uint32_t capacity = 16u) {
+        std::uint32_t capacity = 16u);
+
+std::unique_ptr<CudaSearchExecutor> Create(
+        const CudaSearchExecutorConfiguration &configuration,
+        const char *name);
+
+bool Successful(
+        const CudaSearchBatchExecution &execution,
+        const char *name);
+
+bool SameProductionStorageTuple(
+        const CudaSearchBatchExecution &left,
+        const CudaSearchBatchExecution &right) {
+    return left.mutationDeviceBytes == right.mutationDeviceBytes &&
+            left.candidateInputDeviceBytes ==
+                    right.candidateInputDeviceBytes &&
+            left.mutationScratchDeviceBytes ==
+                    right.mutationScratchDeviceBytes &&
+            left.baselinePrefixDeviceBytes ==
+                    right.baselinePrefixDeviceBytes &&
+            left.candidatePrefixDeviceBytes ==
+                    right.candidatePrefixDeviceBytes &&
+            left.candidateDeduplicationDeviceBytes ==
+                    right.candidateDeduplicationDeviceBytes &&
+            left.winnerSelectionDeviceBytes ==
+                    right.winnerSelectionDeviceBytes &&
+            left.hostToDeviceBytes == right.hostToDeviceBytes;
+}
+
+bool ValidHotPathAccounting(
+        const CudaSearchBatchExecution &execution,
+        std::uint32_t maximumTicks) {
+    const CudaSearchHotPathMetrics &metrics = execution.hotPath;
+    const std::uint64_t forcePaths =
+            metrics.groundForcePassCount +
+            metrics.airForcePassCount +
+            metrics.physicsCallbackDisabledForcePassCount +
+            metrics.zeroDynamicsForcePassCount;
+    const bool firstTickBoundsValid =
+            metrics.physicallySimulatedCandidateCount == 0u
+            ? metrics.firstSimulationTickSum == 0u &&
+                      metrics.firstSimulationTickMinimum == 0u &&
+                      metrics.firstSimulationTickMaximum == 0u
+            : metrics.firstSimulationTickMinimum <=
+                              metrics.firstSimulationTickMaximum &&
+                      metrics.firstSimulationTickMaximum < maximumTicks &&
+                      metrics.firstSimulationTickSum >=
+                              metrics.firstSimulationTickMinimum *
+                                      metrics.
+                                              physicallySimulatedCandidateCount &&
+                      metrics.firstSimulationTickSum <=
+                              metrics.firstSimulationTickMaximum *
+                                      metrics.
+                                              physicallySimulatedCandidateCount;
+    return metrics.collected && metrics.complete &&
+            metrics.forcedRuntimeGenericKernel &&
+            metrics.physicallySimulatedCandidateCount <=
+                    execution.evaluatedCandidateCount &&
+            metrics.executedTickCount <=
+                    metrics.physicallySimulatedCandidateCount *
+                            maximumTicks &&
+            metrics.completedTickCount == metrics.executedTickCount &&
+            metrics.physicsSubstepCount == metrics.collisionDetectCount &&
+            metrics.physicsSubstepCount == metrics.responseSortCallCount &&
+            metrics.surfaceCacheEligibleCount ==
+                    metrics.surfaceCacheReuseCount +
+                            metrics.surfaceCacheRefreshCount &&
+            metrics.surfaceCacheRefreshFailureCount <=
+                    metrics.surfaceCacheRefreshCount &&
+            metrics.triangleHitCount <= metrics.triangleTestCount &&
+            metrics.maximumResponseSortItemCount <=
+                    metrics.responseSortItemCount &&
+            forcePaths == metrics.physicsSubstepCount &&
+            metrics.waterForcePassCount <=
+                    metrics.groundForcePassCount +
+                            metrics.airForcePassCount &&
+            firstTickBoundsValid;
+}
+
+bool CheckHotPathMetrics(
+        const void *deviceScene,
+        const void *deviceConfiguration) {
+    CudaSearchExecutorConfiguration referenceConfiguration =
+            Configuration(deviceScene, deviceConfiguration);
+    referenceConfiguration.deduplicationReplicaLimitForTesting = 1u;
+    CudaSearchExecutorConfiguration profilingConfiguration =
+            referenceConfiguration;
+    profilingConfiguration.collectHotPathMetrics = true;
+
+    auto reference = Create(
+            referenceConfiguration, "hot-path reference executor");
+    auto profiling = Create(
+            profilingConfiguration, "hot-path profiling executor");
+    if (!reference || !profiling) return false;
+
+    const CudaSearchBatchExecution referenceBaseline =
+            reference->EvaluateBaseline();
+    const CudaSearchBatchExecution profilingBaseline =
+            profiling->EvaluateBaseline();
+    if (!Successful(referenceBaseline, "hot-path reference baseline") ||
+        !Successful(profilingBaseline, "hot-path profiling baseline") ||
+        !SameSemantics(referenceBaseline, profilingBaseline) ||
+        referenceBaseline.hotPath.collected ||
+        referenceBaseline.hotPath.complete ||
+        referenceBaseline.hotPath.forcedRuntimeGenericKernel ||
+        !ValidHotPathAccounting(profilingBaseline, 6u) ||
+        profilingBaseline.hotPath.physicallySimulatedCandidateCount != 1u ||
+        profilingBaseline.residentDeviceBytes <=
+                referenceBaseline.residentDeviceBytes ||
+        profilingBaseline.deviceToHostBytes <=
+                referenceBaseline.deviceToHostBytes ||
+        !SameProductionStorageTuple(
+                referenceBaseline, profilingBaseline)) {
+        std::cerr << "hot-path baseline parity/accounting failed\n";
+        return false;
+    }
+
+    const CudaSearchBatchExecution referenceBatch =
+            reference->RunBatch(0u, 16u, false);
+    const CudaSearchBatchExecution profilingBatch =
+            profiling->RunBatch(0u, 16u, false);
+    if (!Successful(referenceBatch, "hot-path reference batch") ||
+        !Successful(profilingBatch, "hot-path profiling batch") ||
+        !SameSemantics(referenceBatch, profilingBatch) ||
+        referenceBatch.hotPath.collected ||
+        referenceBatch.hotPath.complete ||
+        referenceBatch.hotPath.forcedRuntimeGenericKernel ||
+        !ValidHotPathAccounting(profilingBatch, 6u) ||
+        profilingBatch.hotPath.physicallySimulatedCandidateCount !=
+                profilingBatch.simulatedCandidateCount ||
+        profilingBatch.simulatedCandidateCount != 1u ||
+        profilingBatch.deduplicatedCandidateCount != 15u ||
+        profilingBatch.residentDeviceBytes <=
+                referenceBatch.residentDeviceBytes ||
+        profilingBatch.deviceToHostBytes <=
+                referenceBatch.deviceToHostBytes ||
+        !SameProductionStorageTuple(referenceBatch, profilingBatch)) {
+        std::cerr << "hot-path batch parity/accounting failed\n";
+        return false;
+    }
+
+    const CudaSearchBatchExecution referencePartial =
+            reference->RunBatch(16u, 5u, false);
+    const CudaSearchBatchExecution profilingPartial =
+            profiling->RunBatch(16u, 5u, false);
+    if (!Successful(referencePartial, "hot-path reference partial") ||
+        !Successful(profilingPartial, "hot-path profiling partial") ||
+        !SameSemantics(referencePartial, profilingPartial) ||
+        !ValidHotPathAccounting(profilingPartial, 6u) ||
+        profilingPartial.hotPath.physicallySimulatedCandidateCount != 1u ||
+        profilingPartial.simulatedCandidateCount != 1u ||
+        profilingPartial.deduplicatedCandidateCount != 4u ||
+        !SameProductionStorageTuple(
+                referencePartial, profilingPartial)) {
+        std::cerr << "partial hot-path records retained stale slots\n";
+        return false;
+    }
+
+    const CudaSearchBatchExecution cancelled =
+            profiling->RunBatch(21u, 16u, true);
+    if (cancelled.status != CudaSearchStatus::Cancelled ||
+        !cancelled.hotPath.collected ||
+        cancelled.hotPath.complete ||
+        !cancelled.hotPath.forcedRuntimeGenericKernel) {
+        std::cerr << "cancelled hot-path metrics were not finalized\n";
+        return false;
+    }
+    return true;
+}
+
+CudaSearchExecutorConfiguration Configuration(
+        const void *deviceScene,
+        const void *deviceConfiguration,
+        std::uint32_t capacity) {
     CudaSearchExecutorConfiguration result;
     result.deviceScene = deviceScene;
     result.deviceStaticConfiguration = deviceConfiguration;
@@ -397,6 +570,8 @@ int main() {
     }
 
     if (!CheckPrefixAndDeduplicationParity(
+                deviceScene.Get(), deviceConfiguration.Get()) ||
+        !CheckHotPathMetrics(
                 deviceScene.Get(), deviceConfiguration.Get()) ||
         !CheckDisabledEligibility(
                 deviceScene.Get(), deviceConfiguration.Get()) ||
