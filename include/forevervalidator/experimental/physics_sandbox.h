@@ -563,6 +563,10 @@ struct PhysicsSandboxCudaSearchConfiguration {
     // kernel. Disabled searches retain the production allocation and transfer
     // layout.
     bool collectHotPathMetrics = false;
+    // Reuses a conservatively proven empty five-metre collision corridor.
+    // The certificate is local to one CUDA simulation kernel and is disabled
+    // by default while performance evidence is collected.
+    bool useEmptyAirCertificate = false;
     // Seeds a recreated session with an already verified baseline incumbent.
     std::optional<PhysicsSandboxCudaSearchIncumbent> incumbent;
 };
@@ -656,6 +660,15 @@ struct PhysicsSandboxCudaSearchMetrics {
         std::uint64_t waterForcePassCount = 0u;
         std::uint64_t physicsCallbackDisabledForcePassCount = 0u;
         std::uint64_t zeroDynamicsForcePassCount = 0u;
+        std::uint64_t emptyAirOpportunityCount = 0u;
+        std::uint64_t emptyAirProbeAttemptCount = 0u;
+        std::uint64_t emptyAirProbeSuccessCount = 0u;
+        std::uint64_t emptyAirProbeBlockedCount = 0u;
+        std::uint64_t emptyAirCertificateReuseCount = 0u;
+        std::uint64_t emptyAirCertificateInvalidationCount = 0u;
+        std::uint64_t emptyAirProbeAccelerationCellVisitCount = 0u;
+        std::uint64_t emptyAirProbeOctreeCellVisitCount = 0u;
+        std::uint64_t emptyAirZeroHitFastReturnCount = 0u;
     } hotPath{};
 };
 

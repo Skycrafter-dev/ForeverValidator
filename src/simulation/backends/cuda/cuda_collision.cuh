@@ -763,6 +763,277 @@ __device__ inline void ExpandBoundsForRounding(
     bounds.halfExtents.z += margin;
 }
 
+constexpr float EmptyAirCertificateDistance = 5.0f;
+constexpr float EmptyAirCertificateMargin = 0.0625f;
+constexpr std::uint8_t EmptyAirProbeCooldownOpportunities = 8u;
+
+enum class EmptyAirProbeResult : std::uint32_t {
+    Ineligible,
+    Clear,
+    Blocked,
+};
+
+__device__ inline bool FiniteBounds(
+        const GmBoxAligned &bounds) {
+    return isfinite(bounds.center.x) &&
+            isfinite(bounds.center.y) &&
+            isfinite(bounds.center.z) &&
+            isfinite(bounds.halfExtents.x) &&
+            isfinite(bounds.halfExtents.y) &&
+            isfinite(bounds.halfExtents.z) &&
+            bounds.halfExtents.x >= 0.0f &&
+            bounds.halfExtents.y >= 0.0f &&
+            bounds.halfExtents.z >= 0.0f;
+}
+
+template<bool CollectHotPathMetrics>
+__device__ inline void InvalidateEmptyAirCertificate(
+        CudaEmptyAirCertificateState<true> &state,
+        CudaHotPathCounters *hotPathCounters,
+        bool resetProbeCooldown = false) {
+    if (state.active) {
+        if constexpr (CollectHotPathMetrics) {
+            ++hotPathCounters->emptyAirCertificateInvalidationCount;
+        }
+        state.active = false;
+    }
+    if (resetProbeCooldown) {
+        state.probeCooldown = 0u;
+    }
+}
+
+// Extends an already-proven empty one-tick broad-phase cache along the
+// current velocity. Every live collision-shape bound is included in the
+// query; callers may reuse the result only while every live bound remains
+// contained. Malformed packed ranges fail closed before any cache mutation.
+template<bool CollectHotPathMetrics>
+__device__ __noinline__ EmptyAirProbeResult
+TryExtendEmptyAirCertificate(
+        const CudaPackedSceneHeader *scene,
+        const CudaSceneAccelerationCell *acceleration,
+        const CudaSceneSurface *surfaces,
+        const CudaSceneOctreeCell *octreeCells,
+        const GmVec3 &linearSpeed,
+        const GmVec3 &shortTravel,
+        std::uint32_t collisionShapeCount,
+        CudaCollisionSearchScratch &scratch,
+        CudaHotPathCounters *hotPathCounters) {
+    if (scene == nullptr || collisionShapeCount == 0u ||
+        collisionShapeCount > scratch.shapeCapacity ||
+        scratch.movingBoundsStorage == nullptr ||
+        scratch.stride == 0u || scratch.slot >= scratch.stride ||
+        (scene->accelerationCells.count != 0u &&
+         acceleration == nullptr) ||
+        (scene->surfaces.count != 0u && surfaces == nullptr) ||
+        (scene->octreeCells.count != 0u && octreeCells == nullptr)) {
+        return EmptyAirProbeResult::Blocked;
+    }
+
+    const float speedSquared =
+            (linearSpeed.y * linearSpeed.y +
+             linearSpeed.x * linearSpeed.x) +
+            linearSpeed.z * linearSpeed.z;
+    if (!isfinite(speedSquared) ||
+        speedSquared <= DirectionEpsilonSquared) {
+        return EmptyAirProbeResult::Ineligible;
+    }
+    const float speed = exact::Sqrt(speedSquared);
+    const float shortTravelSquared =
+            (shortTravel.y * shortTravel.y +
+             shortTravel.x * shortTravel.x) +
+            shortTravel.z * shortTravel.z;
+    if (!isfinite(speed) || speed <= 0.0f ||
+        !isfinite(shortTravelSquared) ||
+        shortTravelSquared < 0.0f) {
+        return EmptyAirProbeResult::Ineligible;
+    }
+    const float shortDistance = exact::Sqrt(shortTravelSquared);
+    if (!isfinite(shortDistance)) {
+        return EmptyAirProbeResult::Ineligible;
+    }
+    const float additionalDistance =
+            EmptyAirCertificateDistance - shortDistance;
+    GmVec3 additionalTravel{};
+    if (additionalDistance > 0.0f) {
+        additionalTravel = Scale(
+                linearSpeed, additionalDistance / speed);
+        if (!isfinite(additionalTravel.x) ||
+            !isfinite(additionalTravel.y) ||
+            !isfinite(additionalTravel.z)) {
+            return EmptyAirProbeResult::Ineligible;
+        }
+    }
+
+    GmBoxAligned query{};
+    for (std::uint32_t traversal = 0u;
+         traversal < collisionShapeCount;
+         ++traversal) {
+        const GmBoxAligned shortBounds =
+                MovingBoundsAt(scratch, traversal);
+        if (!FiniteBounds(shortBounds)) {
+            return EmptyAirProbeResult::Blocked;
+        }
+        GmBoxAligned extended = shortBounds;
+        if (additionalDistance > 0.0f) {
+            extended = ExpandBoundsAlong(
+                    shortBounds,
+                    additionalTravel,
+                    EmptyAirCertificateMargin);
+            ExpandBoundsForRounding(extended);
+        }
+        query = traversal == 0u
+                ? extended
+                : IncludeBounds(query, extended);
+    }
+    ExpandBoundsForRounding(query);
+    if (!FiniteBounds(query)) {
+        return EmptyAirProbeResult::Blocked;
+    }
+
+    constexpr std::uint32_t TargetGroups[] = {1u, 3u, 4u};
+    for (std::uint32_t groupIndex = 0u;
+         groupIndex < 3u;
+         ++groupIndex) {
+        const CudaSceneAccelerationRange range =
+                scene->accelerationGroups[
+                        TargetGroups[groupIndex] - 1u];
+        // Validate the complete range before recognizing the canonical
+        // one-cell empty root. Otherwise a malformed short range could evade
+        // the certificate proof entirely.
+        if (range.cellCount == 0u ||
+            range.firstCell > scene->accelerationCells.count ||
+            range.cellCount >
+                    scene->accelerationCells.count - range.firstCell) {
+            return EmptyAirProbeResult::Blocked;
+        }
+        const CudaSceneAccelerationCell &root =
+                acceleration[range.firstCell];
+        if (!FiniteBounds(root.bounds) ||
+            root.surfaceIndex != UINT32_MAX ||
+            root.subtreeEntryCount != range.cellCount) {
+            return EmptyAirProbeResult::Blocked;
+        }
+        if (range.cellCount == 1u) {
+            continue;
+        }
+
+        std::uint32_t cursor = 0u;
+        while (cursor < range.cellCount) {
+            if constexpr (CollectHotPathMetrics) {
+                ++hotPathCounters->
+                        emptyAirProbeAccelerationCellVisitCount;
+            }
+            const CudaSceneAccelerationCell &cell =
+                    acceleration[range.firstCell + cursor];
+            if (!FiniteBounds(cell.bounds) ||
+                cell.subtreeEntryCount == 0u ||
+                cell.subtreeEntryCount >
+                        range.cellCount - cursor ||
+                (cell.surfaceIndex != UINT32_MAX &&
+                 cell.subtreeEntryCount != 1u) ||
+                (cursor != 0u &&
+                 cell.surfaceIndex == UINT32_MAX &&
+                 cell.subtreeEntryCount == 1u)) {
+                return EmptyAirProbeResult::Blocked;
+            }
+            if (!BoundsIntersect(query, cell.bounds)) {
+                cursor += cell.subtreeEntryCount;
+                continue;
+            }
+            ++cursor;
+            if (cell.surfaceIndex == UINT32_MAX) {
+                continue;
+            }
+            if (cell.surfaceIndex >= scene->surfaces.count) {
+                return EmptyAirProbeResult::Blocked;
+            }
+            const CudaSceneSurface &surface =
+                    surfaces[cell.surfaceIndex];
+            if (surface.type != static_cast<std::uint32_t>(
+                        GmSurf::EGmSurfType::Mesh) ||
+                surface.firstOctreeCell > scene->octreeCells.count ||
+                surface.octreeCellCount >
+                        scene->octreeCells.count -
+                                surface.firstOctreeCell ||
+                surface.firstTriangle > scene->triangles.count ||
+                surface.triangleCount >
+                        scene->triangles.count -
+                                surface.firstTriangle ||
+                (surface.triangleCount != 0u &&
+                 surface.octreeCellCount == 0u)) {
+                return EmptyAirProbeResult::Blocked;
+            }
+            if (surface.triangleCount == 0u) {
+                continue;
+            }
+
+            GmBoxAligned localQuery =
+                    TransformBox(query, surface.worldToLocal);
+            ExpandBoundsForRounding(localQuery);
+            if (!FiniteBounds(localQuery)) {
+                return EmptyAirProbeResult::Blocked;
+            }
+            const CudaSceneOctreeCell &octreeRoot =
+                    octreeCells[surface.firstOctreeCell];
+            if (!FiniteBounds(octreeRoot.bounds) ||
+                octreeRoot.subtreeEntryCount !=
+                        surface.octreeCellCount) {
+                return EmptyAirProbeResult::Blocked;
+            }
+            std::uint32_t octreeCursor = 0u;
+            while (octreeCursor < surface.octreeCellCount) {
+                if constexpr (CollectHotPathMetrics) {
+                    ++hotPathCounters->
+                            emptyAirProbeOctreeCellVisitCount;
+                }
+                const CudaSceneOctreeCell &entry =
+                        octreeCells[
+                                surface.firstOctreeCell +
+                                octreeCursor];
+                if (!FiniteBounds(entry.bounds) ||
+                    entry.subtreeEntryCount == 0u ||
+                    entry.subtreeEntryCount >
+                            surface.octreeCellCount -
+                                    octreeCursor ||
+                    (entry.containsTriangle != 0u &&
+                     entry.subtreeEntryCount != 1u)) {
+                    return EmptyAirProbeResult::Blocked;
+                }
+                if (!BoundsIntersect(localQuery, entry.bounds)) {
+                    octreeCursor += entry.subtreeEntryCount;
+                    continue;
+                }
+                ++octreeCursor;
+                if (entry.containsTriangle == 0u) {
+                    continue;
+                }
+                if (entry.triangleIndex >= surface.triangleCount) {
+                    return EmptyAirProbeResult::Blocked;
+                }
+                // A triangle leaf intersects the conservative swept query.
+                return EmptyAirProbeResult::Blocked;
+            }
+        }
+    }
+
+    if (additionalDistance <= 0.0f) {
+        // The existing empty short cache already spans five metres. Preserve
+        // its exact bounds so normal containment remains the sole reuse gate.
+        return EmptyAirProbeResult::Clear;
+    }
+    for (std::uint32_t traversal = 0u;
+         traversal < collisionShapeCount;
+         ++traversal) {
+        GmBoxAligned extended = ExpandBoundsAlong(
+                MovingBoundsAt(scratch, traversal),
+                additionalTravel,
+                EmptyAirCertificateMargin);
+        ExpandBoundsForRounding(extended);
+        MovingBoundsAt(scratch, traversal) = extended;
+    }
+    return EmptyAirProbeResult::Clear;
+}
+
 __device__ inline std::uint16_t LocalMaterialIndex(
         GmLocalMaterialIndex value) {
     std::uint16_t result = 0u;
@@ -1977,6 +2248,7 @@ template <
         bool EightOrderedEllipsoids = false,
         bool WarpCoherentAcceleration = false,
         bool TriggerOnly = false,
+        bool UseEmptyAirCertificate = false,
         bool CollectHotPathMetrics = false,
         typename Scratch = CudaCollisionScratch>
 __device__ inline Status Detect(
@@ -1984,8 +2256,15 @@ __device__ inline Status Detect(
         const CudaPackedStaticConfigurationHeader *configuration,
         const CudaCandidatePhysicsState &candidate,
         Scratch &scratch,
-        CudaHotPathCounters *hotPathCounters = nullptr) {
+        CudaHotPathCounters *hotPathCounters = nullptr,
+        CudaEmptyAirCertificateState<UseEmptyAirCertificate>
+                *emptyAirState = nullptr) {
     detail::Clear<TrackDiagnostics>(scratch);
+    if constexpr (UseEmptyAirCertificate) {
+        if (emptyAirState == nullptr) {
+            return Status::InvalidScene;
+        }
+    }
     if constexpr (CollectHotPathMetrics) {
         ++hotPathCounters->collisionDetectCount;
     }
@@ -2222,6 +2501,14 @@ __device__ inline Status Detect(
                 }
             }
         }
+        if constexpr (UseEmptyAirCertificate) {
+            if (!useSurfaceCache || refreshSurfaceCache) {
+                detail::InvalidateEmptyAirCertificate<
+                        CollectHotPathMetrics>(
+                        *emptyAirState, hotPathCounters,
+                        !useSurfaceCache);
+            }
+        }
         if constexpr (CollectHotPathMetrics) {
             if (useSurfaceCache) {
                 ++hotPathCounters->surfaceCacheEligibleCount;
@@ -2410,11 +2697,88 @@ __device__ inline Status Detect(
                         collisionShapeCount, scratch,
                         hotPathCounters);
             }
+            if constexpr (UseEmptyAirCertificate) {
+                const bool emptyShortCache =
+                        scratch.surfaceCacheValid &&
+                        (scratch.surfaceHitCount == 0u ||
+                         (scratch.meshCacheValid &&
+                          scratch.meshCellCount == 0u));
+                if (emptyShortCache) {
+                    if constexpr (CollectHotPathMetrics) {
+                        ++hotPathCounters->emptyAirOpportunityCount;
+                    }
+                    if (emptyAirState->probeCooldown != 0u) {
+                        --emptyAirState->probeCooldown;
+                    } else {
+                        const detail::EmptyAirProbeResult probe =
+                                detail::TryExtendEmptyAirCertificate<
+                                        CollectHotPathMetrics>(
+                                        scene,
+                                        acceleration,
+                                        surfaces,
+                                        detail::SceneSection<
+                                                CudaSceneOctreeCell>(
+                                                scene,
+                                                scene->octreeCells),
+                                        candidate.body.current.linearSpeed,
+                                        surfaceCacheTravel,
+                                        collisionShapeCount,
+                                        scratch,
+                                        hotPathCounters);
+                        if (probe !=
+                            detail::EmptyAirProbeResult::Ineligible) {
+                            if constexpr (CollectHotPathMetrics) {
+                                ++hotPathCounters->
+                                        emptyAirProbeAttemptCount;
+                            }
+                            if (probe ==
+                                detail::EmptyAirProbeResult::Clear) {
+                                emptyAirState->active = true;
+                                emptyAirState->probeCooldown = 0u;
+                                scratch.surfaceHitCount = 0u;
+                                scratch.meshCellCount = 0u;
+                                scratch.meshCacheValid = true;
+                                if constexpr (CollectHotPathMetrics) {
+                                    ++hotPathCounters->
+                                            emptyAirProbeSuccessCount;
+                                }
+                            } else {
+                                emptyAirState->probeCooldown =
+                                        detail::
+                                                EmptyAirProbeCooldownOpportunities;
+                                if constexpr (CollectHotPathMetrics) {
+                                    ++hotPathCounters->
+                                            emptyAirProbeBlockedCount;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         if constexpr (CollectHotPathMetrics) {
             if (useSurfaceCache && !refreshSurfaceCache &&
                 scratch.meshCacheValid) {
                 ++hotPathCounters->meshCacheReuseCount;
+            }
+        }
+        if constexpr (UseEmptyAirCertificate) {
+            const bool emptyCollisionCache =
+                    scratch.surfaceHitCount == 0u;
+            if (emptyAirState->active &&
+                useSurfaceCache && scratch.surfaceCacheValid &&
+                emptyCollisionCache) {
+                if constexpr (CollectHotPathMetrics) {
+                    ++hotPathCounters->
+                            emptyAirZeroHitFastReturnCount;
+                    if (!refreshSurfaceCache) {
+                        ++hotPathCounters->
+                                emptyAirCertificateReuseCount;
+                    }
+                }
+                detail::SortForResponse<CollectHotPathMetrics>(
+                        scratch, hotPathCounters);
+                return Status::Success;
             }
         }
         if (useSurfaceCache) {

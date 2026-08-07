@@ -3312,6 +3312,24 @@ PhysicsSandboxCudaSearchSession::Impl::Convert(
             execution.hotPath.physicsCallbackDisabledForcePassCount;
     result.metrics.hotPath.zeroDynamicsForcePassCount =
             execution.hotPath.zeroDynamicsForcePassCount;
+    result.metrics.hotPath.emptyAirOpportunityCount =
+            execution.hotPath.emptyAirOpportunityCount;
+    result.metrics.hotPath.emptyAirProbeAttemptCount =
+            execution.hotPath.emptyAirProbeAttemptCount;
+    result.metrics.hotPath.emptyAirProbeSuccessCount =
+            execution.hotPath.emptyAirProbeSuccessCount;
+    result.metrics.hotPath.emptyAirProbeBlockedCount =
+            execution.hotPath.emptyAirProbeBlockedCount;
+    result.metrics.hotPath.emptyAirCertificateReuseCount =
+            execution.hotPath.emptyAirCertificateReuseCount;
+    result.metrics.hotPath.emptyAirCertificateInvalidationCount =
+            execution.hotPath.emptyAirCertificateInvalidationCount;
+    result.metrics.hotPath.emptyAirProbeAccelerationCellVisitCount =
+            execution.hotPath.emptyAirProbeAccelerationCellVisitCount;
+    result.metrics.hotPath.emptyAirProbeOctreeCellVisitCount =
+            execution.hotPath.emptyAirProbeOctreeCellVisitCount;
+    result.metrics.hotPath.emptyAirZeroHitFastReturnCount =
+            execution.hotPath.emptyAirZeroHitFastReturnCount;
     if (!execution.best.valid) {
         return PhysicsSandboxResult<
                 PhysicsSandboxCudaSearchBatch>::Success(
@@ -3694,6 +3712,8 @@ CreatePhysicsSandboxCudaSearchSession(
         internal.captureBestState = configuration.captureBestState;
         internal.collectHotPathMetrics =
                 configuration.collectHotPathMetrics;
+        internal.useEmptyAirCertificate =
+                configuration.useEmptyAirCertificate;
         if (configuration.incumbent) {
             if (configuration.incumbent->mutationCount >
                         std::numeric_limits<std::uint32_t>::max() ||

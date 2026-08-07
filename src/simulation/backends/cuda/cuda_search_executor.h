@@ -198,6 +198,7 @@ struct CudaSearchExecutorConfiguration {
     std::uint32_t simulationMinimumBlocksPerMultiprocessorForTesting = 0u;
     bool captureBestState = true;
     bool collectHotPathMetrics = false;
+    bool useEmptyAirCertificate = false;
     std::optional<CudaSearchIncumbent> incumbent;
     std::shared_ptr<const cuda::specialization::SessionModule>
             sessionSpecialization;
@@ -379,6 +380,15 @@ struct CudaSearchHotPathMetrics {
     std::uint64_t waterForcePassCount = 0u;
     std::uint64_t physicsCallbackDisabledForcePassCount = 0u;
     std::uint64_t zeroDynamicsForcePassCount = 0u;
+    std::uint64_t emptyAirOpportunityCount = 0u;
+    std::uint64_t emptyAirProbeAttemptCount = 0u;
+    std::uint64_t emptyAirProbeSuccessCount = 0u;
+    std::uint64_t emptyAirProbeBlockedCount = 0u;
+    std::uint64_t emptyAirCertificateReuseCount = 0u;
+    std::uint64_t emptyAirCertificateInvalidationCount = 0u;
+    std::uint64_t emptyAirProbeAccelerationCellVisitCount = 0u;
+    std::uint64_t emptyAirProbeOctreeCellVisitCount = 0u;
+    std::uint64_t emptyAirZeroHitFastReturnCount = 0u;
 };
 
 struct CudaSearchBatchExecution {

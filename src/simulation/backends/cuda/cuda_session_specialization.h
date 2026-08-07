@@ -35,9 +35,11 @@ public:
             std::string *diagnostic);
     bool Ready() const noexcept;
     CUfunction Kernel(
-            std::uint32_t minimumBlocksPerMultiprocessor) const noexcept;
+            std::uint32_t minimumBlocksPerMultiprocessor,
+            bool useEmptyAirCertificate) const noexcept;
     const KernelMetrics &Metrics(
-            std::uint32_t minimumBlocksPerMultiprocessor) const noexcept;
+            std::uint32_t minimumBlocksPerMultiprocessor,
+            bool useEmptyAirCertificate) const noexcept;
 
 private:
     struct KernelEntry {
@@ -48,9 +50,9 @@ private:
     void Reset() noexcept;
 
     CUmodule module_ = nullptr;
-    KernelEntry throughput_;
-    KernelEntry tail_;
-    KernelEntry denseTail_;
+    KernelEntry throughput_[2]{};
+    KernelEntry tail_[2]{};
+    KernelEntry denseTail_[2]{};
 };
 
 }  // namespace forevervalidator::simulation::cuda::specialization

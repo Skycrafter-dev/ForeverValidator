@@ -257,9 +257,11 @@ void SessionModule::Reset() noexcept {
         cuModuleUnload(module_);
     }
     module_ = nullptr;
-    throughput_ = {};
-    tail_ = {};
-    denseTail_ = {};
+    for (std::uint32_t variant = 0u; variant < 2u; ++variant) {
+        throughput_[variant] = {};
+        tail_[variant] = {};
+        denseTail_[variant] = {};
+    }
 }
 
 std::uint64_t SessionModuleBuildCountForTesting() noexcept {
@@ -584,43 +586,54 @@ bool SessionModule::Build(
                     std::string_view::npos) {
             continue;
         }
-        KernelEntry *destination = nullptr;
         const std::string_view functionName(name);
-        if (functionName.find("ELj16ELb0EE") !=
+        KernelEntry *destination = nullptr;
+        if (functionName.find("ELj16ELb0ELb0EE") !=
             std::string_view::npos) {
-            destination = &throughput_;
-        } else if (functionName.find("ELj12ELb0EE") !=
+            destination = &throughput_[0];
+        } else if (functionName.find("ELj16ELb1ELb0EE") !=
                    std::string_view::npos) {
-            destination = &tail_;
-        } else if (functionName.find("ELj8ELb0EE") !=
+            destination = &throughput_[1];
+        } else if (functionName.find("ELj12ELb0ELb0EE") !=
                    std::string_view::npos) {
-            destination = &denseTail_;
+            destination = &tail_[0];
+        } else if (functionName.find("ELj12ELb1ELb0EE") !=
+                   std::string_view::npos) {
+            destination = &tail_[1];
+        } else if (functionName.find("ELj8ELb0ELb0EE") !=
+                   std::string_view::npos) {
+            destination = &denseTail_[0];
+        } else if (functionName.find("ELj8ELb1ELb0EE") !=
+                   std::string_view::npos) {
+            destination = &denseTail_[1];
         }
         if (destination != nullptr) {
             destination->function = function;
         }
     }
-    if (throughput_.function == nullptr ||
-        tail_.function == nullptr ||
-        denseTail_.function == nullptr ||
-        !LoadMetrics(
-                throughput_.function,
-                &throughput_.metrics,
-                diagnostic) ||
-        !LoadMetrics(
-                tail_.function,
-                &tail_.metrics,
-                diagnostic) ||
-        !LoadMetrics(
-                denseTail_.function,
-                &denseTail_.metrics,
-                diagnostic)) {
-        if (diagnostic != nullptr && diagnostic->empty()) {
-            *diagnostic =
-                    "specialized CUDA simulation kernels are missing";
+    for (std::uint32_t variant = 0u; variant < 2u; ++variant) {
+        if (throughput_[variant].function == nullptr ||
+            tail_[variant].function == nullptr ||
+            denseTail_[variant].function == nullptr ||
+            !LoadMetrics(
+                    throughput_[variant].function,
+                    &throughput_[variant].metrics,
+                    diagnostic) ||
+            !LoadMetrics(
+                    tail_[variant].function,
+                    &tail_[variant].metrics,
+                    diagnostic) ||
+            !LoadMetrics(
+                    denseTail_[variant].function,
+                    &denseTail_[variant].metrics,
+                    diagnostic)) {
+            if (diagnostic != nullptr && diagnostic->empty()) {
+                *diagnostic =
+                        "specialized CUDA simulation kernels are missing";
+            }
+            Reset();
+            return false;
         }
-        Reset();
-        return false;
     }
 
     const double milliseconds =
@@ -639,25 +652,29 @@ bool SessionModule::Ready() const noexcept {
 }
 
 CUfunction SessionModule::Kernel(
-        std::uint32_t minimumBlocksPerMultiprocessor) const noexcept {
+        std::uint32_t minimumBlocksPerMultiprocessor,
+        bool useEmptyAirCertificate) const noexcept {
+    const std::uint32_t variant = useEmptyAirCertificate ? 1u : 0u;
     if (minimumBlocksPerMultiprocessor == DenseTailMinimumBlocks) {
-        return denseTail_.function;
+        return denseTail_[variant].function;
     }
     if (minimumBlocksPerMultiprocessor == TailMinimumBlocks) {
-        return tail_.function;
+        return tail_[variant].function;
     }
-    return throughput_.function;
+    return throughput_[variant].function;
 }
 
 const KernelMetrics &SessionModule::Metrics(
-        std::uint32_t minimumBlocksPerMultiprocessor) const noexcept {
+        std::uint32_t minimumBlocksPerMultiprocessor,
+        bool useEmptyAirCertificate) const noexcept {
+    const std::uint32_t variant = useEmptyAirCertificate ? 1u : 0u;
     if (minimumBlocksPerMultiprocessor == DenseTailMinimumBlocks) {
-        return denseTail_.metrics;
+        return denseTail_[variant].metrics;
     }
     if (minimumBlocksPerMultiprocessor == TailMinimumBlocks) {
-        return tail_.metrics;
+        return tail_[variant].metrics;
     }
-    return throughput_.metrics;
+    return throughput_[variant].metrics;
 }
 
 }  // namespace forevervalidator::simulation::cuda::specialization

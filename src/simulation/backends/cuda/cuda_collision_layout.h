@@ -2,6 +2,7 @@
 #define FOREVERVALIDATOR_CUDA_COLLISION_LAYOUT_H
 
 #include <cstdint>
+#include <type_traits>
 
 #include "engine/core/gm_types.h"
 
@@ -197,7 +198,30 @@ struct CudaHotPathCounters {
     std::uint64_t waterForcePassCount = 0u;
     std::uint64_t physicsCallbackDisabledForcePassCount = 0u;
     std::uint64_t zeroDynamicsForcePassCount = 0u;
+    std::uint64_t emptyAirOpportunityCount = 0u;
+    std::uint64_t emptyAirProbeAttemptCount = 0u;
+    std::uint64_t emptyAirProbeSuccessCount = 0u;
+    std::uint64_t emptyAirProbeBlockedCount = 0u;
+    std::uint64_t emptyAirCertificateReuseCount = 0u;
+    std::uint64_t emptyAirCertificateInvalidationCount = 0u;
+    std::uint64_t emptyAirProbeAccelerationCellVisitCount = 0u;
+    std::uint64_t emptyAirProbeOctreeCellVisitCount = 0u;
+    std::uint64_t emptyAirZeroHitFastReturnCount = 0u;
 };
+
+// Certificate lifetime is one simulation-kernel invocation. The disabled
+// specialization is deliberately empty so production-off kernels retain the
+// existing collision scratch layout and have no certificate state to spill.
+template<bool UseEmptyAirCertificate>
+struct CudaEmptyAirCertificateState {};
+
+template<>
+struct CudaEmptyAirCertificateState<true> {
+    bool active = false;
+    std::uint8_t probeCooldown = 0u;
+};
+
+static_assert(std::is_empty_v<CudaEmptyAirCertificateState<false>>);
 
 struct CudaCollisionSearchScratch {
     std::uint32_t collisionCount;

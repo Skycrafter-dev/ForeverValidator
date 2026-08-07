@@ -50,6 +50,7 @@ template <
         CudaHandlingSpecialization Handling =
                 CudaHandlingSpecialization::Generic,
         bool CollectHotPathMetrics = false,
+        bool UseEmptyAirCertificate = false,
         typename Scratch = collision::CudaCollisionScratch>
 __device__ inline Status CollisionSubstep(
         const CudaPackedSceneHeader *scene,
@@ -57,7 +58,9 @@ __device__ inline Status CollisionSubstep(
         CudaCandidatePhysicsState &candidate,
         float dt,
         Scratch &scratch,
-        collision::CudaHotPathCounters *hotPathCounters = nullptr) {
+        collision::CudaHotPathCounters *hotPathCounters = nullptr,
+        collision::CudaEmptyAirCertificateState<
+                UseEmptyAirCertificate> *emptyAirState = nullptr) {
     if constexpr (CollectHotPathMetrics) {
         ++hotPathCounters->physicsSubstepCount;
     }
@@ -82,9 +85,10 @@ __device__ inline Status CollisionSubstep(
                     EightOrderedEllipsoids,
                     WarpCoherentAcceleration,
                     false,
+                    UseEmptyAirCertificate,
                     CollectHotPathMetrics>(
                     scene, configuration, candidate, scratch,
-                    hotPathCounters);
+                    hotPathCounters, emptyAirState);
     if (collisionStatus == collision::Status::Success) {
         collisionStatus =
                 collision::Respond<
@@ -115,13 +119,16 @@ template <
         CudaHandlingSpecialization Handling =
                 CudaHandlingSpecialization::Generic,
         bool CollectHotPathMetrics = false,
+        bool UseEmptyAirCertificate = false,
         typename Scratch = collision::CudaCollisionScratch>
 __device__ inline Status Step(
         const CudaPackedSceneHeader *scene,
         const CudaPackedStaticConfigurationHeader *configuration,
         CudaCandidatePhysicsState &candidate,
         Scratch &scratch,
-        collision::CudaHotPathCounters *hotPathCounters = nullptr) {
+        collision::CudaHotPathCounters *hotPathCounters = nullptr,
+        collision::CudaEmptyAirCertificateState<
+                UseEmptyAirCertificate> *emptyAirState = nullptr) {
     const float dt =
             __int2float_rn(static_cast<std::int32_t>(
                     candidate.world.schemePeriodMs)) *
@@ -167,9 +174,11 @@ __device__ inline Status Step(
                                 EightOrderedEllipsoids,
                                 WarpCoherentAcceleration,
                                 Handling,
-                                CollectHotPathMetrics>(
+                                CollectHotPathMetrics,
+                                UseEmptyAirCertificate>(
                                 scene, configuration, candidate,
-                                split, scratch, hotPathCounters);
+                                split, scratch, hotPathCounters,
+                                emptyAirState);
                 if (status != Status::Success) return status;
                 remaining -= split;
             }
@@ -183,9 +192,11 @@ __device__ inline Status Step(
                         EightOrderedEllipsoids,
                         WarpCoherentAcceleration,
                         Handling,
-                        CollectHotPathMetrics>(
+                        CollectHotPathMetrics,
+                        UseEmptyAirCertificate>(
                         scene, configuration, candidate,
-                        remaining, scratch, hotPathCounters);
+                        remaining, scratch, hotPathCounters,
+                        emptyAirState);
         if (finalStatus != Status::Success) {
             return finalStatus;
         }

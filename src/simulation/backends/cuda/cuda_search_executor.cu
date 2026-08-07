@@ -265,6 +265,24 @@ void AccumulateHotPathRecord(
             physics.physicsCallbackDisabledForcePassCount;
     result->zeroDynamicsForcePassCount +=
             physics.zeroDynamicsForcePassCount;
+    result->emptyAirOpportunityCount +=
+            physics.emptyAirOpportunityCount;
+    result->emptyAirProbeAttemptCount +=
+            physics.emptyAirProbeAttemptCount;
+    result->emptyAirProbeSuccessCount +=
+            physics.emptyAirProbeSuccessCount;
+    result->emptyAirProbeBlockedCount +=
+            physics.emptyAirProbeBlockedCount;
+    result->emptyAirCertificateReuseCount +=
+            physics.emptyAirCertificateReuseCount;
+    result->emptyAirCertificateInvalidationCount +=
+            physics.emptyAirCertificateInvalidationCount;
+    result->emptyAirProbeAccelerationCellVisitCount +=
+            physics.emptyAirProbeAccelerationCellVisitCount;
+    result->emptyAirProbeOctreeCellVisitCount +=
+            physics.emptyAirProbeOctreeCellVisitCount;
+    result->emptyAirZeroHitFastReturnCount +=
+            physics.emptyAirZeroHitFastReturnCount;
 }
 
 template<typename T>
@@ -3197,6 +3215,7 @@ template <
         bool SteadyTimeline,
         CudaHandlingSpecialization Handling,
         std::uint32_t MinimumBlocksPerSm,
+        bool UseEmptyAirCertificate = false,
         bool CollectHotPathMetrics = false>
 __global__ __launch_bounds__(
         SimulationBlockSize,
@@ -3363,6 +3382,8 @@ __global__ __launch_bounds__(
             shapeCapacity};
     candidateScratch.responseOrderStorage =
             responseOrderScratch;
+    cuda::collision::CudaEmptyAirCertificateState<
+            UseEmptyAirCertificate> candidateEmptyAirState{};
     DeviceControlState controlState = *mutableBoundaryControls;
     if (firstSimulationTick != 0u) {
         const std::int64_t previousPublicTime =
@@ -3475,6 +3496,19 @@ __global__ __launch_bounds__(
                 }
             }
         }
+        if constexpr (UseEmptyAirCertificate) {
+            if (!SteadyTimeline &&
+                (((tick.actionFlags &
+                   CudaControlActionResetAtRaceStart) != 0u) ||
+                 tick.respawnAtCheckpointCount != 0u)) {
+                cuda::collision::detail::
+                        InvalidateEmptyAirCertificate<
+                                CollectHotPathMetrics>(
+                                candidateEmptyAirState,
+                                hotPathCounters,
+                                true);
+            }
+        }
         if constexpr (CollectHotPathMetrics) {
             ++hotPathStorage.record.executedTickCount;
         }
@@ -3490,13 +3524,15 @@ __global__ __launch_bounds__(
                          ThroughputKernelMinimumBlocksPerSm),
                         SimulateStunts,
                         Handling,
-                        CollectHotPathMetrics>(
+                        CollectHotPathMetrics,
+                        UseEmptyAirCertificate>(
                         static_cast<const CudaPackedSceneHeader *>(
                                 sceneData),
                         static_cast<const
                                 CudaPackedStaticConfigurationHeader *>(
                                 configurationData),
-                        state, candidateScratch, hotPathCounters);
+                        state, candidateScratch, hotPathCounters,
+                        &candidateEmptyAirState);
         if (physicsStatus != cuda::physics::Status::Success) {
             statuses[slot] =
                     DeviceCandidateStatus::UnsupportedPhysicsTransition;
@@ -4674,6 +4710,7 @@ struct CudaSearchExecutor::Impl {
     template <
             std::uint32_t MinimumBlocksPerSm,
             CudaHandlingSpecialization Handling,
+            bool UseEmptyAirCertificate = false,
             bool CollectHotPathMetrics = false>
     const void *SimulationKernel() const {
 #if defined(FOREVERVALIDATOR_CUDA_RESEARCH_WATER_ONLY)
@@ -4684,6 +4721,7 @@ struct CudaSearchExecutor::Impl {
                         true,
                         Handling,
                         MinimumBlocksPerSm,
+                        UseEmptyAirCertificate,
                         CollectHotPathMetrics>);
 #else
         if (configuration.branchState.stuntsEnabled &&
@@ -4696,6 +4734,7 @@ struct CudaSearchExecutor::Impl {
                             false,
                             Handling,
                             MinimumBlocksPerSm,
+                            UseEmptyAirCertificate,
                             CollectHotPathMetrics>);
         }
         return steadyTimeline
@@ -4706,6 +4745,7 @@ struct CudaSearchExecutor::Impl {
                                   true,
                                   Handling,
                                   MinimumBlocksPerSm,
+                                  UseEmptyAirCertificate,
                                   CollectHotPathMetrics>)
                 : reinterpret_cast<const void *>(
                           SimulateSearchCandidatesKernel<
@@ -4714,6 +4754,7 @@ struct CudaSearchExecutor::Impl {
                                   false,
                                   Handling,
                                   MinimumBlocksPerSm,
+                                  UseEmptyAirCertificate,
                                   CollectHotPathMetrics>);
 #endif
     }
@@ -4725,10 +4766,28 @@ struct CudaSearchExecutor::Impl {
         if constexpr (CollectHotPathMetrics) {
             // Profiling is intentionally one unambiguous generic AOT kernel.
             // It never inherits session or handling specialization identity.
+            return configuration.useEmptyAirCertificate
+                    ? SimulationKernel<
+                              MinimumBlocksPerSm,
+                              CudaHandlingSpecialization::Generic,
+                              true,
+                              true>()
+                    : SimulationKernel<
+                              MinimumBlocksPerSm,
+                              CudaHandlingSpecialization::Generic,
+                              false,
+                              true>();
+        }
+        if (configuration.useEmptyAirCertificate) {
+            // Keep the experimental certificate on a single generic AOT
+            // identity. This bounds the matrix to three launch-bounds values
+            // times certificate/profile off/on while the production-off
+            // handling-specialized kernels remain unchanged.
             return SimulationKernel<
                     MinimumBlocksPerSm,
                     CudaHandlingSpecialization::Generic,
-                    true>();
+                    true,
+                    false>();
         }
 #if defined(FOREVERVALIDATOR_CUDA_RESEARCH_WATER_ONLY)
         return SimulationKernel<
@@ -4827,7 +4886,9 @@ struct CudaSearchExecutor::Impl {
                     [&](std::uint32_t minimumBlocks,
                         SimulationKernelMetrics *metrics) {
                 const cuda::specialization::KernelMetrics &source =
-                        specializedModule->Metrics(minimumBlocks);
+                        specializedModule->Metrics(
+                                minimumBlocks,
+                                configuration.useEmptyAirCertificate);
                 metrics->registersPerThread =
                         source.registersPerThread;
                 metrics->localBytesPerThread =
@@ -5816,7 +5877,8 @@ struct CudaSearchExecutor::Impl {
             !configuration.collectHotPathMetrics) {
             const CUresult simulationLaunch = LaunchDriverKernel(
                     specializedModule->Kernel(
-                            selectedMinimumBlocks),
+                            selectedMinimumBlocks,
+                            configuration.useEmptyAirCertificate),
                     simulationBlocks,
                     configuration.deviceScene,
                     configuration.deviceStaticConfiguration,
