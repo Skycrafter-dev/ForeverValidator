@@ -62,6 +62,7 @@ PARITY_KEYS = (
     "simulated_candidate_count",
     "deduplicated_candidate_count",
     "empty_air_certificate_requested",
+    "session_specialization_requested",
 )
 
 # Profiling legitimately changes these totals or kernel characteristics. They
@@ -528,7 +529,7 @@ def validate_pair(
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "run one production AOT CUDA benchmark and one instrumented "
+            "run one production-path CUDA benchmark and one instrumented "
             "generic-AOT benchmark, then validate exact semantic parity"
         )
     )

@@ -64,6 +64,7 @@ def valid_rows():
             "simulated_candidate_count": 3,
             "deduplicated_candidate_count": 1,
             "empty_air_certificate_requested": False,
+            "session_specialization_requested": False,
             **pair.REFERENCE_PROVENANCE,
         }
     )
@@ -158,6 +159,14 @@ class HotPathPairTests(unittest.TestCase):
         profiled["best_state_fingerprint"] += 1
         with self.assertRaisesRegex(
             pair.PairValidationError, "best_state_fingerprint"
+        ):
+            pair.validate_pair(reference, profiled)
+
+    def test_session_specialization_request_requires_parity(self):
+        reference, profiled = valid_rows()
+        reference["session_specialization_requested"] = True
+        with self.assertRaisesRegex(
+            pair.PairValidationError, "session_specialization_requested"
         ):
             pair.validate_pair(reference, profiled)
 

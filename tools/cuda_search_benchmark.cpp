@@ -455,6 +455,7 @@ int main(int argc, char **argv) {
                 "[--no-winner-state] [--no-locality-sort] "
                 "[--no-prefix-reuse] [--no-dedup] "
                 "[--hot-path-metrics] [--empty-air-certificate] "
+                "[--session-specialization] "
                 "[--minimum-blocks 8|12|16] "
                 "[--batch-capacity COUNT]");
     }
@@ -497,6 +498,7 @@ int main(int argc, char **argv) {
     bool deduplicateLowEntropyCandidateInputs = true;
     bool collectHotPathMetrics = false;
     bool useEmptyAirCertificate = false;
+    bool useSessionSpecialization = false;
     std::uint32_t simulationMinimumBlocks = 0u;
     std::uint32_t batchCapacity = candidateCount;
     for (int argument = 10; argument < argc; ++argument) {
@@ -523,6 +525,10 @@ int main(int argc, char **argv) {
         }
         if (option == "--empty-air-certificate") {
             useEmptyAirCertificate = true;
+            continue;
+        }
+        if (option == "--session-specialization") {
+            useSessionSpecialization = true;
             continue;
         }
         if (argument + 1 >= argc) {
@@ -576,6 +582,7 @@ int main(int argc, char **argv) {
     }
     PhysicsSandboxOptions options;
     options.backend = SimulationBackend::Cuda;
+    options.prepareCudaSearchSpecialization = useSessionSpecialization;
     auto sandbox = CreatePhysicsSandbox(
             std::move(source).Value(), options);
     if (!sandbox) {
@@ -758,6 +765,7 @@ int main(int argc, char **argv) {
     configuration.captureBestState = captureBestState;
     configuration.collectHotPathMetrics = collectHotPathMetrics;
     configuration.useEmptyAirCertificate = useEmptyAirCertificate;
+    configuration.useSessionSpecialization = useSessionSpecialization;
 
     auto session = CreatePhysicsSandboxCudaSearchSession(
             sandbox.Value(), configuration);
@@ -1187,6 +1195,8 @@ int main(int argc, char **argv) {
                   << (collectHotPathMetrics ? "false" : "true") << ","
                   << "\"empty_air_certificate_requested\":"
                   << (useEmptyAirCertificate ? "true" : "false") << ","
+                  << "\"session_specialization_requested\":"
+                  << (useSessionSpecialization ? "true" : "false") << ","
                   << "\"hot_path_forced_runtime_generic_kernel\":"
                   << (batch.Value().metrics.hotPath.
                                       forcedRuntimeGenericKernel
