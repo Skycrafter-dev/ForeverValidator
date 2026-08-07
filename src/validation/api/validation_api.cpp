@@ -3184,6 +3184,10 @@ PhysicsSandboxCudaSearchSession::Impl::Convert(
     result.evaluatedCandidateCount =
             execution.evaluatedCandidateCount;
     result.evaluatorCalls = execution.evaluatorCalls;
+    result.qualifyingCandidateCount =
+            execution.qualifyingCandidateCount;
+    result.closestTargetDistance =
+            execution.closestTargetDistance;
     result.totalMutationCount = execution.totalMutationCount;
     result.mutationImprovementCount =
             execution.mutationImprovementCount;

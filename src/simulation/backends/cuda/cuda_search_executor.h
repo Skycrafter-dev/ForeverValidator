@@ -225,6 +225,8 @@ struct CudaSearchBatchExecution {
     std::uint32_t candidateCount = 0u;
     std::uint32_t evaluatedCandidateCount = 0u;
     std::uint64_t evaluatorCalls = 0u;
+    std::uint64_t qualifyingCandidateCount = 0u;
+    std::optional<double> closestTargetDistance;
     std::uint64_t totalMutationCount = 0u;
     // Candidate-best samples that strictly improved the incumbent in
     // logical candidate order.

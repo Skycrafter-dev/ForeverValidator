@@ -602,6 +602,11 @@ struct PhysicsSandboxCudaSearchBatch {
     std::uint32_t candidateCount = 0u;
     std::uint32_t evaluatedCandidateCount = 0u;
     std::uint64_t evaluatorCalls = 0u;
+    // Logical candidates that produced at least one valid evaluator sample.
+    std::uint64_t qualifyingCandidateCount = 0u;
+    // Sampled car-center distance to the target volume. Present only for
+    // volume-entry evaluators that observed at least one evaluation tick.
+    std::optional<double> closestTargetDistance;
     std::uint64_t totalMutationCount = 0u;
     // Candidate-level incumbent improvements in logical candidate order.
     std::uint64_t mutationImprovementCount = 0u;

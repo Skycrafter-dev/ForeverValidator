@@ -38,6 +38,7 @@
 #include "simulation/backends/cuda/cuda_scene_layout.h"
 #include "simulation/backends/cuda/cuda_session_specialization.h"
 #include "simulation/backends/cuda/cuda_search_branch_state.cuh"
+#include "simulation/backends/cuda/cuda_search_progress.cuh"
 #include "simulation/backends/cuda/cuda_search_winner_selection.cuh"
 #include "simulation/backends/cuda/cuda_stunts.cuh"
 #include "simulation/backends/cuda/cuda_vehicle_transitions.cuh"
@@ -142,6 +143,10 @@ struct DeviceBatchSummary {
     CudaSearchStatus status = CudaSearchStatus::Success;
     std::uint32_t evaluatedCandidateCount = 0u;
     std::uint64_t evaluatorCalls = 0u;
+    std::uint64_t qualifyingCandidateCount = 0u;
+    double closestTargetDistanceSquared =
+            cuda_search_progress_detail::
+                    InvalidClosestTargetDistanceSquared;
     std::uint64_t totalMutationCount = 0u;
     std::uint64_t mutationImprovementCount = 0u;
     std::uint32_t globalEventCount = 0u;
@@ -2146,6 +2151,15 @@ __global__ void SeedCandidateBestSamplesKernel(
     }
 }
 
+__global__ void InitializeSearchProgressKernel(
+        double *closestTargetDistanceSquared) {
+    if (blockIdx.x == 0u && threadIdx.x == 0u) {
+        *closestTargetDistanceSquared =
+                cuda_search_progress_detail::
+                        InvalidClosestTargetDistanceSquared;
+    }
+}
+
 __global__ void GenerateSearchCandidatesKernel(
         const CudaSearchInputEvent *baselineInputs,
         std::uint32_t baselineInputCount,
@@ -2685,6 +2699,7 @@ __global__ __launch_bounds__(
         bool baseline,
         std::uint32_t eventCapacity,
         DeviceSample *__restrict__ candidateBestSamples,
+        double *__restrict__ closestTargetDistanceSquaredGlobal,
         CudaCandidatePhysicsState *__restrict__ finishCheckpointStates,
         std::uint32_t *__restrict__ finishCheckpointTicks,
         const CudaSearchInputEvent *__restrict__ baselineInputs,
@@ -2789,6 +2804,9 @@ __global__ __launch_bounds__(
     bool evaluatorReported = false;
     const bool maximize = MaximizesScore(configuredEvaluator.kind);
     DeviceSample localBest;
+    double closestTargetDistanceSquared =
+            cuda_search_progress_detail::
+                    InvalidClosestTargetDistanceSquared;
     std::uint32_t evaluationIndex = 0u;
     if (finishCheckpointTicks != nullptr) {
         finishCheckpointTicks[slot] = FinishCheckpointInvalidTick;
@@ -2800,6 +2818,13 @@ __global__ __launch_bounds__(
                     cancellation) != 0u) {
             statuses[slot] = DeviceCandidateStatus::Cancelled;
             candidateBestSamples[slot + 1u] = localBest;
+            if (closestTargetDistanceSquared !=
+                cuda_search_progress_detail::
+                        InvalidClosestTargetDistanceSquared) {
+                cuda_search_progress_detail::AtomicMinNonnegativeDouble(
+                        closestTargetDistanceSquared,
+                        closestTargetDistanceSquaredGlobal);
+            }
             return;
         }
         const std::int64_t publicTime =
@@ -2882,6 +2907,13 @@ __global__ __launch_bounds__(
             statuses[slot] =
                     DeviceCandidateStatus::UnsupportedPhysicsTransition;
             candidateBestSamples[slot + 1u] = localBest;
+            if (closestTargetDistanceSquared !=
+                cuda_search_progress_detail::
+                        InvalidClosestTargetDistanceSquared) {
+                cuda_search_progress_detail::AtomicMinNonnegativeDouble(
+                        closestTargetDistanceSquared,
+                        closestTargetDistanceSquaredGlobal);
+            }
             return;
         }
         if constexpr (SimulateStunts) {
@@ -2891,6 +2923,13 @@ __global__ __launch_bounds__(
                 statuses[slot] =
                         DeviceCandidateStatus::CapacityExceeded;
                 candidateBestSamples[slot + 1u] = localBest;
+                if (closestTargetDistanceSquared !=
+                    cuda_search_progress_detail::
+                            InvalidClosestTargetDistanceSquared) {
+                    cuda_search_progress_detail::AtomicMinNonnegativeDouble(
+                            closestTargetDistanceSquared,
+                            closestTargetDistanceSquaredGlobal);
+                }
                 return;
             }
         }
@@ -2898,6 +2937,20 @@ __global__ __launch_bounds__(
         ++state.controlCursor;
         if (publicTime < evaluationStartTimeMs) {
             continue;
+        }
+        if (configuredEvaluator.kind ==
+            CudaSearchEvaluatorKind::VolumeEntry) {
+            const GmVec3 &position = state.body.current.position;
+            const double distanceSquared =
+                    cuda_search_progress_detail::
+                            SquaredDistanceToTargetVolume(
+                                    configuredEvaluator.values,
+                                    position.x, position.y, position.z);
+            closestTargetDistanceSquared =
+                    cuda_search_progress_detail::
+                            UpdateClosestTargetDistanceSquared(
+                                    closestTargetDistanceSquared,
+                                    distanceSquared, false);
         }
         if (conditionInstructionCount != 0u &&
             !EvaluateCondition(
@@ -2919,6 +2972,15 @@ __global__ __launch_bounds__(
                 static_cast<double>(publicTime),
                 stuntsScore,
                 &evaluatorReported);
+        if (sample.valid &&
+            configuredEvaluator.kind ==
+                    CudaSearchEvaluatorKind::VolumeEntry) {
+            closestTargetDistanceSquared =
+                    cuda_search_progress_detail::
+                            UpdateClosestTargetDistanceSquared(
+                                    closestTargetDistanceSquared,
+                                    closestTargetDistanceSquared, true);
+        }
         sample.candidateId = candidateId;
         sample.candidateSlot = slot;
         sample.evaluationTick = evaluationIndex;
@@ -2946,6 +3008,12 @@ __global__ __launch_bounds__(
         }
     }
     candidateBestSamples[slot + 1u] = localBest;
+    if (closestTargetDistanceSquared !=
+        cuda_search_progress_detail::InvalidClosestTargetDistanceSquared) {
+        cuda_search_progress_detail::AtomicMinNonnegativeDouble(
+                closestTargetDistanceSquared,
+                closestTargetDistanceSquaredGlobal);
+    }
 }
 
 template <
@@ -3405,6 +3473,7 @@ __global__ void FinalizeSearchBatchKernel(
         CudaSearchInputEvent *globalBestInputs,
         std::uint32_t *globalBestEventCount,
         std::uint32_t *globalBestMutationCount,
+        const double *closestTargetDistanceSquared,
         DeviceBatchSummary *summary) {
     if (blockIdx.x != 0u || threadIdx.x != 0u) {
         return;
@@ -3424,6 +3493,11 @@ __global__ void FinalizeSearchBatchKernel(
         if (activeCandidates[slot]) {
             ++result.evaluatedCandidateCount;
             result.evaluatorCalls += evaluationTickCount;
+        }
+        if (cuda_search_progress_detail::IsQualifyingSearchCandidate(
+                    activeCandidates[slot],
+                    candidateBestSamples[slot + 1u].valid)) {
+            ++result.qualifyingCandidateCount;
         }
         result.totalMutationCount += mutationCounts[slot];
     }
@@ -3484,6 +3558,8 @@ __global__ void FinalizeSearchBatchKernel(
     result.bestCandidateId = globalBestSample->candidateId;
     result.bestMutationCount = *globalBestMutationCount;
     result.globalEventCount = *globalBestEventCount;
+    result.closestTargetDistanceSquared =
+            *closestTargetDistanceSquared;
     *summary = result;
 }
 
@@ -3586,6 +3662,7 @@ struct CudaSearchExecutor::Impl {
     DeviceAllocation<CudaSearchInputEvent> globalBestInputs;
     DeviceAllocation<std::uint32_t> globalBestEventCount;
     DeviceAllocation<std::uint32_t> globalBestMutationCount;
+    DeviceAllocation<double> closestTargetDistanceSquared;
     DeviceAllocation<DeviceBatchSummary> summary;
 
     void UpdateResidentBytes() {
@@ -3638,6 +3715,7 @@ struct CudaSearchExecutor::Impl {
         ADD_BYTES(globalBestInputs);
         ADD_BYTES(globalBestEventCount);
         ADD_BYTES(globalBestMutationCount);
+        ADD_BYTES(closestTargetDistanceSquared);
         ADD_BYTES(summary);
 #undef ADD_BYTES
         winnerSelectionBytes =
@@ -4336,6 +4414,8 @@ struct CudaSearchExecutor::Impl {
         constexpr std::uint32_t blockSize = 128u;
         SeedCandidateBestSamplesKernel<<<1u, 1u>>>(
                 candidateBestSamples.Get(), globalBestSample.Get());
+        InitializeSearchProgressKernel<<<1u, 1u>>>(
+                closestTargetDistanceSquared.Get());
         cudaEventRecord(winnerInitialized.Get());
         const std::uint32_t candidateBlocks =
                 (candidateCount - 1u) / blockSize + 1u;
@@ -4478,6 +4558,7 @@ struct CudaSearchExecutor::Impl {
                     static_cast<std::uint32_t>(
                             configuration.maximumEventCount),
                     candidateBestSamples.Get(),
+                    closestTargetDistanceSquared.Get(),
                     finishCheckpointStates.Get(),
                     finishCheckpointTicks.Get(),
                     baselineInputs.Get(),
@@ -4558,6 +4639,7 @@ struct CudaSearchExecutor::Impl {
                     static_cast<std::uint32_t>(
                             configuration.maximumEventCount),
                     candidateBestSamples.Get(),
+                    closestTargetDistanceSquared.Get(),
                     finishCheckpointStates.Get(),
                     finishCheckpointTicks.Get(),
                     baselineInputs.Get(),
@@ -4749,6 +4831,7 @@ struct CudaSearchExecutor::Impl {
                 globalBestInputs.Get(),
                 globalBestEventCount.Get(),
                 globalBestMutationCount.Get(),
+                closestTargetDistanceSquared.Get(),
                 summary.Get());
         error = cudaGetLastError();
         if (error != cudaSuccess) {
@@ -4847,6 +4930,16 @@ struct CudaSearchExecutor::Impl {
         result.evaluatedCandidateCount =
                 hostSummary.evaluatedCandidateCount;
         result.evaluatorCalls = hostSummary.evaluatorCalls;
+        result.qualifyingCandidateCount =
+                hostSummary.qualifyingCandidateCount;
+        if (configuration.evaluator.kind ==
+                    CudaSearchEvaluatorKind::VolumeEntry &&
+            hostSummary.closestTargetDistanceSquared <
+                    cuda_search_progress_detail::
+                            InvalidClosestTargetDistanceSquared) {
+            result.closestTargetDistance = std::sqrt(
+                    hostSummary.closestTargetDistanceSquared);
+        }
         result.totalMutationCount =
                 hostSummary.totalMutationCount;
         result.mutationImprovementCount =
@@ -5781,6 +5874,7 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
                     preparedConfiguration.maximumEventCount) ||
             !impl->globalBestEventCount.Allocate(1u) ||
             !impl->globalBestMutationCount.Allocate(1u) ||
+            !impl->closestTargetDistanceSquared.Allocate(1u) ||
             !impl->summary.Allocate(1u)) {
             if (diagnostic != nullptr) {
                 *diagnostic = "CUDA resident search allocation failed";
