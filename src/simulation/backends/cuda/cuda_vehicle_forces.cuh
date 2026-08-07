@@ -3122,11 +3122,13 @@ __device__ inline ForceStatus ComputeModel6Ground(
 template <
         bool ReuseWheelPassInvariants = false,
         CudaHandlingSpecialization Handling =
-                CudaHandlingSpecialization::Generic>
+                CudaHandlingSpecialization::Generic,
+        bool CollectHotPathMetrics = false>
 __device__ inline ForceStatus ComputeForcesModel6(
         CudaCandidatePhysicsState &candidate,
         const CudaPackedStaticConfigurationHeader *configuration,
-        float dt) {
+        float dt,
+        collision::CudaHotPathCounters *hotPathCounters = nullptr) {
     CudaVehicleState &vehicle = candidate.vehicle;
     GmVec3 savedForce;
     GmVec3 savedImpulse;
@@ -3134,6 +3136,9 @@ __device__ inline ForceStatus ComputeForcesModel6(
             vehicle, savedForce, savedImpulse);
     if (wheel_detail::SpeedBlocked(vehicle) ||
         vehicle.water.boxLocal.halfExtents.x < 0.0f) {
+        if constexpr (CollectHotPathMetrics) {
+            ++hotPathCounters->zeroDynamicsForcePassCount;
+        }
         force_detail::SetZeroDynamics(candidate);
         return ForceStatus::Success;
     }
@@ -3164,6 +3169,13 @@ __device__ inline ForceStatus ComputeForcesModel6(
             candidate, configuration, dt);
     const bool groundContact =
             force_detail::IsGroundContact(vehicle);
+    if constexpr (CollectHotPathMetrics) {
+        if (groundContact) {
+            ++hotPathCounters->groundForcePassCount;
+        } else {
+            ++hotPathCounters->airForcePassCount;
+        }
+    }
     candidate.body.physicalParameters.
             vehicleContactFeedbackScale =
             groundContact
@@ -3238,6 +3250,11 @@ __device__ inline ForceStatus ComputeForcesModel6(
                                 GearedDriveWater) {
             waterActive = force_detail::ApplyWaterForces(
                     candidate, configuration, currentForce);
+            if constexpr (CollectHotPathMetrics) {
+                if (waterActive != 0) {
+                    ++hotPathCounters->waterForcePassCount;
+                }
+            }
         }
         const ForceStatus modelStatus =
                 force_detail::ComputeModel6Ground<
@@ -3263,6 +3280,11 @@ __device__ inline ForceStatus ComputeForcesModel6(
     } else {
         const int waterActive = force_detail::ApplyWaterForces(
                 candidate, configuration, currentForce);
+        if constexpr (CollectHotPathMetrics) {
+            if (waterActive != 0) {
+                ++hotPathCounters->waterForcePassCount;
+            }
+        }
         const ForceStatus modelStatus =
                 force_detail::ComputeModel6Ground<
                         ReuseWheelPassInvariants>(

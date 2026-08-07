@@ -19,19 +19,25 @@ enum class Status : std::uint32_t {
 template <
         bool ReuseWheelPassInvariants = false,
         CudaHandlingSpecialization Handling =
-                CudaHandlingSpecialization::Generic>
+                CudaHandlingSpecialization::Generic,
+        bool CollectHotPathMetrics = false>
 __device__ inline vehicle::ForceStatus ForcePass(
         CudaCandidatePhysicsState &candidate,
         const CudaPackedStaticConfigurationHeader *configuration,
-        float dt) {
+        float dt,
+        collision::CudaHotPathCounters *hotPathCounters = nullptr) {
     environment::BeginForcePass(candidate.body, configuration);
     if (!candidate.vehicle.mobil.physicsUpdatesEnabled) {
+        if constexpr (CollectHotPathMetrics) {
+            ++hotPathCounters->physicsCallbackDisabledForcePassCount;
+        }
         return vehicle::ForceStatus::Success;
     }
     return vehicle::ComputeForcesModel6<
             ReuseWheelPassInvariants,
-            Handling>(
-            candidate, configuration, dt);
+            Handling,
+            CollectHotPathMetrics>(
+            candidate, configuration, dt, hotPathCounters);
 }
 
 template <
@@ -43,18 +49,24 @@ template <
         bool WarpCoherentAcceleration = false,
         CudaHandlingSpecialization Handling =
                 CudaHandlingSpecialization::Generic,
+        bool CollectHotPathMetrics = false,
         typename Scratch = collision::CudaCollisionScratch>
 __device__ inline Status CollisionSubstep(
         const CudaPackedSceneHeader *scene,
         const CudaPackedStaticConfigurationHeader *configuration,
         CudaCandidatePhysicsState &candidate,
         float dt,
-        Scratch &scratch) {
+        Scratch &scratch,
+        collision::CudaHotPathCounters *hotPathCounters = nullptr) {
+    if constexpr (CollectHotPathMetrics) {
+        ++hotPathCounters->physicsSubstepCount;
+    }
     const vehicle::ForceStatus forceStatus =
             ForcePass<
                     ReuseWheelPassInvariants,
-                    Handling>(
-                    candidate, configuration, dt);
+                    Handling,
+                    CollectHotPathMetrics>(
+                    candidate, configuration, dt, hotPathCounters);
     if (forceStatus != vehicle::ForceStatus::Success) {
         return static_cast<Status>(
                 static_cast<std::uint32_t>(
@@ -68,8 +80,11 @@ __device__ inline Status CollisionSubstep(
                     TrackCollisionDiagnostics,
                     TrustedInputs,
                     EightOrderedEllipsoids,
-                    WarpCoherentAcceleration>(
-                    scene, configuration, candidate, scratch);
+                    WarpCoherentAcceleration,
+                    false,
+                    CollectHotPathMetrics>(
+                    scene, configuration, candidate, scratch,
+                    hotPathCounters);
     if (collisionStatus == collision::Status::Success) {
         collisionStatus =
                 collision::Respond<
@@ -99,12 +114,14 @@ template <
         bool WriteOutputSnapshots = true,
         CudaHandlingSpecialization Handling =
                 CudaHandlingSpecialization::Generic,
+        bool CollectHotPathMetrics = false,
         typename Scratch = collision::CudaCollisionScratch>
 __device__ inline Status Step(
         const CudaPackedSceneHeader *scene,
         const CudaPackedStaticConfigurationHeader *configuration,
         CudaCandidatePhysicsState &candidate,
-        Scratch &scratch) {
+        Scratch &scratch,
+        collision::CudaHotPathCounters *hotPathCounters = nullptr) {
     const float dt =
             __int2float_rn(static_cast<std::int32_t>(
                     candidate.world.schemePeriodMs)) *
@@ -130,6 +147,11 @@ __device__ inline Status Step(
         std::uint32_t substeps =
                 exact::TruncateToUint32Modulo(scaled) + 1u;
         if (substeps > 1000u) substeps = 1000u;
+        if constexpr (CollectHotPathMetrics) {
+            if (substeps > hotPathCounters->maximumSubstepsPerTick) {
+                hotPathCounters->maximumSubstepsPerTick = substeps;
+            }
+        }
         float remaining = dt;
         if (substeps > 1u) {
             const float split =
@@ -144,9 +166,10 @@ __device__ inline Status Step(
                                 CompactReplacements,
                                 EightOrderedEllipsoids,
                                 WarpCoherentAcceleration,
-                                Handling>(
+                                Handling,
+                                CollectHotPathMetrics>(
                                 scene, configuration, candidate,
-                                split, scratch);
+                                split, scratch, hotPathCounters);
                 if (status != Status::Success) return status;
                 remaining -= split;
             }
@@ -159,9 +182,10 @@ __device__ inline Status Step(
                         CompactReplacements,
                         EightOrderedEllipsoids,
                         WarpCoherentAcceleration,
-                        Handling>(
+                        Handling,
+                        CollectHotPathMetrics>(
                         scene, configuration, candidate,
-                        remaining, scratch);
+                        remaining, scratch, hotPathCounters);
         if (finalStatus != Status::Success) {
             return finalStatus;
         }

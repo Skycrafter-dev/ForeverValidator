@@ -197,6 +197,7 @@ struct CudaSearchExecutorConfiguration {
     std::uint32_t deduplicationReplicaLimitForTesting = 0u;
     std::uint32_t simulationMinimumBlocksPerMultiprocessorForTesting = 0u;
     bool captureBestState = true;
+    bool collectHotPathMetrics = false;
     std::optional<CudaSearchIncumbent> incumbent;
     std::shared_ptr<const cuda::specialization::SessionModule>
             sessionSpecialization;
@@ -344,6 +345,40 @@ struct CudaSearchBest {
     std::vector<CudaSearchInputEvent> inputs;
 };
 
+struct CudaSearchHotPathMetrics {
+    bool collected = false;
+    bool complete = false;
+    std::uint64_t physicallySimulatedCandidateCount = 0u;
+    std::uint64_t firstSimulationTickSum = 0u;
+    std::uint64_t firstSimulationTickMinimum = 0u;
+    std::uint64_t firstSimulationTickMaximum = 0u;
+    std::uint64_t executedTickCount = 0u;
+    std::uint64_t completedTickCount = 0u;
+    std::uint64_t physicsSubstepCount = 0u;
+    std::uint64_t maximumSubstepsPerTick = 0u;
+    std::uint64_t collisionDetectCount = 0u;
+    std::uint64_t surfaceCacheEligibleCount = 0u;
+    std::uint64_t surfaceCacheReuseCount = 0u;
+    std::uint64_t surfaceCacheRefreshCount = 0u;
+    std::uint64_t surfaceCacheRefreshFailureCount = 0u;
+    std::uint64_t meshCacheReuseCount = 0u;
+    std::uint64_t accelerationCellVisitCount = 0u;
+    std::uint64_t accelerationSurfaceVisitCount = 0u;
+    std::uint64_t octreeCellVisitCount = 0u;
+    std::uint64_t cachedTriangleLeafVisitCount = 0u;
+    std::uint64_t triangleTestCount = 0u;
+    std::uint64_t triangleHitCount = 0u;
+    std::uint64_t rawContactCount = 0u;
+    std::uint64_t responseSortCallCount = 0u;
+    std::uint64_t responseSortItemCount = 0u;
+    std::uint64_t maximumResponseSortItemCount = 0u;
+    std::uint64_t groundForcePassCount = 0u;
+    std::uint64_t airForcePassCount = 0u;
+    std::uint64_t waterForcePassCount = 0u;
+    std::uint64_t physicsCallbackDisabledForcePassCount = 0u;
+    std::uint64_t zeroDynamicsForcePassCount = 0u;
+};
+
 struct CudaSearchBatchExecution {
     CudaSearchStatus status = CudaSearchStatus::InvalidArgument;
     std::uint64_t firstCandidateId = 0u;
@@ -391,6 +426,7 @@ struct CudaSearchBatchExecution {
     std::uint64_t simulationLocalBytesPerThread = 0u;
     std::uint32_t simulationActiveBlocksPerMultiprocessor = 0u;
     double simulationTheoreticalOccupancy = 0.0;
+    CudaSearchHotPathMetrics hotPath{};
     std::string diagnostic;
 };
 

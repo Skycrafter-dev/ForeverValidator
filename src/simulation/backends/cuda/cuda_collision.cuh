@@ -962,7 +962,10 @@ __device__ inline void TransformNewCollisions(
     }
 }
 
-template <bool TrackDiagnostics, typename Scratch>
+template <
+        bool TrackDiagnostics,
+        bool CollectHotPathMetrics = false,
+        typename Scratch>
 __device__ inline int SphereMesh(
         const CudaPackedSceneHeader *scene,
         const CudaPackedStaticConfigurationHeader *configuration,
@@ -972,7 +975,8 @@ __device__ inline int SphereMesh(
         const CudaVehicleCollisionShape &shape,
         std::uint32_t shapeIndex,
         const GmIso4 &shapeWorld,
-        Scratch &scratch) {
+        Scratch &scratch,
+        CudaHotPathCounters *hotPathCounters = nullptr) {
     const float radius = shape.localBounds.halfExtents.y;
     const GmIso4 sphereToMesh =
             Compose(shapeWorld, surface.worldToLocal);
@@ -998,6 +1002,9 @@ __device__ inline int SphereMesh(
     int hit = 0;
     std::uint32_t cell = 0u;
     while (cell < surface.octreeCellCount) {
+        if constexpr (CollectHotPathMetrics) {
+            ++hotPathCounters->octreeCellVisitCount;
+        }
         if constexpr (TrackDiagnostics) {
             ++scratch.meshCellVisits;
         }
@@ -1019,6 +1026,9 @@ __device__ inline int SphereMesh(
             ++scratch.meshTriangleCells;
             ++scratch.triangleTests;
         }
+        if constexpr (CollectHotPathMetrics) {
+            ++hotPathCounters->triangleTestCount;
+        }
         const CudaSceneTriangle &triangle =
                 triangles[surface.firstTriangle +
                           entry.triangleIndex];
@@ -1036,6 +1046,9 @@ __device__ inline int SphereMesh(
                 triangle.normal,
         };
         if (query.Collide(triangleVertices)) {
+            if constexpr (CollectHotPathMetrics) {
+                ++hotPathCounters->triangleHitCount;
+            }
             if constexpr (TrackDiagnostics) {
                 ++scratch.triangleHits;
             }
@@ -1083,6 +1096,7 @@ __device__ inline int SphereMesh(
 template <
         bool TrackDiagnostics,
         bool UseMeshCellCache = false,
+        bool CollectHotPathMetrics = false,
         typename Scratch>
 __device__ inline int EllipsoidMesh(
         const CudaPackedSceneHeader *scene,
@@ -1095,7 +1109,8 @@ __device__ inline int EllipsoidMesh(
         const GmIso4 &shapeWorld,
         Scratch &scratch,
         std::uint32_t cachedCellFirst = 0u,
-        std::uint32_t cachedCellCount = 0u) {
+        std::uint32_t cachedCellCount = 0u,
+        CudaHotPathCounters *hotPathCounters = nullptr) {
     const GmVec3 radii = shape.localBounds.halfExtents;
     const GmVec3 inverseRadii = {
             1.0f / radii.x,
@@ -1150,6 +1165,13 @@ __device__ inline int EllipsoidMesh(
     while (UseMeshCellCache
                    ? cachedCell < cachedCellCount
                    : cell < surface.octreeCellCount) {
+        if constexpr (CollectHotPathMetrics) {
+            if constexpr (UseMeshCellCache) {
+                ++hotPathCounters->cachedTriangleLeafVisitCount;
+            } else {
+                ++hotPathCounters->octreeCellVisitCount;
+            }
+        }
         if constexpr (TrackDiagnostics) {
             ++scratch.meshCellVisits;
         }
@@ -1187,6 +1209,9 @@ __device__ inline int EllipsoidMesh(
                           entry.triangleIndex];
         if constexpr (TrackDiagnostics) {
             ++scratch.triangleTests;
+        }
+        if constexpr (CollectHotPathMetrics) {
+            ++hotPathCounters->triangleTestCount;
         }
         const GmVec3 unitVertices[3] = {
                 TransformPoint(
@@ -1233,6 +1258,9 @@ __device__ inline int EllipsoidMesh(
                 triangleNormal,
         };
         if (query.Collide(unitVertices)) {
+            if constexpr (CollectHotPathMetrics) {
+                ++hotPathCounters->triangleHitCount;
+            }
             if constexpr (TrackDiagnostics) {
                 ++scratch.triangleHits;
             }
@@ -1490,12 +1518,15 @@ __device__ inline void EllipsoidMeshPairCached(
 // Preserve octree preorder while caching only triangle leaves. Each live
 // shape still applies the authoritative bounds and triangle tests, so its
 // contacts remain an ordered subset of this conservative union query.
-template<bool UnifiedBounds = false>
+template<
+        bool UnifiedBounds = false,
+        bool CollectHotPathMetrics = false>
 __device__ inline void BuildMeshCellCache(
         const CudaPackedSceneHeader *scene,
         const CudaSceneSurface *surfaces,
         std::uint32_t collisionShapeCount,
-        CudaCollisionSearchScratch &scratch) {
+        CudaCollisionSearchScratch &scratch,
+        CudaHotPathCounters *hotPathCounters = nullptr) {
     const CudaSceneOctreeCell *cells =
             SceneSection<CudaSceneOctreeCell>(
                     scene, scene->octreeCells);
@@ -1547,6 +1578,9 @@ __device__ inline void BuildMeshCellCache(
         ExpandBoundsForRounding(localBounds);
         std::uint32_t cell = 0u;
         while (cell < surface.octreeCellCount) {
+            if constexpr (CollectHotPathMetrics) {
+                ++hotPathCounters->octreeCellVisitCount;
+            }
             const std::uint32_t cellIndex = cell;
             const CudaSceneOctreeCell &entry =
                     cells[surface.firstOctreeCell + cellIndex];
@@ -1586,9 +1620,14 @@ __device__ inline bool NearlyEqual(
            NearlyEqual(left.z, right.z);
 }
 
-template <typename Scratch>
+template <bool CollectHotPathMetrics = false, typename Scratch>
 __device__ inline void MergeShapeContacts(
-        Scratch &scratch) {
+        Scratch &scratch,
+        CudaHotPathCounters *hotPathCounters = nullptr) {
+    if constexpr (CollectHotPathMetrics) {
+        hotPathCounters->rawContactCount +=
+                scratch.shapeCollisionCount;
+    }
     const std::uint32_t firstTarget =
             scratch.collisionCount;
     for (std::uint32_t index = 0u;
@@ -1762,9 +1801,20 @@ __device__ inline int CompareForResponse(
     return 1;
 }
 
-template <typename Scratch>
+template <bool CollectHotPathMetrics = false, typename Scratch>
 __device__ inline void SortForResponse(
-        Scratch &scratch) {
+        Scratch &scratch,
+        CudaHotPathCounters *hotPathCounters = nullptr) {
+    if constexpr (CollectHotPathMetrics) {
+        ++hotPathCounters->responseSortCallCount;
+        hotPathCounters->responseSortItemCount +=
+                scratch.collisionCount;
+        if (scratch.collisionCount >
+            hotPathCounters->maximumResponseSortItemCount) {
+            hotPathCounters->maximumResponseSortItemCount =
+                    scratch.collisionCount;
+        }
+    }
     constexpr std::uint32_t Cutoff = 8u;
     constexpr std::uint32_t StackSize = 30u;
     InitializeResponseOrder(scratch);
@@ -1927,13 +1977,18 @@ template <
         bool EightOrderedEllipsoids = false,
         bool WarpCoherentAcceleration = false,
         bool TriggerOnly = false,
+        bool CollectHotPathMetrics = false,
         typename Scratch = CudaCollisionScratch>
 __device__ inline Status Detect(
         const CudaPackedSceneHeader *scene,
         const CudaPackedStaticConfigurationHeader *configuration,
         const CudaCandidatePhysicsState &candidate,
-        Scratch &scratch) {
+        Scratch &scratch,
+        CudaHotPathCounters *hotPathCounters = nullptr) {
     detail::Clear<TrackDiagnostics>(scratch);
+    if constexpr (CollectHotPathMetrics) {
+        ++hotPathCounters->collisionDetectCount;
+    }
     if constexpr (!TrustedInputs) {
         if (scene == nullptr || configuration == nullptr ||
             !ValidCudaPackedSceneHeader(*scene) ||
@@ -2167,6 +2222,16 @@ __device__ inline Status Detect(
                 }
             }
         }
+        if constexpr (CollectHotPathMetrics) {
+            if (useSurfaceCache) {
+                ++hotPathCounters->surfaceCacheEligibleCount;
+                if (refreshSurfaceCache) {
+                    ++hotPathCounters->surfaceCacheRefreshCount;
+                } else {
+                    ++hotPathCounters->surfaceCacheReuseCount;
+                }
+            }
+        }
         if (useSurfaceCache && refreshSurfaceCache) {
             scratch.meshCacheValid = false;
             scratch.surfaceHitCount = 0u;
@@ -2192,6 +2257,10 @@ __device__ inline Status Detect(
                         if (index >= range.cellCount) break;
                         std::uint32_t shapeMask = 0u;
                         if (cursor == index) {
+                            if constexpr (CollectHotPathMetrics) {
+                                ++hotPathCounters->
+                                        accelerationCellVisitCount;
+                            }
                             const CudaSceneAccelerationCell &cell =
                                     acceleration[
                                             range.firstCell + index];
@@ -2209,6 +2278,10 @@ __device__ inline Status Detect(
                                 cell.surfaceIndex != UINT32_MAX &&
                                 cell.surfaceIndex <
                                         scene->surfaces.count) {
+                                if constexpr (CollectHotPathMetrics) {
+                                    ++hotPathCounters->
+                                            accelerationSurfaceVisitCount;
+                                }
                                 for (std::uint32_t traversal = 0u;
                                      traversal <
                                              collisionShapeCount;
@@ -2272,6 +2345,10 @@ __device__ inline Status Detect(
                         const CudaSceneAccelerationCell &cell =
                                 acceleration[
                                         range.firstCell + index];
+                        if constexpr (CollectHotPathMetrics) {
+                            ++hotPathCounters->
+                                    accelerationCellVisitCount;
+                        }
                         std::uint32_t shapeMask = 0u;
 #pragma unroll
                         for (std::uint32_t traversal = 0u;
@@ -2300,6 +2377,10 @@ __device__ inline Status Detect(
                                     scene->surfaces.count) {
                             continue;
                         }
+                        if constexpr (CollectHotPathMetrics) {
+                            ++hotPathCounters->
+                                    accelerationSurfaceVisitCount;
+                        }
                         if (scratch.surfaceHitCount >=
                             SurfaceHitCapacity) {
                             useSurfaceCache = false;
@@ -2315,11 +2396,25 @@ __device__ inline Status Detect(
                 }
             }
             scratch.surfaceCacheValid = useSurfaceCache;
+            if constexpr (CollectHotPathMetrics) {
+                if (!scratch.surfaceCacheValid) {
+                    ++hotPathCounters->
+                            surfaceCacheRefreshFailureCount;
+                }
+            }
             if (scratch.surfaceCacheValid) {
                 detail::BuildMeshCellCache<
-                        EightOrderedEllipsoids>(
+                        EightOrderedEllipsoids,
+                        CollectHotPathMetrics>(
                         scene, surfaces,
-                        collisionShapeCount, scratch);
+                        collisionShapeCount, scratch,
+                        hotPathCounters);
+            }
+        }
+        if constexpr (CollectHotPathMetrics) {
+            if (useSurfaceCache && !refreshSurfaceCache &&
+                scratch.meshCacheValid) {
+                ++hotPathCounters->meshCacheReuseCount;
             }
         }
         if (useSurfaceCache) {
@@ -2554,33 +2649,41 @@ __device__ inline Status Detect(
                         const CudaCollisionMeshRange range =
                                 detail::MeshRangeAt(
                                         scratch, hitIndex);
-                        detail::EllipsoidMesh<false, true>(
+                        detail::EllipsoidMesh<
+                                false, true,
+                                CollectHotPathMetrics>(
                                 scene, configuration, surface,
                                 hit.surfaceIndex,
                                 surface.actorIndex,
                                 shape, shapeIndex,
                                 shapeWorld,
                                 scratch, range.first,
-                                range.count);
+                                range.count,
+                                hotPathCounters);
                     } else {
-                        detail::EllipsoidMesh<false>(
+                        detail::EllipsoidMesh<
+                                false, false,
+                                CollectHotPathMetrics>(
                                 scene, configuration, surface,
                                 hit.surfaceIndex,
                                 surface.actorIndex,
                                 shape, shapeIndex,
                                 shapeWorld,
-                                scratch);
+                                scratch, 0u, 0u,
+                                hotPathCounters);
                     }
                     if (scratch.overflow) {
                         return Status::Overflow;
                     }
                 }
-                detail::MergeShapeContacts(scratch);
+                detail::MergeShapeContacts<CollectHotPathMetrics>(
+                        scratch, hotPathCounters);
                 if (scratch.overflow) {
                     return Status::Overflow;
                 }
             }
-            detail::SortForResponse(scratch);
+            detail::SortForResponse<CollectHotPathMetrics>(
+                    scratch, hotPathCounters);
             return scratch.overflow
                     ? Status::Overflow
                     : Status::Success;
@@ -2628,6 +2731,9 @@ __device__ inline Status Detect(
             if (range.cellCount <= 1u) continue;
             std::uint32_t index = 0u;
             while (index < range.cellCount) {
+                if constexpr (CollectHotPathMetrics) {
+                    ++hotPathCounters->accelerationCellVisitCount;
+                }
                 if constexpr (TrackDiagnostics) {
                     ++scratch.accelerationCellVisits;
                 }
@@ -2645,6 +2751,9 @@ __device__ inline Status Detect(
                 }
                 const CudaSceneSurface &surface =
                         surfaces[cell.surfaceIndex];
+                if constexpr (CollectHotPathMetrics) {
+                    ++hotPathCounters->accelerationSurfaceVisitCount;
+                }
                 if constexpr (TrackDiagnostics) {
                     ++scratch.accelerationSurfaceVisits;
                 }
@@ -2653,33 +2762,44 @@ __device__ inline Status Detect(
                     return Status::UnsupportedGeometry;
                 }
                 if constexpr (EightOrderedEllipsoids) {
-                    detail::EllipsoidMesh<TrackDiagnostics>(
+                    detail::EllipsoidMesh<
+                            TrackDiagnostics, false,
+                            CollectHotPathMetrics>(
                             scene, configuration, surface,
                             cell.surfaceIndex,
                             surface.actorIndex, shape, shapeIndex,
-                            shapeWorld, scratch);
+                            shapeWorld, scratch, 0u, 0u,
+                            hotPathCounters);
                 } else if (shape.surfaceType ==
                            static_cast<std::uint32_t>(
                                    GmSurf::EGmSurfType::Sphere)) {
-                    detail::SphereMesh<TrackDiagnostics>(
+                    detail::SphereMesh<
+                            TrackDiagnostics,
+                            CollectHotPathMetrics>(
                             scene, configuration, surface,
                             cell.surfaceIndex,
                             surface.actorIndex, shape, shapeIndex,
-                            shapeWorld, scratch);
+                            shapeWorld, scratch,
+                            hotPathCounters);
                 } else {
-                    detail::EllipsoidMesh<TrackDiagnostics>(
+                    detail::EllipsoidMesh<
+                            TrackDiagnostics, false,
+                            CollectHotPathMetrics>(
                             scene, configuration, surface,
                             cell.surfaceIndex,
                             surface.actorIndex, shape, shapeIndex,
-                            shapeWorld, scratch);
+                            shapeWorld, scratch, 0u, 0u,
+                            hotPathCounters);
                 }
                 if (scratch.overflow) return Status::Overflow;
             }
         }
-        detail::MergeShapeContacts(scratch);
+        detail::MergeShapeContacts<CollectHotPathMetrics>(
+                scratch, hotPathCounters);
         if (scratch.overflow) return Status::Overflow;
     }
-    detail::SortForResponse(scratch);
+    detail::SortForResponse<CollectHotPathMetrics>(
+            scratch, hotPathCounters);
     if (scratch.overflow) return Status::Overflow;
     return Status::Success;
 }

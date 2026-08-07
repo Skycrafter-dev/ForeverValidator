@@ -559,6 +559,10 @@ struct PhysicsSandboxCudaSearchConfiguration {
     // ForeverTAS resolves improved runs on its optimized CPU worker. Other
     // callers retain the compatible CUDA winner-state capture by default.
     bool captureBestState = true;
+    // Collects diagnostic counters using a separately compiled generic CUDA
+    // kernel. Disabled searches retain the production allocation and transfer
+    // layout.
+    bool collectHotPathMetrics = false;
     // Seeds a recreated session with an already verified baseline incumbent.
     std::optional<PhysicsSandboxCudaSearchIncumbent> incumbent;
 };
@@ -615,6 +619,39 @@ struct PhysicsSandboxCudaSearchMetrics {
     std::uint64_t simulationLocalBytesPerThread = 0u;
     std::uint32_t simulationActiveBlocksPerMultiprocessor = 0u;
     double simulationTheoreticalOccupancy = 0.0;
+    struct HotPath {
+        bool collected = false;
+        bool complete = false;
+        std::uint64_t physicallySimulatedCandidateCount = 0u;
+        std::uint64_t firstSimulationTickSum = 0u;
+        std::uint64_t firstSimulationTickMinimum = 0u;
+        std::uint64_t firstSimulationTickMaximum = 0u;
+        std::uint64_t executedTickCount = 0u;
+        std::uint64_t completedTickCount = 0u;
+        std::uint64_t physicsSubstepCount = 0u;
+        std::uint64_t maximumSubstepsPerTick = 0u;
+        std::uint64_t collisionDetectCount = 0u;
+        std::uint64_t surfaceCacheEligibleCount = 0u;
+        std::uint64_t surfaceCacheReuseCount = 0u;
+        std::uint64_t surfaceCacheRefreshCount = 0u;
+        std::uint64_t surfaceCacheRefreshFailureCount = 0u;
+        std::uint64_t meshCacheReuseCount = 0u;
+        std::uint64_t accelerationCellVisitCount = 0u;
+        std::uint64_t accelerationSurfaceVisitCount = 0u;
+        std::uint64_t octreeCellVisitCount = 0u;
+        std::uint64_t cachedTriangleLeafVisitCount = 0u;
+        std::uint64_t triangleTestCount = 0u;
+        std::uint64_t triangleHitCount = 0u;
+        std::uint64_t rawContactCount = 0u;
+        std::uint64_t responseSortCallCount = 0u;
+        std::uint64_t responseSortItemCount = 0u;
+        std::uint64_t maximumResponseSortItemCount = 0u;
+        std::uint64_t groundForcePassCount = 0u;
+        std::uint64_t airForcePassCount = 0u;
+        std::uint64_t waterForcePassCount = 0u;
+        std::uint64_t physicsCallbackDisabledForcePassCount = 0u;
+        std::uint64_t zeroDynamicsForcePassCount = 0u;
+    } hotPath{};
 };
 
 struct PhysicsSandboxCudaSearchBatch {

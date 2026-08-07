@@ -169,6 +169,34 @@ struct CudaCollisionScratch {
     CudaCollision shapeCollisions[ShapeCollisionCapacity]{};
 };
 
+// Per-candidate counters owned only by the compile-time-instrumented search
+// kernel. The production specialization neither stores nor updates them.
+struct CudaHotPathCounters {
+    std::uint64_t physicsSubstepCount = 0u;
+    std::uint64_t maximumSubstepsPerTick = 0u;
+    std::uint64_t collisionDetectCount = 0u;
+    std::uint64_t surfaceCacheEligibleCount = 0u;
+    std::uint64_t surfaceCacheReuseCount = 0u;
+    std::uint64_t surfaceCacheRefreshCount = 0u;
+    std::uint64_t surfaceCacheRefreshFailureCount = 0u;
+    std::uint64_t meshCacheReuseCount = 0u;
+    std::uint64_t accelerationCellVisitCount = 0u;
+    std::uint64_t accelerationSurfaceVisitCount = 0u;
+    std::uint64_t octreeCellVisitCount = 0u;
+    std::uint64_t cachedTriangleLeafVisitCount = 0u;
+    std::uint64_t triangleTestCount = 0u;
+    std::uint64_t triangleHitCount = 0u;
+    std::uint64_t rawContactCount = 0u;
+    std::uint64_t responseSortCallCount = 0u;
+    std::uint64_t responseSortItemCount = 0u;
+    std::uint64_t maximumResponseSortItemCount = 0u;
+    std::uint64_t groundForcePassCount = 0u;
+    std::uint64_t airForcePassCount = 0u;
+    std::uint64_t waterForcePassCount = 0u;
+    std::uint64_t physicsCallbackDisabledForcePassCount = 0u;
+    std::uint64_t zeroDynamicsForcePassCount = 0u;
+};
+
 struct CudaCollisionSearchScratch {
     std::uint32_t collisionCount;
     std::uint32_t shapeCollisionCount;
