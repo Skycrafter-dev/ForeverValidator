@@ -983,6 +983,18 @@ int main(int argc, char **argv) {
                   << batch.Value().metrics
                              .candidateDeduplicationDeviceBytes
                   << ","
+                  << "\"baseline_prefix_reuse_active\":"
+                  << (batch.Value().metrics.baselinePrefixReuseActive
+                              ? "true" : "false")
+                  << ","
+                  << "\"candidate_deduplication_active\":"
+                  << (batch.Value().metrics.candidateDeduplicationActive
+                              ? "true" : "false")
+                  << ","
+                  << "\"simulated_candidate_count\":"
+                  << batch.Value().metrics.simulatedCandidateCount << ","
+                  << "\"deduplicated_candidate_count\":"
+                  << batch.Value().metrics.deduplicatedCandidateCount << ","
                   << "\"winner_selection_device_bytes\":"
                   << batch.Value().metrics.winnerSelectionDeviceBytes << ","
                   << "\"host_to_device_bytes\":"

@@ -591,6 +591,10 @@ struct PhysicsSandboxCudaSearchMetrics {
     std::uint64_t baselinePrefixDeviceBytes = 0u;
     std::uint64_t candidatePrefixDeviceBytes = 0u;
     std::uint64_t candidateDeduplicationDeviceBytes = 0u;
+    bool baselinePrefixReuseActive = false;
+    bool candidateDeduplicationActive = false;
+    std::uint32_t simulatedCandidateCount = 0u;
+    std::uint32_t deduplicatedCandidateCount = 0u;
     // Winner-selection storage only; independent of the evaluation window.
     std::uint64_t winnerSelectionDeviceBytes = 0u;
     std::uint64_t hostToDeviceBytes = 0u;
@@ -725,6 +729,9 @@ public:
             noexcept;
     PhysicsSandboxResult<PhysicsSandboxCudaSearchBatch> EvaluateBaseline(
             const std::function<bool()> &cancellationRequested) noexcept;
+    // Candidate IDs are zero-based. Conditions observe Iterations=0 for the
+    // baseline and a one-based logical mutation iteration for candidates;
+    // UINT64_MAX is accepted and is exposed as 2^64 in double precision.
     PhysicsSandboxResult<PhysicsSandboxCudaSearchBatch> RunBatch(
             std::uint64_t firstCandidateId,
             std::uint32_t candidateCount,

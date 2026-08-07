@@ -809,6 +809,28 @@ if(FOREVERVALIDATOR_BUILD_TESTS)
             forevervalidator-cuda-search-branch-state-tests)
         add_test(NAME forevervalidator-cuda-search-branch-state
                  COMMAND forevervalidator-cuda-search-branch-state-tests)
+
+        add_executable(forevervalidator-cuda-search-prefix-integration-tests
+            tests/cuda_search_prefix_integration_tests.cpp)
+        target_include_directories(
+            forevervalidator-cuda-search-prefix-integration-tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_link_libraries(
+            forevervalidator-cuda-search-prefix-integration-tests PRIVATE
+            forevervalidator_core CUDA::cudart)
+        forevervalidator_configure_target(
+            forevervalidator-cuda-search-prefix-integration-tests)
+        add_test(NAME forevervalidator-cuda-search-prefix-integration
+                 COMMAND
+                 forevervalidator-cuda-search-prefix-integration-tests)
+        set_tests_properties(
+            forevervalidator-cuda-search-prefix-integration PROPERTIES
+            RUN_SERIAL TRUE
+            RESOURCE_LOCK forevervalidator_cuda
+            SKIP_RETURN_CODE 77
+            TIMEOUT 120
+            LABELS cuda)
     endif()
 
     add_executable(forevervalidator-render-scene-tests

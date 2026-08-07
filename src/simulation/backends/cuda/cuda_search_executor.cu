@@ -150,6 +150,7 @@ namespace sparse_events = cuda::sparse_candidate_events;
 struct DeviceBatchSummary {
     CudaSearchStatus status = CudaSearchStatus::Success;
     std::uint32_t evaluatedCandidateCount = 0u;
+    std::uint32_t simulatedCandidateCount = 0u;
     std::uint64_t evaluatorCalls = 0u;
     std::uint64_t qualifyingCandidateCount = 0u;
     double closestTargetDistanceSquared =
@@ -3929,6 +3930,7 @@ __global__ void CaptureSearchWinnerStateKernel(
 
 struct DeviceBatchCounters {
     std::uint32_t evaluatedCandidateCount = 0u;
+    std::uint32_t simulatedCandidateCount = 0u;
     std::uint64_t evaluatorCalls = 0u;
     std::uint64_t qualifyingCandidateCount = 0u;
     std::uint64_t totalMutationCount = 0u;
@@ -3942,6 +3944,8 @@ struct AddDeviceBatchCounters {
         return {
                 left.evaluatedCandidateCount +
                         right.evaluatedCandidateCount,
+                left.simulatedCandidateCount +
+                        right.simulatedCandidateCount,
                 left.evaluatorCalls + right.evaluatorCalls,
                 left.qualifyingCandidateCount +
                         right.qualifyingCandidateCount,
@@ -3958,6 +3962,8 @@ void AccumulateSearchBatchSummaryKernel(
         const std::uint32_t *__restrict__ mutationCounts,
         const DeviceCandidateStatus *__restrict__ statuses,
         const bool *__restrict__ activeCandidates,
+        const std::uint32_t *__restrict__ representativeSlots,
+        bool deduplicateCandidateInputs,
         std::uint32_t candidateCount,
         std::uint32_t evaluationTickCount,
         const double *__restrict__ blockClosestTargetDistanceSquared,
@@ -3994,6 +4000,11 @@ void AccumulateSearchBatchSummaryKernel(
     if (validSlot) {
         const bool active = activeCandidates[slot];
         local.evaluatedCandidateCount = active ? 1u : 0u;
+        local.simulatedCandidateCount =
+                active &&
+                        (!deduplicateCandidateInputs ||
+                         representativeSlots[slot] == slot)
+                ? 1u : 0u;
         local.evaluatorCalls = active
                 ? static_cast<std::uint64_t>(evaluationTickCount)
                 : 0u;
@@ -4021,6 +4032,9 @@ void AccumulateSearchBatchSummaryKernel(
         atomicAdd(
                 &summary->evaluatedCandidateCount,
                 block.evaluatedCandidateCount);
+        atomicAdd(
+                &summary->simulatedCandidateCount,
+                block.simulatedCandidateCount);
         atomicAdd(
                 reinterpret_cast<unsigned long long *>(
                         &summary->evaluatorCalls),
@@ -5447,6 +5461,9 @@ struct CudaSearchExecutor::Impl {
         const bool deduplicateCandidateInputs =
                 useBaselinePrefixes &&
                 DeduplicationStorageEligible(candidateCount);
+        result.baselinePrefixReuseActive = useBaselinePrefixes;
+        result.candidateDeduplicationActive =
+                deduplicateCandidateInputs;
         std::uint32_t deduplicationReplicaLimit = 1u;
         if (deduplicateCandidateInputs) {
             const std::uint64_t residentWorkers =
@@ -5469,6 +5486,11 @@ struct CudaSearchExecutor::Impl {
                             : replicas > UINT32_MAX
                             ? UINT32_MAX
                             : replicas);
+            if (configuration.
+                        deduplicationReplicaLimitForTesting != 0u) {
+                deduplicationReplicaLimit = configuration.
+                        deduplicationReplicaLimitForTesting;
+            }
         }
         const std::uint32_t *simulationCandidateSlots = nullptr;
         const std::uint64_t *simulationKeys = nullptr;
@@ -5894,6 +5916,10 @@ struct CudaSearchExecutor::Impl {
                 prefixBestSamples.Get(), candidateBestSamples.Get(),
                 mutationCounts.Get(),
                 statuses.Get(), activeCandidates.Get(),
+                deduplicateCandidateInputs
+                        ? candidateRepresentativeSlots.Get()
+                        : nullptr,
+                deduplicateCandidateInputs,
                 candidateCount, evaluationTickCount,
                 closestTargetDistanceSquaredByBlock.Get(), simulationBlocks,
                 summary.Get());
@@ -6074,6 +6100,14 @@ struct CudaSearchExecutor::Impl {
         result.status = hostSummary.status;
         result.evaluatedCandidateCount =
                 hostSummary.evaluatedCandidateCount;
+        result.simulatedCandidateCount =
+                hostSummary.simulatedCandidateCount;
+        result.deduplicatedCandidateCount =
+                hostSummary.evaluatedCandidateCount >=
+                                hostSummary.simulatedCandidateCount
+                ? hostSummary.evaluatedCandidateCount -
+                          hostSummary.simulatedCandidateCount
+                : 0u;
         result.evaluatorCalls = hostSummary.evaluatorCalls;
         result.qualifyingCandidateCount =
                 hostSummary.qualifyingCandidateCount;

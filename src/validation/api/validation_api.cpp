@@ -3230,6 +3230,14 @@ PhysicsSandboxCudaSearchSession::Impl::Convert(
             execution.candidatePrefixDeviceBytes;
     result.metrics.candidateDeduplicationDeviceBytes =
             execution.candidateDeduplicationDeviceBytes;
+    result.metrics.baselinePrefixReuseActive =
+            execution.baselinePrefixReuseActive;
+    result.metrics.candidateDeduplicationActive =
+            execution.candidateDeduplicationActive;
+    result.metrics.simulatedCandidateCount =
+            execution.simulatedCandidateCount;
+    result.metrics.deduplicatedCandidateCount =
+            execution.deduplicatedCandidateCount;
     result.metrics.simulationSelectedMinimumBlocksPerMultiprocessor =
             execution.simulationSelectedMinimumBlocksPerMultiprocessor;
     result.metrics.simulationThreadsPerBlock =

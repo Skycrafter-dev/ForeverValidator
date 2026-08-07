@@ -191,6 +191,10 @@ struct CudaSearchExecutorConfiguration {
     bool sortCandidatesByLocality = true;
     bool reuseBaselinePrefixes = true;
     bool deduplicateLowEntropyCandidateInputs = true;
+    // Zero selects the occupancy-derived production value. Tests may force a
+    // small replica count so representative expansion is exercised by a
+    // bounded batch on high-SM GPUs.
+    std::uint32_t deduplicationReplicaLimitForTesting = 0u;
     std::uint32_t simulationMinimumBlocksPerMultiprocessorForTesting = 0u;
     bool captureBestState = true;
     std::optional<CudaSearchIncumbent> incumbent;
@@ -361,6 +365,10 @@ struct CudaSearchBatchExecution {
     std::uint64_t baselinePrefixDeviceBytes = 0u;
     std::uint64_t candidatePrefixDeviceBytes = 0u;
     std::uint64_t candidateDeduplicationDeviceBytes = 0u;
+    bool baselinePrefixReuseActive = false;
+    bool candidateDeduplicationActive = false;
+    std::uint32_t simulatedCandidateCount = 0u;
+    std::uint32_t deduplicatedCandidateCount = 0u;
     // Candidate-best and prefix-best samples, the scan output, and CUB scan
     // temporary storage. This is independent of evaluationTickCount.
     std::uint64_t winnerSelectionDeviceBytes = 0u;
