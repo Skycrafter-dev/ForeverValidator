@@ -431,13 +431,104 @@ struct PhysicsSandboxCudaStuntPointsEvaluator {};
 
 struct PhysicsSandboxCudaFinishTimeEvaluator {};
 
+// Generic score-expression bytecode for callers that need CUDA evaluation
+// beyond the specialized evaluator fast paths above. The program is postfix:
+// source/constant instructions push values and operators consume their
+// operands from the stack. Programs are validated by the CUDA search session
+// before any kernel launch.
+enum class PhysicsSandboxCudaExpressionOpcode : std::uint32_t {
+    Constant,
+    Boolean,
+    Source,
+    Vector,
+    Direction,
+    Rotation,
+    Distance,
+    Magnitude,
+    Normalize,
+    Dot,
+    RotationDistance,
+    PercentRatio,
+    KilometersPerHour,
+    Absolute,
+    Clamp,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Minimum,
+    Maximum,
+    Less,
+    LessOrEqual,
+    Equal,
+    GreaterOrEqual,
+    Greater,
+    LogicalAnd,
+    LogicalOr,
+    LogicalNot,
+    InsideBox,
+    InsidePrism,
+    WeightedBlend,
+};
+
+enum class PhysicsSandboxCudaExpressionSource : std::uint32_t {
+    CarPosition,
+    CarVelocity,
+    CarLocalVelocity,
+    CarSpeed,
+    StuntPoints,
+    FinishTime,
+    SimulationTime,
+    CheckpointCount,
+    RaceCompleted,
+    Sliding,
+    FreeWheeling,
+    CarRotation,
+};
+
+struct PhysicsSandboxCudaExpressionInstruction {
+    PhysicsSandboxCudaExpressionOpcode opcode =
+            PhysicsSandboxCudaExpressionOpcode::Constant;
+    PhysicsSandboxCudaExpressionSource source =
+            PhysicsSandboxCudaExpressionSource::CarSpeed;
+    double value = 0.0;
+};
+
+enum class PhysicsSandboxCudaExpressionPlane : std::uint32_t {
+    XY,
+    XZ,
+    YZ,
+};
+
+struct PhysicsSandboxCudaExpressionPoint2 {
+    double x = 0.0;
+    double y = 0.0;
+};
+
+struct PhysicsSandboxCudaExpressionPrism {
+    PhysicsSandboxCudaExpressionPlane plane =
+            PhysicsSandboxCudaExpressionPlane::XZ;
+    std::uint32_t vertexOffset = 0u;
+    std::uint32_t vertexCount = 0u;
+};
+
+struct PhysicsSandboxCudaExpressionEvaluator {
+    std::vector<PhysicsSandboxCudaExpressionInstruction> score;
+    std::vector<PhysicsSandboxCudaExpressionInstruction> condition;
+    std::vector<PhysicsSandboxCudaExpressionPrism> prisms;
+    std::vector<PhysicsSandboxCudaExpressionPoint2> prismVertices;
+    bool maximize = false;
+    bool firstTime = false;
+};
+
 using PhysicsSandboxCudaEvaluator = std::variant<
         PhysicsSandboxCudaVelocityEvaluator,
         PhysicsSandboxCudaPointEvaluator,
         PhysicsSandboxCudaPoseEvaluator,
         PhysicsSandboxCudaVolumeEntryEvaluator,
         PhysicsSandboxCudaStuntPointsEvaluator,
-        PhysicsSandboxCudaFinishTimeEvaluator>;
+        PhysicsSandboxCudaFinishTimeEvaluator,
+        PhysicsSandboxCudaExpressionEvaluator>;
 
 struct PhysicsSandboxCudaSearchIncumbent {
     bool mutation = false;

@@ -2020,8 +2020,502 @@ __device__ __noinline__ bool EvaluateCondition(
     return size == 1u && !stack[0].vector && stack[0].x != 0.0;
 }
 
+enum class DeviceExpressionKind : std::uint32_t {
+    Scalar,
+    Vector,
+    Rotation,
+    Boolean,
+};
+
+struct DeviceExpressionValue {
+    double x = 0.0;
+    double y = 0.0;
+    double z = 0.0;
+    double w = 0.0;
+    DeviceExpressionKind kind = DeviceExpressionKind::Scalar;
+};
+
+__device__ DeviceExpressionValue ExpressionScalar(double value) {
+    return {value, 0.0, 0.0, 0.0, DeviceExpressionKind::Scalar};
+}
+
+__device__ DeviceExpressionValue ExpressionBoolean(bool value) {
+    return {value ? 1.0 : 0.0, 0.0, 0.0, 0.0,
+            DeviceExpressionKind::Boolean};
+}
+
+__device__ DeviceExpressionValue ExpressionVector(const GmVec3 &value) {
+    return {static_cast<double>(value.x), static_cast<double>(value.y),
+            static_cast<double>(value.z), 0.0,
+            DeviceExpressionKind::Vector};
+}
+
+__device__ bool ExpressionPointOnSegment(
+        double px, double py,
+        double ax, double ay,
+        double bx, double by) {
+    constexpr double tolerance = 1e-9;
+    const double cross =
+            (px - ax) * (by - ay) - (py - ay) * (bx - ax);
+    if (fabs(cross) > tolerance) return false;
+    return px >= fmin(ax, bx) - tolerance &&
+            px <= fmax(ax, bx) + tolerance &&
+            py >= fmin(ay, by) - tolerance &&
+            py <= fmax(ay, by) + tolerance;
+}
+
+__device__ bool ExpressionContainsPrism(
+        const CudaSearchExpressionPrism &prism,
+        const CudaSearchExpressionPoint2 *vertices,
+        const DeviceExpressionValue &position,
+        const DeviceExpressionValue &origin,
+        double depth) {
+    if (vertices == nullptr || prism.vertexCount < 3u ||
+        !isfinite(depth) || depth <= 0.0) {
+        return false;
+    }
+    double planeX = 0.0;
+    double planeY = 0.0;
+    double normal = 0.0;
+    if (prism.plane == 0u) {
+        planeX = position.x - origin.x;
+        planeY = position.y - origin.y;
+        normal = position.z - origin.z;
+    } else if (prism.plane == 1u) {
+        planeX = position.x - origin.x;
+        planeY = position.z - origin.z;
+        normal = position.y - origin.y;
+    } else if (prism.plane == 2u) {
+        planeX = position.y - origin.y;
+        planeY = position.z - origin.z;
+        normal = position.x - origin.x;
+    } else {
+        return false;
+    }
+    if (normal < 0.0 || normal > depth) return false;
+
+    bool inside = false;
+    const CudaSearchExpressionPoint2 *polygon =
+            vertices + prism.vertexOffset;
+    std::uint32_t previous = prism.vertexCount - 1u;
+    for (std::uint32_t index = 0u; index < prism.vertexCount;
+         previous = index++) {
+        const CudaSearchExpressionPoint2 &a = polygon[previous];
+        const CudaSearchExpressionPoint2 &b = polygon[index];
+        if (ExpressionPointOnSegment(
+                    planeX, planeY, a.x, a.y, b.x, b.y)) {
+            return true;
+        }
+        const bool crosses = (a.y > planeY) != (b.y > planeY);
+        if (crosses) {
+            const double crossingX =
+                    (b.x - a.x) * (planeY - a.y) /
+                            (b.y - a.y) +
+                    a.x;
+            if (planeX < crossingX) inside = !inside;
+        }
+    }
+    return inside;
+}
+
+__device__ __noinline__ bool EvaluateExpression(
+        const CudaSearchExpressionInstruction *instructions,
+        std::uint32_t instructionCount,
+        const CudaSearchExpressionPrism *prisms,
+        std::uint32_t prismCount,
+        const CudaSearchExpressionPoint2 *prismVertices,
+        const CudaCandidatePhysicsState &state,
+        double currentTimeMs,
+        std::uint32_t stuntsScore,
+        DeviceExpressionValue *output) {
+    if (instructions == nullptr || instructionCount == 0u || output == nullptr) {
+        return false;
+    }
+    DeviceExpressionValue stack[32];
+    std::uint32_t size = 0u;
+    const auto push = [&](const DeviceExpressionValue &value) {
+        if (size >= 32u) return false;
+        stack[size++] = value;
+        return true;
+    };
+    const auto pop = [&](DeviceExpressionKind kind,
+                         DeviceExpressionValue *value) {
+        if (size == 0u || stack[size - 1u].kind != kind) return false;
+        *value = stack[--size];
+        return true;
+    };
+    for (std::uint32_t index = 0u; index < instructionCount; ++index) {
+        const CudaSearchExpressionInstruction instruction = instructions[index];
+        switch (instruction.opcode) {
+        case CudaSearchExpressionOpcode::Constant:
+            if (!push(ExpressionScalar(instruction.value))) return false;
+            continue;
+        case CudaSearchExpressionOpcode::Boolean:
+            if (!push(ExpressionBoolean(instruction.value != 0.0))) return false;
+            continue;
+        case CudaSearchExpressionOpcode::Source: {
+            const auto source = instruction.source;
+            if (source == CudaSearchExpressionSource::CarPosition) {
+                if (!push(ExpressionVector(state.body.current.position))) return false;
+            } else if (source == CudaSearchExpressionSource::CarVelocity) {
+                if (!push(ExpressionVector(state.body.current.linearSpeed))) return false;
+            } else if (source == CudaSearchExpressionSource::CarLocalVelocity) {
+                if (!push(ExpressionVector(
+                            state.vehicle.frameHistory.physicsCurrent.localLinearSpeed))) {
+                    return false;
+                }
+            } else if (source == CudaSearchExpressionSource::CarSpeed) {
+                if (!push(ExpressionScalar(
+                            ConditionLength(state.body.current.linearSpeed)))) {
+                    return false;
+                }
+            } else if (source == CudaSearchExpressionSource::StuntPoints) {
+                if (!push(ExpressionScalar(static_cast<double>(stuntsScore)))) {
+                    return false;
+                }
+            } else if (source == CudaSearchExpressionSource::FinishTime) {
+                if (!state.finishTime.present) return false;
+                if (!push(ExpressionScalar(
+                            static_cast<double>(
+                                    state.finishTime.value.upperBoundNs) /
+                            1.0e6))) {
+                    return false;
+                }
+            } else if (source == CudaSearchExpressionSource::SimulationTime) {
+                if (!push(ExpressionScalar(currentTimeMs))) return false;
+            } else if (source == CudaSearchExpressionSource::CheckpointCount) {
+                if (!push(ExpressionScalar(static_cast<double>(
+                            state.race.progress.checkpointCount)))) {
+                    return false;
+                }
+            } else if (source == CudaSearchExpressionSource::RaceCompleted) {
+                if (!push(ExpressionBoolean(state.race.progress.raceCompleted))) {
+                    return false;
+                }
+            } else if (source == CudaSearchExpressionSource::Sliding) {
+                bool sliding = false;
+                for (std::uint32_t wheel = 0u;
+                     wheel < cuda::facts::WheelCount(state.vehicle); ++wheel) {
+                    const auto &value =
+                            state.vehicle.wheels.values[wheel].realTime;
+                    sliding = sliding ||
+                            (value.contactPresent && value.slipping);
+                }
+                if (!push(ExpressionBoolean(sliding))) return false;
+            } else if (source == CudaSearchExpressionSource::FreeWheeling) {
+                if (!push(ExpressionBoolean(
+                            state.vehicle.controls.forcedLowSpeedFriction))) {
+                    return false;
+                }
+            } else if (source == CudaSearchExpressionSource::CarRotation) {
+                const GmQuat &rotation = state.body.current.rotationQuat;
+                if (!push({static_cast<double>(rotation.x),
+                           static_cast<double>(rotation.y),
+                           static_cast<double>(rotation.z),
+                           static_cast<double>(rotation.w),
+                           DeviceExpressionKind::Rotation})) {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+            continue;
+        }
+        default:
+            break;
+        }
+
+        if (instruction.opcode == CudaSearchExpressionOpcode::Vector ||
+            instruction.opcode == CudaSearchExpressionOpcode::Direction ||
+            instruction.opcode == CudaSearchExpressionOpcode::Rotation) {
+            DeviceExpressionValue z;
+            DeviceExpressionValue y;
+            DeviceExpressionValue x;
+            if (!pop(DeviceExpressionKind::Scalar, &z) ||
+                !pop(DeviceExpressionKind::Scalar, &y) ||
+                !pop(DeviceExpressionKind::Scalar, &x)) {
+                return false;
+            }
+            if (instruction.opcode == CudaSearchExpressionOpcode::Rotation) {
+                constexpr double degreesToRadians =
+                        3.14159265358979323846 / 180.0;
+                const double hy = x.x * degreesToRadians * 0.5;
+                const double hp = y.x * degreesToRadians * 0.5;
+                const double hr = z.x * degreesToRadians * 0.5;
+                const double cy = cos(hy);
+                const double sy = sin(hy);
+                const double cp = cos(hp);
+                const double sp = sin(hp);
+                const double cr = cos(hr);
+                const double sr = sin(hr);
+                DeviceExpressionValue rotation{
+                        sr * cp * cy - cr * sp * sy,
+                        cr * sp * cy + sr * cp * sy,
+                        cr * cp * sy - sr * sp * cy,
+                        cr * cp * cy + sr * sp * sy,
+                        DeviceExpressionKind::Rotation};
+                const double length = sqrt(
+                        rotation.x * rotation.x +
+                        rotation.y * rotation.y +
+                        rotation.z * rotation.z +
+                        rotation.w * rotation.w);
+                if (!isfinite(length) || length <= 1e-12) return false;
+                rotation.x /= length;
+                rotation.y /= length;
+                rotation.z /= length;
+                rotation.w /= length;
+                if (!push(rotation)) return false;
+                continue;
+            }
+            DeviceExpressionValue vector{x.x, y.x, z.x, 0.0,
+                                         DeviceExpressionKind::Vector};
+            if (instruction.opcode == CudaSearchExpressionOpcode::Direction) {
+                const double length = sqrt(
+                        vector.x * vector.x + vector.y * vector.y +
+                        vector.z * vector.z);
+                if (length <= 1e-12) {
+                    vector.x = vector.y = vector.z = 0.0;
+                } else {
+                    vector.x /= length;
+                    vector.y /= length;
+                    vector.z /= length;
+                }
+            }
+            if (!push(vector)) return false;
+            continue;
+        }
+
+        if (instruction.opcode == CudaSearchExpressionOpcode::Magnitude ||
+            instruction.opcode == CudaSearchExpressionOpcode::Normalize ||
+            instruction.opcode == CudaSearchExpressionOpcode::Absolute ||
+            instruction.opcode == CudaSearchExpressionOpcode::PercentRatio ||
+            instruction.opcode ==
+                    CudaSearchExpressionOpcode::KilometersPerHour ||
+            instruction.opcode == CudaSearchExpressionOpcode::LogicalNot) {
+            if (instruction.opcode == CudaSearchExpressionOpcode::Magnitude ||
+                instruction.opcode == CudaSearchExpressionOpcode::Normalize) {
+                DeviceExpressionValue value;
+                if (!pop(DeviceExpressionKind::Vector, &value)) return false;
+                const double length = sqrt(
+                        value.x * value.x + value.y * value.y +
+                        value.z * value.z);
+                if (instruction.opcode ==
+                    CudaSearchExpressionOpcode::Magnitude) {
+                    if (!push(ExpressionScalar(length))) return false;
+                } else {
+                    if (length <= 1e-12) {
+                        value.x = value.y = value.z = 0.0;
+                    } else {
+                        value.x /= length;
+                        value.y /= length;
+                        value.z /= length;
+                    }
+                    if (!push(value)) return false;
+                }
+                continue;
+            }
+            if (instruction.opcode == CudaSearchExpressionOpcode::LogicalNot) {
+                DeviceExpressionValue value;
+                if (!pop(DeviceExpressionKind::Boolean, &value) ||
+                    !push(ExpressionBoolean(value.x == 0.0))) {
+                    return false;
+                }
+                continue;
+            }
+            DeviceExpressionValue value;
+            if (!pop(DeviceExpressionKind::Scalar, &value)) return false;
+            if (instruction.opcode == CudaSearchExpressionOpcode::Absolute) {
+                value.x = fabs(value.x);
+            } else if (instruction.opcode ==
+                       CudaSearchExpressionOpcode::PercentRatio) {
+                value.x /= 100.0;
+            } else {
+                value.x *= 3.6;
+            }
+            if (!isfinite(value.x) || !push(value)) return false;
+            continue;
+        }
+
+        if (instruction.opcode == CudaSearchExpressionOpcode::Clamp ||
+            instruction.opcode == CudaSearchExpressionOpcode::InsideBox ||
+            instruction.opcode == CudaSearchExpressionOpcode::InsidePrism ||
+            instruction.opcode == CudaSearchExpressionOpcode::WeightedBlend) {
+            if (instruction.opcode == CudaSearchExpressionOpcode::InsideBox) {
+                DeviceExpressionValue sizeValue;
+                DeviceExpressionValue center;
+                DeviceExpressionValue position;
+                if (!pop(DeviceExpressionKind::Vector, &sizeValue) ||
+                    !pop(DeviceExpressionKind::Vector, &center) ||
+                    !pop(DeviceExpressionKind::Vector, &position) ||
+                    !isfinite(sizeValue.x) || !isfinite(sizeValue.y) ||
+                    !isfinite(sizeValue.z) || sizeValue.x <= 0.0 ||
+                    sizeValue.y <= 0.0 || sizeValue.z <= 0.0) {
+                    return false;
+                }
+                const bool inside =
+                        fabs(position.x - center.x) <= sizeValue.x * 0.5 &&
+                        fabs(position.y - center.y) <= sizeValue.y * 0.5 &&
+                        fabs(position.z - center.z) <= sizeValue.z * 0.5;
+                if (!push(ExpressionBoolean(inside))) return false;
+                continue;
+            }
+            if (instruction.opcode == CudaSearchExpressionOpcode::InsidePrism) {
+                DeviceExpressionValue depth;
+                DeviceExpressionValue origin;
+                DeviceExpressionValue position;
+                if (!pop(DeviceExpressionKind::Scalar, &depth) ||
+                    !pop(DeviceExpressionKind::Vector, &origin) ||
+                    !pop(DeviceExpressionKind::Vector, &position) ||
+                    instruction.value < 0.0 ||
+                    instruction.value >= static_cast<double>(prismCount)) {
+                    return false;
+                }
+                const std::uint32_t prismIndex =
+                        static_cast<std::uint32_t>(instruction.value);
+                if (!push(ExpressionBoolean(ExpressionContainsPrism(
+                            prisms[prismIndex], prismVertices,
+                            position, origin, depth.x)))) {
+                    return false;
+                }
+                continue;
+            }
+            DeviceExpressionValue c;
+            DeviceExpressionValue b;
+            DeviceExpressionValue a;
+            if (!pop(DeviceExpressionKind::Scalar, &c) ||
+                !pop(DeviceExpressionKind::Scalar, &b) ||
+                !pop(DeviceExpressionKind::Scalar, &a)) {
+                return false;
+            }
+            if (instruction.opcode == CudaSearchExpressionOpcode::Clamp) {
+                if (b.x > c.x) return false;
+                a.x = a.x < b.x ? b.x : (a.x > c.x ? c.x : a.x);
+            } else {
+                const double weight = c.x / 100.0;
+                a.x = a.x * (1.0 - weight) + b.x * weight;
+            }
+            if (!isfinite(a.x) || !push(a)) return false;
+            continue;
+        }
+
+        if (instruction.opcode == CudaSearchExpressionOpcode::Distance ||
+            instruction.opcode == CudaSearchExpressionOpcode::Dot) {
+            DeviceExpressionValue right;
+            DeviceExpressionValue left;
+            if (!pop(DeviceExpressionKind::Vector, &right) ||
+                !pop(DeviceExpressionKind::Vector, &left)) {
+                return false;
+            }
+            const double value =
+                    instruction.opcode == CudaSearchExpressionOpcode::Distance
+                    ? sqrt((left.x - right.x) * (left.x - right.x) +
+                           (left.y - right.y) * (left.y - right.y) +
+                           (left.z - right.z) * (left.z - right.z))
+                    : left.x * right.x + left.y * right.y + left.z * right.z;
+            if (!isfinite(value) || !push(ExpressionScalar(value))) return false;
+            continue;
+        }
+        if (instruction.opcode ==
+            CudaSearchExpressionOpcode::RotationDistance) {
+            DeviceExpressionValue right;
+            DeviceExpressionValue left;
+            if (!pop(DeviceExpressionKind::Rotation, &right) ||
+                !pop(DeviceExpressionKind::Rotation, &left)) {
+                return false;
+            }
+            const double leftLength = sqrt(
+                    left.x * left.x + left.y * left.y +
+                    left.z * left.z + left.w * left.w);
+            const double rightLength = sqrt(
+                    right.x * right.x + right.y * right.y +
+                    right.z * right.z + right.w * right.w);
+            if (!isfinite(leftLength) || !isfinite(rightLength) ||
+                leftLength <= 1e-12 || rightLength <= 1e-12) {
+                return false;
+            }
+            double dot = fabs(
+                    left.x / leftLength * (right.x / rightLength) +
+                    left.y / leftLength * (right.y / rightLength) +
+                    left.z / leftLength * (right.z / rightLength) +
+                    left.w / leftLength * (right.w / rightLength));
+            dot = dot < 0.0 ? 0.0 : (dot > 1.0 ? 1.0 : dot);
+            if (!push(ExpressionScalar(2.0 * acos(dot)))) return false;
+            continue;
+        }
+
+        if (instruction.opcode == CudaSearchExpressionOpcode::LogicalAnd ||
+            instruction.opcode == CudaSearchExpressionOpcode::LogicalOr) {
+            DeviceExpressionValue right;
+            DeviceExpressionValue left;
+            if (!pop(DeviceExpressionKind::Boolean, &right) ||
+                !pop(DeviceExpressionKind::Boolean, &left)) {
+                return false;
+            }
+            const bool value =
+                    instruction.opcode == CudaSearchExpressionOpcode::LogicalAnd
+                    ? (left.x != 0.0 && right.x != 0.0)
+                    : (left.x != 0.0 || right.x != 0.0);
+            if (!push(ExpressionBoolean(value))) return false;
+            continue;
+        }
+
+        DeviceExpressionValue right;
+        DeviceExpressionValue left;
+        if (!pop(DeviceExpressionKind::Scalar, &right) ||
+            !pop(DeviceExpressionKind::Scalar, &left)) {
+            return false;
+        }
+        if (instruction.opcode == CudaSearchExpressionOpcode::Less ||
+            instruction.opcode == CudaSearchExpressionOpcode::LessOrEqual ||
+            instruction.opcode == CudaSearchExpressionOpcode::Equal ||
+            instruction.opcode == CudaSearchExpressionOpcode::GreaterOrEqual ||
+            instruction.opcode == CudaSearchExpressionOpcode::Greater) {
+            bool value = false;
+            if (instruction.opcode == CudaSearchExpressionOpcode::Less)
+                value = left.x < right.x;
+            if (instruction.opcode == CudaSearchExpressionOpcode::LessOrEqual)
+                value = left.x <= right.x;
+            if (instruction.opcode == CudaSearchExpressionOpcode::Equal)
+                value = left.x == right.x;
+            if (instruction.opcode ==
+                CudaSearchExpressionOpcode::GreaterOrEqual)
+                value = left.x >= right.x;
+            if (instruction.opcode == CudaSearchExpressionOpcode::Greater)
+                value = left.x > right.x;
+            if (!push(ExpressionBoolean(value))) return false;
+            continue;
+        }
+        if (instruction.opcode == CudaSearchExpressionOpcode::Divide &&
+            fabs(right.x) <= 1e-15) {
+            return false;
+        }
+        if (instruction.opcode == CudaSearchExpressionOpcode::Add)
+            left.x += right.x;
+        else if (instruction.opcode == CudaSearchExpressionOpcode::Subtract)
+            left.x -= right.x;
+        else if (instruction.opcode == CudaSearchExpressionOpcode::Multiply)
+            left.x *= right.x;
+        else if (instruction.opcode == CudaSearchExpressionOpcode::Divide)
+            left.x /= right.x;
+        else if (instruction.opcode == CudaSearchExpressionOpcode::Minimum)
+            left.x = left.x < right.x ? left.x : right.x;
+        else if (instruction.opcode == CudaSearchExpressionOpcode::Maximum)
+            left.x = left.x > right.x ? left.x : right.x;
+        else
+            return false;
+        if (!isfinite(left.x) || !push(left)) return false;
+    }
+    if (size != 1u) return false;
+    *output = stack[0];
+    return true;
+}
+
 __device__ DeviceSample EvaluateState(
         const CudaSearchEvaluatorConfiguration &evaluator,
+        const CudaSearchExpressionInstruction *expressionInstructions,
+        const CudaSearchExpressionPrism *expressionPrisms,
+        std::uint32_t expressionPrismCount,
+        const CudaSearchExpressionPoint2 *expressionPrismVertices,
         const CudaCandidatePhysicsState &state,
         const GmVec3 &previousPosition,
         double previousTimeMs,
@@ -2127,6 +2621,50 @@ __device__ DeviceSample EvaluateState(
         result.score = result.timeMs;
         result.valid = true;
         break;
+    case CudaSearchEvaluatorKind::Expression: {
+        DeviceExpressionValue condition;
+        const CudaSearchExpressionInstruction *conditionProgram =
+                expressionInstructions + evaluator.scoreInstructionCount;
+        if (!EvaluateExpression(
+                    conditionProgram,
+                    evaluator.conditionInstructionCount,
+                    expressionPrisms,
+                    expressionPrismCount,
+                    expressionPrismVertices,
+                    state,
+                    currentTimeMs,
+                    stuntsScore,
+                    &condition) ||
+            condition.kind != DeviceExpressionKind::Boolean ||
+            condition.x == 0.0) {
+            return result;
+        }
+        if ((evaluator.optionFlags & 2u) != 0u) {
+            if (*reported) return result;
+            *reported = true;
+            result.score = currentTimeMs;
+            result.valid = true;
+            break;
+        }
+        DeviceExpressionValue score;
+        if (!EvaluateExpression(
+                    expressionInstructions,
+                    evaluator.scoreInstructionCount,
+                    expressionPrisms,
+                    expressionPrismCount,
+                    expressionPrismVertices,
+                    state,
+                    currentTimeMs,
+                    stuntsScore,
+                    &score) ||
+            score.kind != DeviceExpressionKind::Scalar ||
+            !isfinite(score.x)) {
+            return result;
+        }
+        result.score = score.x;
+        result.valid = true;
+        break;
+    }
     }
     return result;
 }
@@ -2135,6 +2673,13 @@ __host__ __device__ bool MaximizesScore(
         CudaSearchEvaluatorKind kind) {
     return kind == CudaSearchEvaluatorKind::Velocity ||
             kind == CudaSearchEvaluatorKind::StuntPoints;
+}
+
+__host__ __device__ bool MaximizesScore(
+        const CudaSearchEvaluatorConfiguration &evaluator) {
+    return evaluator.kind == CudaSearchEvaluatorKind::Expression
+            ? (evaluator.optionFlags & 1u) != 0u
+            : MaximizesScore(evaluator.kind);
 }
 
 __global__ void SeedCandidateBestSamplesKernel(
@@ -2674,6 +3219,11 @@ __global__ __launch_bounds__(
         const CudaControlTick *__restrict__ baselineTicks,
         std::uint32_t timelineTickCount,
         const CudaSearchEvaluatorConfiguration *__restrict__ evaluator,
+        const CudaSearchExpressionInstruction *__restrict__
+                expressionInstructions,
+        const CudaSearchExpressionPrism *__restrict__ expressionPrisms,
+        std::uint32_t expressionPrismCount,
+        const CudaSearchExpressionPoint2 *__restrict__ expressionPrismVertices,
         const CudaSearchConditionInstruction *__restrict__ condition,
         std::uint32_t conditionInstructionCount,
         double lastImprovementTimeSeconds,
@@ -2792,7 +3342,7 @@ __global__ __launch_bounds__(
             responseOrderScratch;
     DeviceControlState controlState = *mutableBoundaryControls;
     bool evaluatorReported = false;
-    const bool maximize = MaximizesScore(configuredEvaluator.kind);
+    const bool maximize = MaximizesScore(configuredEvaluator);
     DeviceSample localBest;
     std::uint32_t evaluationIndex = 0u;
     if (finishCheckpointTicks != nullptr) {
@@ -2919,7 +3469,10 @@ __global__ __launch_bounds__(
             stuntsScore = state.stunts.stuntsScore;
         }
         DeviceSample sample = EvaluateState(
-                configuredEvaluator, state, previousPosition,
+                configuredEvaluator, expressionInstructions,
+                expressionPrisms, expressionPrismCount,
+                expressionPrismVertices,
+                state, previousPosition,
                 static_cast<double>(publicTime - tickDurationMs),
                 static_cast<double>(publicTime),
                 stuntsScore,
@@ -3548,6 +4101,9 @@ struct CudaSearchExecutor::Impl {
     DeviceAllocation<CudaSearchModifierConfiguration> modifiers;
     DeviceAllocation<double> smoothWeights;
     DeviceAllocation<CudaSearchEvaluatorConfiguration> evaluator;
+    DeviceAllocation<CudaSearchExpressionInstruction> expressionInstructions;
+    DeviceAllocation<CudaSearchExpressionPrism> expressionPrisms;
+    DeviceAllocation<CudaSearchExpressionPoint2> expressionPrismVertices;
     DeviceAllocation<CudaSearchConditionInstruction> condition;
     DeviceAllocation<CudaCandidateState> capturedWinnerState;
     DeviceAllocation<DeviceSample> candidateBestSamples;
@@ -3604,6 +4160,9 @@ struct CudaSearchExecutor::Impl {
         ADD_BYTES(modifiers);
         ADD_BYTES(smoothWeights);
         ADD_BYTES(evaluator);
+        ADD_BYTES(expressionInstructions);
+        ADD_BYTES(expressionPrisms);
+        ADD_BYTES(expressionPrismVertices);
         ADD_BYTES(condition);
         ADD_BYTES(capturedWinnerState);
         ADD_BYTES(candidateBestSamples);
@@ -4191,7 +4750,7 @@ struct CudaSearchExecutor::Impl {
                 nextCandidateBestSamples.Get(), reducedBest.Get(),
                 winnerSlots,
                 BetterSample{
-                        MaximizesScore(configuration.evaluator.kind)},
+                        MaximizesScore(configuration.evaluator)},
                 DeviceSample{});
         if (error != cudaSuccess ||
             !nextReductionTemporary.Allocate(reductionBytes)) {
@@ -4467,6 +5026,11 @@ struct CudaSearchExecutor::Impl {
                     baselineTicks.Get(),
                     timelineTickCount,
                     evaluator.Get(),
+                    expressionInstructions.Get(),
+                    expressionPrisms.Get(),
+                    static_cast<std::uint32_t>(
+                            configuration.expressionPrisms.size()),
+                    expressionPrismVertices.Get(),
                     condition.Get(),
                     conditionInstructionCount,
                     lastImprovementTimeSeconds,
@@ -4547,6 +5111,11 @@ struct CudaSearchExecutor::Impl {
                     baselineTicks.Get(),
                     timelineTickCount,
                     evaluator.Get(),
+                    expressionInstructions.Get(),
+                    expressionPrisms.Get(),
+                    static_cast<std::uint32_t>(
+                            configuration.expressionPrisms.size()),
+                    expressionPrismVertices.Get(),
                     condition.Get(),
                     conditionInstructionCount,
                     lastImprovementTimeSeconds,
@@ -4667,7 +5236,7 @@ struct CudaSearchExecutor::Impl {
                 candidateBestSamples.Get(), reducedBest.Get(),
                 winnerCount,
                 BetterSample{
-                        MaximizesScore(configuration.evaluator.kind)},
+                        MaximizesScore(configuration.evaluator)},
                 DeviceSample{});
         if (error != cudaSuccess) {
             result.status = CudaSearchStatus::DeviceFailure;
@@ -4747,7 +5316,7 @@ struct CudaSearchExecutor::Impl {
                 static_cast<std::uint32_t>(
                         configuration.maximumEventCount),
                 evaluationTickCount,
-                MaximizesScore(configuration.evaluator.kind),
+                MaximizesScore(configuration.evaluator),
                 baseline,
                 configuration.captureBestState,
                 globalBestSample.Get(),
@@ -5715,6 +6284,12 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
             !impl->smoothWeights.Allocate(
                     preparedConfiguration.smoothWeights.size()) ||
             !impl->evaluator.Allocate(1u) ||
+            !impl->expressionInstructions.Allocate(
+                    preparedConfiguration.expressionInstructions.size()) ||
+            !impl->expressionPrisms.Allocate(
+                    preparedConfiguration.expressionPrisms.size()) ||
+            !impl->expressionPrismVertices.Allocate(
+                    preparedConfiguration.expressionPrismVertices.size()) ||
             !impl->condition.Allocate(
                     preparedConfiguration.condition
                             ? preparedConfiguration.condition->instructions.size()
@@ -5800,8 +6375,7 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
                 impl->reducedBest.Get(),
                 winnerSampleSlots,
                 BetterSample{
-                        MaximizesScore(
-                                preparedConfiguration.evaluator.kind)},
+                        MaximizesScore(preparedConfiguration.evaluator)},
                 DeviceSample{});
         if (error != cudaSuccess ||
             !impl->reductionTemporary.Allocate(reductionBytes)) {
@@ -5871,6 +6445,15 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
         UPLOAD(impl->smoothWeights,
                preparedConfiguration.smoothWeights,
                "uploading CUDA smooth weights");
+        UPLOAD(impl->expressionInstructions,
+               preparedConfiguration.expressionInstructions,
+               "uploading CUDA expression program");
+        UPLOAD(impl->expressionPrisms,
+               preparedConfiguration.expressionPrisms,
+               "uploading CUDA expression prism descriptors");
+        UPLOAD(impl->expressionPrismVertices,
+               preparedConfiguration.expressionPrismVertices,
+               "uploading CUDA expression prism vertices");
         if (preparedConfiguration.condition) {
             UPLOAD(impl->condition,
                    preparedConfiguration.condition->instructions,

@@ -64,12 +64,82 @@ enum class CudaSearchEvaluatorKind : std::uint32_t {
     VolumeEntry,
     StuntPoints,
     FinishTime,
+    Expression,
 };
 
 struct CudaSearchEvaluatorConfiguration {
     CudaSearchEvaluatorKind kind = CudaSearchEvaluatorKind::FinishTime;
     std::uint32_t optionFlags = 0u;
+    std::uint32_t scoreInstructionCount = 0u;
+    std::uint32_t conditionInstructionCount = 0u;
     double values[10]{};
+};
+
+enum class CudaSearchExpressionOpcode : std::uint32_t {
+    Constant,
+    Boolean,
+    Source,
+    Vector,
+    Direction,
+    Rotation,
+    Distance,
+    Magnitude,
+    Normalize,
+    Dot,
+    RotationDistance,
+    PercentRatio,
+    KilometersPerHour,
+    Absolute,
+    Clamp,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Minimum,
+    Maximum,
+    Less,
+    LessOrEqual,
+    Equal,
+    GreaterOrEqual,
+    Greater,
+    LogicalAnd,
+    LogicalOr,
+    LogicalNot,
+    InsideBox,
+    InsidePrism,
+    WeightedBlend,
+};
+
+enum class CudaSearchExpressionSource : std::uint32_t {
+    CarPosition,
+    CarVelocity,
+    CarLocalVelocity,
+    CarSpeed,
+    StuntPoints,
+    FinishTime,
+    SimulationTime,
+    CheckpointCount,
+    RaceCompleted,
+    Sliding,
+    FreeWheeling,
+    CarRotation,
+};
+
+struct CudaSearchExpressionInstruction {
+    CudaSearchExpressionOpcode opcode = CudaSearchExpressionOpcode::Constant;
+    CudaSearchExpressionSource source = CudaSearchExpressionSource::CarSpeed;
+    double value = 0.0;
+};
+
+struct CudaSearchExpressionPrism {
+    std::uint32_t plane = 1u;
+    std::uint32_t vertexOffset = 0u;
+    std::uint32_t vertexCount = 0u;
+};
+
+struct CudaSearchExpressionPoint2 {
+    double x = 0.0;
+    double y = 0.0;
 };
 
 enum class CudaSearchConditionOpcode : std::uint32_t {
@@ -180,6 +250,9 @@ struct CudaSearchExecutorConfiguration {
     std::vector<CudaSearchModifierConfiguration> modifiers;
     std::vector<double> smoothWeights;
     CudaSearchEvaluatorConfiguration evaluator{};
+    std::vector<CudaSearchExpressionInstruction> expressionInstructions;
+    std::vector<CudaSearchExpressionPrism> expressionPrisms;
+    std::vector<CudaSearchExpressionPoint2> expressionPrismVertices;
     std::optional<CudaSearchConditionConfiguration> condition;
     std::uint32_t maximumBatchSize = 1u;
     std::uint32_t tickDurationMs = 10u;

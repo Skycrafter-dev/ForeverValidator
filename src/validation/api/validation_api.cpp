@@ -1866,9 +1866,16 @@ simulation::CudaSearchModifierConfiguration CudaModifier(
 }
 
 simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
-        const PhysicsSandboxCudaEvaluator &source) {
+        const PhysicsSandboxCudaEvaluator &source,
+        std::vector<simulation::CudaSearchExpressionInstruction>
+                *expressionInstructions,
+        std::vector<simulation::CudaSearchExpressionPrism> *expressionPrisms,
+        std::vector<simulation::CudaSearchExpressionPoint2>
+                *expressionPrismVertices) {
     return std::visit(
-            [](const auto &evaluator) {
+            [expressionInstructions,
+             expressionPrisms,
+             expressionPrismVertices](const auto &evaluator) {
                 using T = std::decay_t<decltype(evaluator)>;
                 simulation::CudaSearchEvaluatorConfiguration result;
                 if constexpr (std::is_same_v<
@@ -1920,13 +1927,337 @@ simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
                                              PhysicsSandboxCudaStuntPointsEvaluator>) {
                     result.kind =
                             simulation::CudaSearchEvaluatorKind::StuntPoints;
-                } else {
+                } else if constexpr (std::is_same_v<
+                                             T,
+                                             PhysicsSandboxCudaFinishTimeEvaluator>) {
                     result.kind =
                             simulation::CudaSearchEvaluatorKind::FinishTime;
+                } else {
+                    result.kind =
+                            simulation::CudaSearchEvaluatorKind::Expression;
+                    result.optionFlags =
+                            (evaluator.maximize ? 1u : 0u) |
+                            (evaluator.firstTime ? 2u : 0u);
+                    result.scoreInstructionCount =
+                            static_cast<std::uint32_t>(evaluator.score.size());
+                    result.conditionInstructionCount =
+                            static_cast<std::uint32_t>(evaluator.condition.size());
+                    expressionInstructions->reserve(
+                            evaluator.score.size() + evaluator.condition.size());
+                    const auto append = [&](const auto &program) {
+                        for (const PhysicsSandboxCudaExpressionInstruction
+                                     &instruction : program) {
+                            expressionInstructions->push_back({
+                                    static_cast<simulation::
+                                            CudaSearchExpressionOpcode>(
+                                            instruction.opcode),
+                                    static_cast<simulation::
+                                            CudaSearchExpressionSource>(
+                                            instruction.source),
+                                    instruction.value});
+                        }
+                    };
+                    append(evaluator.score);
+                    append(evaluator.condition);
+                    expressionPrisms->reserve(evaluator.prisms.size());
+                    for (const PhysicsSandboxCudaExpressionPrism &prism :
+                         evaluator.prisms) {
+                        expressionPrisms->push_back({
+                                static_cast<std::uint32_t>(prism.plane),
+                                prism.vertexOffset,
+                                prism.vertexCount});
+                    }
+                    expressionPrismVertices->reserve(
+                            evaluator.prismVertices.size());
+                    for (const PhysicsSandboxCudaExpressionPoint2 &vertex :
+                         evaluator.prismVertices) {
+                        expressionPrismVertices->push_back(
+                                {vertex.x, vertex.y});
+                    }
                 }
                 return result;
             },
             source);
+}
+
+std::optional<std::string> ValidateCudaExpressionPrisms(
+        const PhysicsSandboxCudaExpressionEvaluator &evaluator) {
+    constexpr std::size_t kMaximumPrisms = 256u;
+    constexpr std::size_t kMaximumVertices = 65536u;
+    if (evaluator.prisms.size() > kMaximumPrisms) {
+        return "CUDA expression contains too many prism constants";
+    }
+    if (evaluator.prismVertices.size() > kMaximumVertices) {
+        return "CUDA expression prism geometry is too large";
+    }
+    for (const PhysicsSandboxCudaExpressionPoint2 &vertex :
+         evaluator.prismVertices) {
+        if (!std::isfinite(vertex.x) || !std::isfinite(vertex.y)) {
+            return "CUDA expression prism contains a non-finite vertex";
+        }
+    }
+    for (const PhysicsSandboxCudaExpressionPrism &prism : evaluator.prisms) {
+        if (static_cast<std::uint32_t>(prism.plane) >
+            static_cast<std::uint32_t>(PhysicsSandboxCudaExpressionPlane::YZ)) {
+            return "CUDA expression prism has an invalid plane";
+        }
+        if (prism.vertexCount < 3u || prism.vertexCount > 256u) {
+            return "CUDA expression prism must contain between 3 and 256 vertices";
+        }
+        const std::uint64_t end =
+                static_cast<std::uint64_t>(prism.vertexOffset) +
+                static_cast<std::uint64_t>(prism.vertexCount);
+        if (end > evaluator.prismVertices.size()) {
+            return "CUDA expression prism vertex range is invalid";
+        }
+    }
+    return std::nullopt;
+}
+
+enum class CudaExpressionValidationKind {
+    Scalar,
+    Vector,
+    Rotation,
+    Boolean,
+};
+
+std::optional<std::string> ValidateCudaExpressionProgram(
+        const std::vector<PhysicsSandboxCudaExpressionInstruction> &program,
+        CudaExpressionValidationKind expected) {
+    constexpr std::size_t kMaximumInstructions = 4096u;
+    constexpr std::size_t kMaximumStack = 32u;
+    if (program.empty()) {
+        return "CUDA expression program must not be empty";
+    }
+    if (program.size() > kMaximumInstructions) {
+        return "CUDA expression program exceeds the 4096-instruction limit";
+    }
+    std::vector<CudaExpressionValidationKind> stack;
+    stack.reserve(kMaximumStack);
+    const auto push = [&](CudaExpressionValidationKind value)
+            -> std::optional<std::string> {
+        if (stack.size() >= kMaximumStack) {
+            return "CUDA expression requires more than 32 temporary values";
+        }
+        stack.push_back(value);
+        return std::nullopt;
+    };
+    const auto pop = [&](CudaExpressionValidationKind value,
+                         const char *name) -> std::optional<std::string> {
+        if (stack.empty() || stack.back() != value) {
+            return std::string("CUDA expression '") + name +
+                    "' received an operand of the wrong type";
+        }
+        stack.pop_back();
+        return std::nullopt;
+    };
+    const auto unary = [&](CudaExpressionValidationKind input,
+                           CudaExpressionValidationKind output,
+                           const char *name) -> std::optional<std::string> {
+        if (const auto error = pop(input, name)) return error;
+        return push(output);
+    };
+    const auto binary = [&](CudaExpressionValidationKind input,
+                            CudaExpressionValidationKind output,
+                            const char *name) -> std::optional<std::string> {
+        if (const auto error = pop(input, name)) return error;
+        if (const auto error = pop(input, name)) return error;
+        return push(output);
+    };
+    const auto ternary = [&](CudaExpressionValidationKind input,
+                             CudaExpressionValidationKind output,
+                             const char *name) -> std::optional<std::string> {
+        if (const auto error = pop(input, name)) return error;
+        if (const auto error = pop(input, name)) return error;
+        if (const auto error = pop(input, name)) return error;
+        return push(output);
+    };
+
+    for (const PhysicsSandboxCudaExpressionInstruction &instruction : program) {
+        using Opcode = PhysicsSandboxCudaExpressionOpcode;
+        using Source = PhysicsSandboxCudaExpressionSource;
+        switch (instruction.opcode) {
+        case Opcode::Constant:
+            if (!std::isfinite(instruction.value)) {
+                return "CUDA expression contains a non-finite constant";
+            }
+            if (const auto error = push(CudaExpressionValidationKind::Scalar))
+                return error;
+            break;
+        case Opcode::Boolean:
+            if (instruction.value != 0.0 && instruction.value != 1.0) {
+                return "CUDA expression Boolean literals must be 0 or 1";
+            }
+            if (const auto error = push(CudaExpressionValidationKind::Boolean))
+                return error;
+            break;
+        case Opcode::Source: {
+            CudaExpressionValidationKind kind;
+            switch (instruction.source) {
+            case Source::CarPosition:
+            case Source::CarVelocity:
+            case Source::CarLocalVelocity:
+                kind = CudaExpressionValidationKind::Vector;
+                break;
+            case Source::CarRotation:
+                kind = CudaExpressionValidationKind::Rotation;
+                break;
+            case Source::RaceCompleted:
+            case Source::Sliding:
+            case Source::FreeWheeling:
+                kind = CudaExpressionValidationKind::Boolean;
+                break;
+            case Source::CarSpeed:
+            case Source::StuntPoints:
+            case Source::FinishTime:
+            case Source::SimulationTime:
+            case Source::CheckpointCount:
+                kind = CudaExpressionValidationKind::Scalar;
+                break;
+            default:
+                return "CUDA expression contains an unknown state source";
+            }
+            if (const auto error = push(kind)) return error;
+            break;
+        }
+        case Opcode::Vector:
+        case Opcode::Direction:
+            if (const auto error = ternary(
+                        CudaExpressionValidationKind::Scalar,
+                        CudaExpressionValidationKind::Vector,
+                        instruction.opcode == Opcode::Vector ? "vector" :
+                                                              "direction"))
+                return error;
+            break;
+        case Opcode::Rotation:
+            if (const auto error = ternary(
+                        CudaExpressionValidationKind::Scalar,
+                        CudaExpressionValidationKind::Rotation,
+                        "rotation"))
+                return error;
+            break;
+        case Opcode::Distance:
+        case Opcode::Dot:
+            if (const auto error = binary(
+                        CudaExpressionValidationKind::Vector,
+                        CudaExpressionValidationKind::Scalar,
+                        instruction.opcode == Opcode::Distance ? "distance" :
+                                                                "dot"))
+                return error;
+            break;
+        case Opcode::RotationDistance:
+            if (const auto error = binary(
+                        CudaExpressionValidationKind::Rotation,
+                        CudaExpressionValidationKind::Scalar,
+                        "rotation distance"))
+                return error;
+            break;
+        case Opcode::Magnitude:
+            if (const auto error = unary(
+                        CudaExpressionValidationKind::Vector,
+                        CudaExpressionValidationKind::Scalar,
+                        "magnitude"))
+                return error;
+            break;
+        case Opcode::Normalize:
+            if (const auto error = unary(
+                        CudaExpressionValidationKind::Vector,
+                        CudaExpressionValidationKind::Vector,
+                        "normalize"))
+                return error;
+            break;
+        case Opcode::PercentRatio:
+        case Opcode::KilometersPerHour:
+        case Opcode::Absolute:
+            if (const auto error = unary(
+                        CudaExpressionValidationKind::Scalar,
+                        CudaExpressionValidationKind::Scalar,
+                        "scalar unary operator"))
+                return error;
+            break;
+        case Opcode::LogicalNot:
+            if (const auto error = unary(
+                        CudaExpressionValidationKind::Boolean,
+                        CudaExpressionValidationKind::Boolean,
+                        "not"))
+                return error;
+            break;
+        case Opcode::Add:
+        case Opcode::Subtract:
+        case Opcode::Multiply:
+        case Opcode::Divide:
+        case Opcode::Minimum:
+        case Opcode::Maximum:
+            if (const auto error = binary(
+                        CudaExpressionValidationKind::Scalar,
+                        CudaExpressionValidationKind::Scalar,
+                        "scalar binary operator"))
+                return error;
+            break;
+        case Opcode::Less:
+        case Opcode::LessOrEqual:
+        case Opcode::Equal:
+        case Opcode::GreaterOrEqual:
+        case Opcode::Greater:
+            if (const auto error = binary(
+                        CudaExpressionValidationKind::Scalar,
+                        CudaExpressionValidationKind::Boolean,
+                        "comparison"))
+                return error;
+            break;
+        case Opcode::LogicalAnd:
+        case Opcode::LogicalOr:
+            if (const auto error = binary(
+                        CudaExpressionValidationKind::Boolean,
+                        CudaExpressionValidationKind::Boolean,
+                        "Boolean operator"))
+                return error;
+            break;
+        case Opcode::Clamp:
+        case Opcode::WeightedBlend:
+            if (const auto error = ternary(
+                        CudaExpressionValidationKind::Scalar,
+                        CudaExpressionValidationKind::Scalar,
+                        instruction.opcode == Opcode::Clamp ? "clamp" :
+                                                             "weighted blend"))
+                return error;
+            break;
+        case Opcode::InsideBox:
+            if (const auto error = ternary(
+                        CudaExpressionValidationKind::Vector,
+                        CudaExpressionValidationKind::Boolean,
+                        "inside box"))
+                return error;
+            break;
+        case Opcode::InsidePrism:
+            if (!std::isfinite(instruction.value) ||
+                instruction.value < 0.0 ||
+                std::floor(instruction.value) != instruction.value) {
+                return "CUDA expression inside-prism index is invalid";
+            }
+            if (const auto error = pop(
+                        CudaExpressionValidationKind::Scalar,
+                        "inside prism depth"))
+                return error;
+            if (const auto error = pop(
+                        CudaExpressionValidationKind::Vector,
+                        "inside prism origin"))
+                return error;
+            if (const auto error = pop(
+                        CudaExpressionValidationKind::Vector,
+                        "inside prism position"))
+                return error;
+            if (const auto error = push(CudaExpressionValidationKind::Boolean))
+                return error;
+            break;
+        default:
+            return "CUDA expression contains an unknown opcode";
+        }
+    }
+    if (stack.size() != 1u || stack.back() != expected) {
+        return "CUDA expression program has the wrong result type or stack shape";
+    }
+    return std::nullopt;
 }
 
 simulation::CudaSearchInputEvent CudaInput(
@@ -3550,7 +3881,62 @@ CreatePhysicsSandboxCudaSearchSession(
             }
             internal.modifiers.push_back(converted);
         }
-        internal.evaluator = CudaEvaluator(configuration.evaluator);
+        if (const auto *expression =
+                    std::get_if<PhysicsSandboxCudaExpressionEvaluator>(
+                            &configuration.evaluator)) {
+            const auto prismError = ValidateCudaExpressionPrisms(*expression);
+            const auto scoreError = ValidateCudaExpressionProgram(
+                    expression->score,
+                    CudaExpressionValidationKind::Scalar);
+            const auto conditionError = ValidateCudaExpressionProgram(
+                    expression->condition,
+                    CudaExpressionValidationKind::Boolean);
+            if (prismError || scoreError || conditionError) {
+                return PhysicsSandboxResult<
+                        PhysicsSandboxCudaSearchSession>::Failure(
+                        SearchError(
+                                PhysicsSandboxErrorCode::InvalidRequest,
+                                prismError ? *prismError
+                                           : scoreError ? *scoreError
+                                                        : *conditionError));
+            }
+            const auto validatePrismReferences =
+                    [expression](
+                            const std::vector<
+                                    PhysicsSandboxCudaExpressionInstruction>
+                                    &program) -> std::optional<std::string> {
+                for (const PhysicsSandboxCudaExpressionInstruction &instruction :
+                     program) {
+                    if (instruction.opcode !=
+                        PhysicsSandboxCudaExpressionOpcode::InsidePrism) {
+                        continue;
+                    }
+                    const auto index = static_cast<std::size_t>(instruction.value);
+                    if (index >= expression->prisms.size()) {
+                        return "CUDA expression inside-prism index is out of range";
+                    }
+                }
+                return std::nullopt;
+            };
+            if (const auto referenceError = validatePrismReferences(expression->score)) {
+                return PhysicsSandboxResult<
+                        PhysicsSandboxCudaSearchSession>::Failure(
+                        SearchError(PhysicsSandboxErrorCode::InvalidRequest,
+                                    *referenceError));
+            }
+            if (const auto referenceError =
+                        validatePrismReferences(expression->condition)) {
+                return PhysicsSandboxResult<
+                        PhysicsSandboxCudaSearchSession>::Failure(
+                        SearchError(PhysicsSandboxErrorCode::InvalidRequest,
+                                    *referenceError));
+            }
+        }
+        internal.evaluator = CudaEvaluator(
+                configuration.evaluator,
+                &internal.expressionInstructions,
+                &internal.expressionPrisms,
+                &internal.expressionPrismVertices);
         if (configuration.condition) {
             if (configuration.condition->instructions.empty() ||
                 configuration.condition->instructions.size() > 256u) {
