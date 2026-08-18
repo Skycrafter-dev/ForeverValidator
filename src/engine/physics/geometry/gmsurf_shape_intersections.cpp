@@ -74,14 +74,14 @@ int GmCollision_Sphere_Sphere(
     const float distance = CIsqrt(distanceSq);
 
     if (!(PhysicsTolerance::CollisionDistance < distance)) {
-        collision->impulseNormal = (GmVec3){0.0f, -1.0f, 0.0f};
-        collision->separation = (GmVec3){0.0f, radiusB, 0.0f};
+        collision->impulseNormal = GmVec3{0.0f, -1.0f, 0.0f};
+        collision->separation = GmVec3{0.0f, radiusB, 0.0f};
         collision->contactPoint = centerA;
     } else {
         const GmVec3 unitAB = deltaAB.ScaleForCollision(1.0f / distance);
         collision->impulseNormal = unitAB.ScaleForCollision(-1.0f);
         collision->separation = unitAB.ScaleForCollision(radiusSum - distance);
-        collision->contactPoint = (GmVec3){
+        collision->contactPoint = GmVec3{
             centerA.x + radiusA * unitAB.x,
             centerA.y + radiusA * unitAB.y,
             centerA.z + radiusA * unitAB.z,
@@ -117,15 +117,15 @@ int GmCollision_Sphere_Ellipsoid(
     const float distance = CIsqrt(distanceSq);
 
     if (!(PhysicsTolerance::CollisionDistance < distance)) {
-        collision->impulseNormal = (GmVec3){0.0f, -1.0f, 0.0f};
-        collision->separation = (GmVec3){0.0f, radiusSum, 0.0f};
+        collision->impulseNormal = GmVec3{0.0f, -1.0f, 0.0f};
+        collision->separation = GmVec3{0.0f, radiusSum, 0.0f};
         collision->contactPoint = sphereCenter;
     } else {
         const GmVec3 unitSphereToEllipsoid =
             deltaSphereToEllipsoid.ScaleForCollision(1.0f / distance);
         collision->impulseNormal = unitSphereToEllipsoid.ScaleForCollision(-1.0f);
         collision->separation = unitSphereToEllipsoid.ScaleForCollision(radiusSum - distance);
-        collision->contactPoint = (GmVec3){
+        collision->contactPoint = GmVec3{
             sphereCenter.x + sphereRadius * unitSphereToEllipsoid.x,
             sphereCenter.y + sphereRadius * unitSphereToEllipsoid.y,
             sphereCenter.z + sphereRadius * unitSphereToEllipsoid.z,
@@ -263,8 +263,8 @@ int GmCollision_Box_Box(
 
     GmCollision *collision = &collisionBuffer->AddCollision();
     collision->contactPoint = a->iso->TranslationForGmSurf();
-    collision->separation = (GmVec3){0.0f, 0.0f, 0.0f};
-    collision->impulseNormal = (GmVec3){1.0f, 0.0f, 0.0f};
+    collision->separation = GmVec3{0.0f, 0.0f, 0.0f};
+    collision->impulseNormal = GmVec3{1.0f, 0.0f, 0.0f};
     collision->localMaterialA = a->LocalMaterial();
     collision->localMaterialB = b->LocalMaterial();
     return 1;

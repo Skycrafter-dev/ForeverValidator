@@ -36,14 +36,14 @@ int SSphereMeshCollide::EmitFeatureCollision(GmVec3 featurePointLocal,
 
     const float distance = (CIsqrt(distanceSq));
     const float invDistance = (1.0f / distance);
-    const GmVec3 normal = ((GmVec3){
+    const GmVec3 normal = (GmVec3{
         (featureToCenter.x * invDistance),
         (featureToCenter.y * invDistance),
         (featureToCenter.z * invDistance),
     });
     const float distanceMinusRadius = (distance - radius);
     const float penetrationScale = (distanceMinusRadius * invDistance);
-    const GmVec3 penetration = ((GmVec3){
+    const GmVec3 penetration = (GmVec3{
         (featureToCenter.x * penetrationScale),
         (featureToCenter.y * penetrationScale),
         (featureToCenter.z * penetrationScale),
@@ -76,7 +76,7 @@ int SSphereMeshCollide::EmitEndpointBCollision(GmVec3 featurePointLocal,
     // Endpoint B intentionally uses a second root for its asymmetric response.
     const float endpointDistance = (CIsqrt(distance));
     const float invEndpointDistance = (1.0f / endpointDistance);
-    const GmVec3 normal = ((GmVec3){
+    const GmVec3 normal = (GmVec3{
         (featureToCenter.x * invEndpointDistance),
         (featureToCenter.y * invEndpointDistance),
         (featureToCenter.z * invEndpointDistance),
@@ -84,7 +84,7 @@ int SSphereMeshCollide::EmitEndpointBCollision(GmVec3 featurePointLocal,
     const float endpointDistanceMinusRadius = (endpointDistance - radius);
     const float endpointPenetrationScale =
         (endpointDistanceMinusRadius * invEndpointDistance);
-    const GmVec3 penetration = ((GmVec3){
+    const GmVec3 penetration = (GmVec3{
         (featureToCenter.x * endpointPenetrationScale),
         (featureToCenter.y * endpointPenetrationScale),
         (featureToCenter.z * endpointPenetrationScale),
@@ -344,7 +344,7 @@ int GmCollision_Ellipsoid_Mesh(
             if (normalLenSq > PhysicsTolerance::SurfaceDirectionLengthSquared) {
                 const float normalLen = (CIsqrt(normalLenSq));
                 const float invNormalLen = (1.0f / normalLen);
-                unitTriangleNormal = (GmVec3){
+                unitTriangleNormal = GmVec3{
                     (normalX * invNormalLen),
                     (normalY * invNormalLen),
                     (invNormalLen * normalZ),
@@ -422,13 +422,13 @@ int GmCollision_Box_Mesh(
             };
 
             const GmBoxAligned localBox =
-                GmBoxAligned::FromCenterHalfExtents((GmVec3){0.0f, 0.0f, 0.0f},
+                GmBoxAligned::FromCenterHalfExtents(GmVec3{0.0f, 0.0f, 0.0f},
                                                     boxHalfExtents);
             if (localBox.OverlapsTriangleInLocalSpaceForGmSurf(boxLocalVertices[0],
                                                                boxLocalVertices[1],
                                                                boxLocalVertices[2])) {
                 GmCollision *collision = &collisionBuffer->AddCollision();
-                collision->separation = (GmVec3){0.0f, 0.0f, 0.0f};
+                collision->separation = GmVec3{0.0f, 0.0f, 0.0f};
                 collision->contactPoint = meshVertices[0];
                 collision->contactPoint.Mult(*meshLocated->iso);
 

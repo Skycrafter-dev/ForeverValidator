@@ -90,14 +90,14 @@ int SSphereMeshCollideOptimizedCpuNativeBinary32::EmitFeatureCollision(
 
     const float distance = (NativeBinary32Sqrt(distanceSq));
     const float invDistance = (1.0f / distance);
-    const GmVec3 normal = ((GmVec3){
+    const GmVec3 normal = (GmVec3{
         (featureToCenter.x * invDistance),
         (featureToCenter.y * invDistance),
         (featureToCenter.z * invDistance),
     });
     const float distanceMinusRadius = (distance - radius);
     const float penetrationScale = (distanceMinusRadius * invDistance);
-    const GmVec3 penetration = ((GmVec3){
+    const GmVec3 penetration = (GmVec3{
         (featureToCenter.x * penetrationScale),
         (featureToCenter.y * penetrationScale),
         (featureToCenter.z * penetrationScale),
@@ -130,7 +130,7 @@ int SSphereMeshCollideOptimizedCpuNativeBinary32::EmitEndpointBCollision(
 
     const float endpointDistance = (NativeBinary32Sqrt(distance));
     const float invEndpointDistance = (1.0f / endpointDistance);
-    const GmVec3 normal = ((GmVec3){
+    const GmVec3 normal = (GmVec3{
         (featureToCenter.x * invEndpointDistance),
         (featureToCenter.y * invEndpointDistance),
         (featureToCenter.z * invEndpointDistance),
@@ -138,7 +138,7 @@ int SSphereMeshCollideOptimizedCpuNativeBinary32::EmitEndpointBCollision(
     const float endpointDistanceMinusRadius = (endpointDistance - radius);
     const float endpointPenetrationScale =
         (endpointDistanceMinusRadius * invEndpointDistance);
-    const GmVec3 penetration = ((GmVec3){
+    const GmVec3 penetration = (GmVec3{
         (featureToCenter.x * endpointPenetrationScale),
         (featureToCenter.y * endpointPenetrationScale),
         (featureToCenter.z * endpointPenetrationScale),
@@ -276,14 +276,14 @@ int SEllipsoidMeshCollideOptimizedCpuNativeBinary32::EmitFeatureCollision(
 
     const float distance = (NativeBinary32Sqrt(distanceSq));
     const float invDistance = (1.0f / distance);
-    const GmVec3 normal = ((GmVec3){
+    const GmVec3 normal = (GmVec3{
         (featureToCenter.x * invDistance),
         (featureToCenter.y * invDistance),
         (featureToCenter.z * invDistance),
     });
     const float distanceMinusRadius = (distance - radius);
     const float penetrationScale = (distanceMinusRadius * invDistance);
-    const GmVec3 penetration = ((GmVec3){
+    const GmVec3 penetration = (GmVec3{
         (featureToCenter.x * penetrationScale),
         (featureToCenter.y * penetrationScale),
         (featureToCenter.z * penetrationScale),
@@ -316,7 +316,7 @@ int SEllipsoidMeshCollideOptimizedCpuNativeBinary32::EmitEndpointBCollision(
 
     const float endpointDistance = (NativeBinary32Sqrt(distance));
     const float invEndpointDistance = (1.0f / endpointDistance);
-    const GmVec3 normal = ((GmVec3){
+    const GmVec3 normal = (GmVec3{
         (featureToCenter.x * invEndpointDistance),
         (featureToCenter.y * invEndpointDistance),
         (featureToCenter.z * invEndpointDistance),
@@ -324,7 +324,7 @@ int SEllipsoidMeshCollideOptimizedCpuNativeBinary32::EmitEndpointBCollision(
     const float endpointDistanceMinusRadius = (endpointDistance - radius);
     const float endpointPenetrationScale =
         (endpointDistanceMinusRadius * invEndpointDistance);
-    const GmVec3 penetration = ((GmVec3){
+    const GmVec3 penetration = (GmVec3{
         (featureToCenter.x * endpointPenetrationScale),
         (featureToCenter.y * endpointPenetrationScale),
         (featureToCenter.z * endpointPenetrationScale),
@@ -603,7 +603,7 @@ int GmCollision_Ellipsoid_Mesh_OptimizedCpuNativeBinary32(
                 const float normalLen =
                         (NativeBinary32Sqrt(normalLenSq));
                 const float invNormalLen = (1.0f / normalLen);
-                unitTriangleNormal = (GmVec3){
+                unitTriangleNormal = GmVec3{
                     (normalX * invNormalLen),
                     (normalY * invNormalLen),
                     (invNormalLen * normalZ),

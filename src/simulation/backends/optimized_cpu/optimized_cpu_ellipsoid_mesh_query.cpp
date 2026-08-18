@@ -55,14 +55,14 @@ int SEllipsoidMeshCollideOptimizedCpu::EmitFeatureCollision(
 
     const float distance = (CIsqrt(distanceSq));
     const float invDistance = (1.0f / distance);
-    const GmVec3 normal = ((GmVec3){
+    const GmVec3 normal = (GmVec3{
         (featureToCenter.x * invDistance),
         (featureToCenter.y * invDistance),
         (featureToCenter.z * invDistance),
     });
     const float distanceMinusRadius = (distance - radius);
     const float penetrationScale = (distanceMinusRadius * invDistance);
-    const GmVec3 penetration = ((GmVec3){
+    const GmVec3 penetration = (GmVec3{
         (featureToCenter.x * penetrationScale),
         (featureToCenter.y * penetrationScale),
         (featureToCenter.z * penetrationScale),
@@ -95,7 +95,7 @@ int SEllipsoidMeshCollideOptimizedCpu::EmitEndpointBCollision(
 
     const float endpointDistance = (CIsqrt(distance));
     const float invEndpointDistance = (1.0f / endpointDistance);
-    const GmVec3 normal = ((GmVec3){
+    const GmVec3 normal = (GmVec3{
         (featureToCenter.x * invEndpointDistance),
         (featureToCenter.y * invEndpointDistance),
         (featureToCenter.z * invEndpointDistance),
@@ -103,7 +103,7 @@ int SEllipsoidMeshCollideOptimizedCpu::EmitEndpointBCollision(
     const float endpointDistanceMinusRadius = (endpointDistance - radius);
     const float endpointPenetrationScale =
         (endpointDistanceMinusRadius * invEndpointDistance);
-    const GmVec3 penetration = ((GmVec3){
+    const GmVec3 penetration = (GmVec3{
         (featureToCenter.x * endpointPenetrationScale),
         (featureToCenter.y * endpointPenetrationScale),
         (featureToCenter.z * endpointPenetrationScale),
@@ -321,7 +321,7 @@ int GmCollision_Ellipsoid_Mesh_OptimizedCpu(
                     PhysicsTolerance::SurfaceDirectionLengthSquared) {
                 const float normalLen = (CIsqrt(normalLenSq));
                 const float invNormalLen = (1.0f / normalLen);
-                unitTriangleNormal = (GmVec3){
+                unitTriangleNormal = GmVec3{
                     (normalX * invNormalLen),
                     (normalY * invNormalLen),
                     (invNormalLen * normalZ),

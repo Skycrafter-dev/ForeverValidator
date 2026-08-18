@@ -844,8 +844,12 @@ bool DetectEllipsoidPacketAgainstStaticGroup(
     }
 
     while (collidedMask != 0u) {
-        const unsigned int laneIndex =
-                static_cast<unsigned int>(__builtin_ctz(collidedMask));
+        unsigned int laneIndex = 0u;
+        unsigned int firstSetBit = collidedMask;
+        while ((firstSetBit & 1u) == 0u) {
+            firstSetBit >>= 1u;
+            ++laneIndex;
+        }
         zone.AddSphereContactOnce(lanes[laneIndex].sphereContact);
         collidedMask &= collidedMask - 1u;
     }

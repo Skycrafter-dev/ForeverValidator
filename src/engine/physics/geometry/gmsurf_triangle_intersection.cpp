@@ -245,7 +245,7 @@ int GmCoplanarTriTri(const GmVec3 &normal,
 void SMeshMeshCollide::EmitCollision(const GmSurfMeshTriangle &triangleA,
                                      const GmSurfMeshTriangle &triangleB) {
     GmCollision *collision = &collisionBuffer->AddCollision();
-    collision->separation = (GmVec3){0.0f, 0.0f, 0.0f};
+    collision->separation = GmVec3{0.0f, 0.0f, 0.0f};
 
     collision->contactPoint = meshA->Vertex(triangleA.vertexIndex[0]);
     collision->contactPoint.Mult(*isoA);
