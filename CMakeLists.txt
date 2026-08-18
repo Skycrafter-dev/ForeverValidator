@@ -754,6 +754,20 @@ if(FOREVERVALIDATOR_BUILD_TESTS)
             forevervalidator-cuda-search-branch-state-tests)
         add_test(NAME forevervalidator-cuda-search-branch-state
                  COMMAND forevervalidator-cuda-search-branch-state-tests)
+
+        add_executable(forevervalidator-cuda-condition-program-tests
+            tests/cuda_condition_program_tests.cpp)
+        target_include_directories(
+            forevervalidator-cuda-condition-program-tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_link_libraries(
+            forevervalidator-cuda-condition-program-tests PRIVATE
+            forevervalidator_core CUDA::cudart)
+        forevervalidator_configure_target(
+            forevervalidator-cuda-condition-program-tests)
+        add_test(NAME forevervalidator-cuda-condition-program
+                 COMMAND forevervalidator-cuda-condition-program-tests)
     endif()
 
     add_executable(forevervalidator-render-scene-tests

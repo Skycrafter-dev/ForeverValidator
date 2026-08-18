@@ -1805,12 +1805,45 @@ __device__ bool SegmentEntry(
     return true;
 }
 
+enum class DeviceConditionKind : std::uint32_t {
+    Scalar,
+    Vector,
+    Rotation,
+};
+
 struct DeviceConditionValue {
     double x = 0.0;
     double y = 0.0;
     double z = 0.0;
-    bool vector = false;
+    double w = 0.0;
+    DeviceConditionKind kind = DeviceConditionKind::Scalar;
+    bool valid = true;
 };
+
+__device__ DeviceConditionValue ConditionScalar(double value) {
+    return {value, 0.0, 0.0, 0.0, DeviceConditionKind::Scalar, true};
+}
+
+__device__ DeviceConditionValue ConditionVector(
+        double x, double y, double z) {
+    return {x, y, z, 0.0, DeviceConditionKind::Vector, true};
+}
+
+__device__ DeviceConditionValue ConditionVector(const GmVec3 &value) {
+    return ConditionVector(value.x, value.y, value.z);
+}
+
+__device__ DeviceConditionValue ConditionRotation(const GmQuat &value) {
+    return {static_cast<double>(value.x), static_cast<double>(value.y),
+            static_cast<double>(value.z), static_cast<double>(value.w),
+            DeviceConditionKind::Rotation, true};
+}
+
+__device__ DeviceConditionValue InvalidConditionValue() {
+    DeviceConditionValue result;
+    result.valid = false;
+    return result;
+}
 
 __device__ double ConditionLength(const GmVec3 &value) {
     return sqrt(static_cast<double>(value.x) * value.x +
@@ -1849,8 +1882,9 @@ __device__ DeviceConditionValue ConditionAngles(
     const double pitch = fabs(sinp) >= 1.0
             ? copysign(1.57079632679489661923, sinp)
             : asin(sinp);
-    return {atan2(sinyCosp, cosyCosp), pitch,
-            atan2(sinrCosp, cosrCosp), true};
+    return ConditionVector(
+            atan2(sinyCosp, cosyCosp), pitch,
+            atan2(sinrCosp, cosrCosp));
 }
 
 __device__ DeviceConditionValue ConditionSource(
@@ -1859,60 +1893,104 @@ __device__ DeviceConditionValue ConditionSource(
         std::uint64_t iterationCount,
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds,
-        double currentTimeSeconds) {
+        double currentTimeSeconds,
+        double currentTimeMs,
+        std::uint32_t stuntsScore) {
     const CHmsDyna::CHmsStateDyna &current = state.body.current;
     const CHmsDyna::CHmsStateDyna &previous = state.body.temporary;
     const GmVec3 currentLocal =
             state.vehicle.frameHistory.physicsCurrent.localLinearSpeed;
     const GmVec3 previousLocal = ConditionLocalSpeed(previous);
-    const auto vector = [](const GmVec3 &value) {
-        return DeviceConditionValue{value.x, value.y, value.z, true};
-    };
     switch (source) {
-    case CudaSearchConditionValue::Position: return vector(current.position);
-    case CudaSearchConditionValue::PreviousPosition: return vector(previous.position);
-    case CudaSearchConditionValue::Velocity: return vector(current.linearSpeed);
-    case CudaSearchConditionValue::PreviousVelocity: return vector(previous.linearSpeed);
-    case CudaSearchConditionValue::LocalVelocity: return vector(currentLocal);
-    case CudaSearchConditionValue::PreviousLocalVelocity: return vector(previousLocal);
-    case CudaSearchConditionValue::AngularVelocity: return vector(current.angularSpeed);
-    case CudaSearchConditionValue::PreviousAngularVelocity: return vector(previous.angularSpeed);
-    case CudaSearchConditionValue::Yaw: return {ConditionAngles(current.rotationQuat).x};
-    case CudaSearchConditionValue::Pitch: return {ConditionAngles(current.rotationQuat).y};
-    case CudaSearchConditionValue::Roll: return {ConditionAngles(current.rotationQuat).z};
-    case CudaSearchConditionValue::PreviousYaw: return {ConditionAngles(previous.rotationQuat).x};
-    case CudaSearchConditionValue::PreviousPitch: return {ConditionAngles(previous.rotationQuat).y};
-    case CudaSearchConditionValue::PreviousRoll: return {ConditionAngles(previous.rotationQuat).z};
-    case CudaSearchConditionValue::Speed: return {ConditionLength(current.linearSpeed)};
-    case CudaSearchConditionValue::PreviousSpeed: return {ConditionLength(previous.linearSpeed)};
-    case CudaSearchConditionValue::LocalSpeed: return {ConditionLength(currentLocal)};
-    case CudaSearchConditionValue::PreviousLocalSpeed: return {ConditionLength(previousLocal)};
-    case CudaSearchConditionValue::FreeWheeling: return {state.vehicle.controls.forcedLowSpeedFriction ? 1.0 : 0.0};
-    case CudaSearchConditionValue::LateralContact: return {state.vehicle.contacts.lateralSlowDownContactActive ? 1.0 : 0.0};
+    case CudaSearchConditionValue::Position:
+        return ConditionVector(current.position);
+    case CudaSearchConditionValue::PreviousPosition:
+        return ConditionVector(previous.position);
+    case CudaSearchConditionValue::Velocity:
+        return ConditionVector(current.linearSpeed);
+    case CudaSearchConditionValue::PreviousVelocity:
+        return ConditionVector(previous.linearSpeed);
+    case CudaSearchConditionValue::LocalVelocity:
+        return ConditionVector(currentLocal);
+    case CudaSearchConditionValue::PreviousLocalVelocity:
+        return ConditionVector(previousLocal);
+    case CudaSearchConditionValue::AngularVelocity:
+        return ConditionVector(current.angularSpeed);
+    case CudaSearchConditionValue::PreviousAngularVelocity:
+        return ConditionVector(previous.angularSpeed);
+    case CudaSearchConditionValue::Yaw:
+        return ConditionScalar(ConditionAngles(current.rotationQuat).x);
+    case CudaSearchConditionValue::Pitch:
+        return ConditionScalar(ConditionAngles(current.rotationQuat).y);
+    case CudaSearchConditionValue::Roll:
+        return ConditionScalar(ConditionAngles(current.rotationQuat).z);
+    case CudaSearchConditionValue::PreviousYaw:
+        return ConditionScalar(ConditionAngles(previous.rotationQuat).x);
+    case CudaSearchConditionValue::PreviousPitch:
+        return ConditionScalar(ConditionAngles(previous.rotationQuat).y);
+    case CudaSearchConditionValue::PreviousRoll:
+        return ConditionScalar(ConditionAngles(previous.rotationQuat).z);
+    case CudaSearchConditionValue::Speed:
+        return ConditionScalar(ConditionLength(current.linearSpeed));
+    case CudaSearchConditionValue::PreviousSpeed:
+        return ConditionScalar(ConditionLength(previous.linearSpeed));
+    case CudaSearchConditionValue::LocalSpeed:
+        return ConditionScalar(ConditionLength(currentLocal));
+    case CudaSearchConditionValue::PreviousLocalSpeed:
+        return ConditionScalar(ConditionLength(previousLocal));
+    case CudaSearchConditionValue::FreeWheeling:
+        return ConditionScalar(
+                state.vehicle.controls.forcedLowSpeedFriction ? 1.0 : 0.0);
+    case CudaSearchConditionValue::LateralContact:
+        return ConditionScalar(
+                state.vehicle.contacts.lateralSlowDownContactActive ? 1.0 : 0.0);
     case CudaSearchConditionValue::Sliding: {
         bool sliding = false;
         for (std::uint32_t i = 0u; i < cuda::facts::WheelCount(state.vehicle); ++i) {
             sliding = sliding || (state.vehicle.wheels.values[i].realTime.contactPresent &&
                                   state.vehicle.wheels.values[i].realTime.slipping);
         }
-        return {sliding ? 1.0 : 0.0};
+        return ConditionScalar(sliding ? 1.0 : 0.0);
     }
     case CudaSearchConditionValue::Gear:
-        return {state.vehicle.engine.useLowSpeedGateB ? -1.0 :
-                static_cast<double>(state.vehicle.engine.gearIndex)};
-    case CudaSearchConditionValue::Rpm: return {state.vehicle.engine.engineInputMemory};
-    case CudaSearchConditionValue::TurningRate: return {state.vehicle.radiusSteering.steerAngle};
-    case CudaSearchConditionValue::TurboType: return {static_cast<double>(state.vehicle.turbo.type)};
+        return ConditionScalar(
+                state.vehicle.engine.useLowSpeedGateB ? -1.0 :
+                static_cast<double>(state.vehicle.engine.gearIndex));
+    case CudaSearchConditionValue::Rpm:
+        return ConditionScalar(state.vehicle.engine.engineInputMemory);
+    case CudaSearchConditionValue::TurningRate:
+        return ConditionScalar(state.vehicle.radiusSteering.steerAngle);
+    case CudaSearchConditionValue::TurboType:
+        return ConditionScalar(static_cast<double>(state.vehicle.turbo.type));
     case CudaSearchConditionValue::TurboBoostFactor:
-        return {state.vehicle.turbo.type == CSceneVehicleCar::ETurboType_Roulette
+        return ConditionScalar(
+                state.vehicle.turbo.type == CSceneVehicleCar::ETurboType_Roulette
                 ? static_cast<double>(state.vehicle.turbo.type2Phase) + 1.0
-                : state.vehicle.turbo.impulseScale};
-    case CudaSearchConditionValue::Iterations: return {static_cast<double>(iterationCount)};
-    case CudaSearchConditionValue::LastImprovementTime: return {lastImprovementTimeSeconds};
-    case CudaSearchConditionValue::LastRestartTime: return {lastRestartTimeSeconds};
-    case CudaSearchConditionValue::CurrentTime: return {currentTimeSeconds};
+                : state.vehicle.turbo.impulseScale);
+    case CudaSearchConditionValue::Iterations:
+        return ConditionScalar(static_cast<double>(iterationCount));
+    case CudaSearchConditionValue::LastImprovementTime:
+        return ConditionScalar(lastImprovementTimeSeconds);
+    case CudaSearchConditionValue::LastRestartTime:
+        return ConditionScalar(lastRestartTimeSeconds);
+    case CudaSearchConditionValue::CurrentTime:
+        return ConditionScalar(currentTimeSeconds);
     case CudaSearchConditionValue::CheckpointCount:
-        return {static_cast<double>(state.race.progress.checkpointCount)};
+        return ConditionScalar(
+                static_cast<double>(state.race.progress.checkpointCount));
+    case CudaSearchConditionValue::StuntPoints:
+        return ConditionScalar(static_cast<double>(stuntsScore));
+    case CudaSearchConditionValue::FinishTime:
+        if (!state.finishTime.present) return InvalidConditionValue();
+        return ConditionScalar(
+                static_cast<double>(state.finishTime.value.upperBoundNs) /
+                1.0e6);
+    case CudaSearchConditionValue::SimulationTime:
+        return ConditionScalar(currentTimeMs);
+    case CudaSearchConditionValue::RaceCompleted:
+        return ConditionScalar(state.race.progress.raceCompleted ? 1.0 : 0.0);
+    case CudaSearchConditionValue::CarRotation:
+        return ConditionRotation(current.rotationQuat);
     default: break;
     }
     const std::uint32_t raw = static_cast<std::uint32_t>(source);
@@ -1922,102 +2000,459 @@ __device__ DeviceConditionValue ConditionSource(
     std::uint32_t wheel = 0u;
     if (raw >= ground0 && raw < ground0 + 4u) {
         wheel = raw - ground0;
-        return {wheel < cuda::facts::WheelCount(state.vehicle) &&
-                state.vehicle.wheels.values[wheel].realTime.contactPresent ? 1.0 : 0.0};
+        return ConditionScalar(
+                wheel < cuda::facts::WheelCount(state.vehicle) &&
+                state.vehicle.wheels.values[wheel].realTime.contactPresent
+                        ? 1.0 : 0.0);
     }
     if (raw >= sliding0 && raw < sliding0 + 4u) {
         wheel = raw - sliding0;
         const auto &value = state.vehicle.wheels.values[wheel].realTime;
-        return {wheel < cuda::facts::WheelCount(state.vehicle) &&
-                value.contactPresent && value.slipping ? 1.0 : 0.0};
+        return ConditionScalar(
+                wheel < cuda::facts::WheelCount(state.vehicle) &&
+                value.contactPresent && value.slipping ? 1.0 : 0.0);
     }
     wheel = raw - surface0;
     if (raw >= surface0 && raw < surface0 + 4u &&
         wheel < cuda::facts::WheelCount(state.vehicle)) {
         const auto &value = state.vehicle.wheels.values[wheel].realTime;
-        return {value.contactPresent
+        return ConditionScalar(
+                value.contactPresent
                 ? static_cast<double>(value.contactMaterial)
-                : 65535.0};
+                : 65535.0);
     }
-    return {};
+    return InvalidConditionValue();
+}
+
+__device__ bool ConditionPointOnSegment(
+        double px, double py,
+        double ax, double ay,
+        double bx, double by) {
+    constexpr double tolerance = 1e-9;
+    const double cross =
+            (px - ax) * (by - ay) - (py - ay) * (bx - ax);
+    if (fabs(cross) > tolerance) return false;
+    return px >= fmin(ax, bx) - tolerance &&
+            px <= fmax(ax, bx) + tolerance &&
+            py >= fmin(ay, by) - tolerance &&
+            py <= fmax(ay, by) + tolerance;
+}
+
+__device__ bool ConditionContainsPrism(
+        const CudaSearchExpressionPrism &prism,
+        const CudaSearchExpressionPoint2 *vertices,
+        const DeviceConditionValue &position,
+        const DeviceConditionValue &origin,
+        double depth) {
+    if (vertices == nullptr || prism.vertexCount < 3u ||
+        !isfinite(depth) || depth <= 0.0) {
+        return false;
+    }
+    double planeX = 0.0;
+    double planeY = 0.0;
+    double normal = 0.0;
+    if (prism.plane == 0u) {
+        planeX = position.x - origin.x;
+        planeY = position.y - origin.y;
+        normal = position.z - origin.z;
+    } else if (prism.plane == 1u) {
+        planeX = position.x - origin.x;
+        planeY = position.z - origin.z;
+        normal = position.y - origin.y;
+    } else if (prism.plane == 2u) {
+        planeX = position.y - origin.y;
+        planeY = position.z - origin.z;
+        normal = position.x - origin.x;
+    } else {
+        return false;
+    }
+    if (normal < 0.0 || normal > depth) return false;
+
+    bool inside = false;
+    const CudaSearchExpressionPoint2 *polygon =
+            vertices + prism.vertexOffset;
+    std::uint32_t previous = prism.vertexCount - 1u;
+    for (std::uint32_t index = 0u; index < prism.vertexCount;
+         previous = index++) {
+        const CudaSearchExpressionPoint2 &a = polygon[previous];
+        const CudaSearchExpressionPoint2 &b = polygon[index];
+        if (ConditionPointOnSegment(
+                    planeX, planeY, a.x, a.y, b.x, b.y)) {
+            return true;
+        }
+        const bool crosses = (a.y > planeY) != (b.y > planeY);
+        if (crosses) {
+            const double crossingX =
+                    (b.x - a.x) * (planeY - a.y) /
+                            (b.y - a.y) +
+                    a.x;
+            if (planeX < crossingX) inside = !inside;
+        }
+    }
+    return inside;
 }
 
 __device__ __noinline__ bool EvaluateCondition(
         const CudaSearchConditionInstruction *instructions,
         std::uint32_t instructionCount,
+        const CudaSearchExpressionPrism *prisms,
+        std::uint32_t prismCount,
+        const CudaSearchExpressionPoint2 *prismVertices,
         const CudaCandidatePhysicsState &state,
         std::uint64_t iterationCount,
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds,
-        double currentTimeSeconds) {
+        double currentTimeSeconds,
+        double currentTimeMs,
+        std::uint32_t stuntsScore) {
     if (instructionCount == 0u) return true;
     DeviceConditionValue stack[32];
     std::uint32_t size = 0u;
+    const auto push = [&](const DeviceConditionValue &value) {
+        if (size >= 32u || !value.valid) return false;
+        stack[size++] = value;
+        return true;
+    };
+    const auto pop = [&](DeviceConditionKind kind,
+                         DeviceConditionValue *value) {
+        if (size == 0u || stack[size - 1u].kind != kind ||
+            !stack[size - 1u].valid) {
+            return false;
+        }
+        *value = stack[--size];
+        return true;
+    };
     for (std::uint32_t index = 0u; index < instructionCount; ++index) {
         const CudaSearchConditionInstruction instruction = instructions[index];
         if (instruction.opcode == CudaSearchConditionOpcode::Constant) {
-            if (size >= 32u) return false;
-            stack[size++] = {instruction.x};
+            if (!isfinite(instruction.x) ||
+                !push(ConditionScalar(instruction.x))) return false;
             continue;
         }
         if (instruction.opcode == CudaSearchConditionOpcode::ConstantVector) {
-            if (size >= 32u) return false;
-            stack[size++] = {instruction.x, instruction.y, instruction.z, true};
+            if (!isfinite(instruction.x) || !isfinite(instruction.y) ||
+                !isfinite(instruction.z) ||
+                !push(ConditionVector(
+                        instruction.x, instruction.y, instruction.z))) {
+                return false;
+            }
             continue;
         }
         if (instruction.opcode == CudaSearchConditionOpcode::Scalar ||
-            instruction.opcode == CudaSearchConditionOpcode::Vector) {
-            if (size >= 32u) return false;
+            instruction.opcode == CudaSearchConditionOpcode::Vector ||
+            instruction.opcode == CudaSearchConditionOpcode::RotationSource) {
             DeviceConditionValue value = ConditionSource(
                     instruction.value, state, iterationCount,
                     lastImprovementTimeSeconds,
-                    lastRestartTimeSeconds, currentTimeSeconds);
+                    lastRestartTimeSeconds, currentTimeSeconds,
+                    currentTimeMs, stuntsScore);
+            if (!value.valid) return false;
             if (instruction.opcode == CudaSearchConditionOpcode::Scalar &&
-                value.vector) {
+                value.kind == DeviceConditionKind::Vector) {
                 const int component = static_cast<int>(instruction.x);
-                value = {component == 1 ? value.x
-                         : component == 2 ? value.y
-                         : component == 3 ? value.z : 0.0};
+                value = ConditionScalar(
+                        component == 1 ? value.x
+                        : component == 2 ? value.y
+                        : component == 3 ? value.z : 0.0);
             }
             if ((instruction.opcode == CudaSearchConditionOpcode::Scalar &&
-                 value.vector) ||
+                 value.kind != DeviceConditionKind::Scalar) ||
                 (instruction.opcode == CudaSearchConditionOpcode::Vector &&
-                 !value.vector)) return false;
-            stack[size++] = value;
+                 value.kind != DeviceConditionKind::Vector) ||
+                (instruction.opcode ==
+                         CudaSearchConditionOpcode::RotationSource &&
+                 value.kind != DeviceConditionKind::Rotation) ||
+                !push(value)) {
+                return false;
+            }
             continue;
         }
         if (instruction.opcode == CudaSearchConditionOpcode::KilometersPerHour ||
-            instruction.opcode == CudaSearchConditionOpcode::Degrees) {
-            if (size == 0u || stack[size - 1u].vector) return false;
+            instruction.opcode == CudaSearchConditionOpcode::Degrees ||
+            instruction.opcode == CudaSearchConditionOpcode::PercentRatio ||
+            instruction.opcode == CudaSearchConditionOpcode::Absolute ||
+            instruction.opcode == CudaSearchConditionOpcode::LogicalNot) {
+            if (size == 0u ||
+                stack[size - 1u].kind != DeviceConditionKind::Scalar) {
+                return false;
+            }
+            if (instruction.opcode == CudaSearchConditionOpcode::LogicalNot) {
+                stack[size - 1u].x = stack[size - 1u].x == 0.0 ? 1.0 : 0.0;
+                continue;
+            }
             stack[size - 1u].x *= instruction.opcode ==
                     CudaSearchConditionOpcode::KilometersPerHour
-                    ? 3.6 : 57.2957795130823208768;
+                    ? 3.6
+                    : instruction.opcode == CudaSearchConditionOpcode::Degrees
+                              ? 57.2957795130823208768
+                              : instruction.opcode ==
+                                        CudaSearchConditionOpcode::PercentRatio
+                                    ? 0.01
+                                    : 1.0;
+            if (instruction.opcode == CudaSearchConditionOpcode::Absolute) {
+                stack[size - 1u].x = fabs(stack[size - 1u].x);
+            }
+            if (!isfinite(stack[size - 1u].x)) return false;
             continue;
         }
+
+        if (instruction.opcode == CudaSearchConditionOpcode::ComposeVector ||
+            instruction.opcode == CudaSearchConditionOpcode::Direction ||
+            instruction.opcode == CudaSearchConditionOpcode::Rotation) {
+            DeviceConditionValue z;
+            DeviceConditionValue y;
+            DeviceConditionValue x;
+            if (!pop(DeviceConditionKind::Scalar, &z) ||
+                !pop(DeviceConditionKind::Scalar, &y) ||
+                !pop(DeviceConditionKind::Scalar, &x)) {
+                return false;
+            }
+            if (instruction.opcode == CudaSearchConditionOpcode::Rotation) {
+                constexpr double degreesToRadians =
+                        3.14159265358979323846 / 180.0;
+                const double hy = x.x * degreesToRadians * 0.5;
+                const double hp = y.x * degreesToRadians * 0.5;
+                const double hr = z.x * degreesToRadians * 0.5;
+                const double cy = cos(hy);
+                const double sy = sin(hy);
+                const double cp = cos(hp);
+                const double sp = sin(hp);
+                const double cr = cos(hr);
+                const double sr = sin(hr);
+                DeviceConditionValue rotation{
+                        sr * cp * cy - cr * sp * sy,
+                        cr * sp * cy + sr * cp * sy,
+                        cr * cp * sy - sr * sp * cy,
+                        cr * cp * cy + sr * sp * sy,
+                        DeviceConditionKind::Rotation,
+                        true};
+                const double length = sqrt(
+                        rotation.x * rotation.x + rotation.y * rotation.y +
+                        rotation.z * rotation.z + rotation.w * rotation.w);
+                if (!isfinite(length) || length <= 1e-12) return false;
+                rotation.x /= length;
+                rotation.y /= length;
+                rotation.z /= length;
+                rotation.w /= length;
+                if (!push(rotation)) return false;
+                continue;
+            }
+            DeviceConditionValue vector = ConditionVector(x.x, y.x, z.x);
+            if (instruction.opcode == CudaSearchConditionOpcode::Direction) {
+                const double length = sqrt(
+                        vector.x * vector.x + vector.y * vector.y +
+                        vector.z * vector.z);
+                if (length <= 1e-12) {
+                    vector.x = vector.y = vector.z = 0.0;
+                } else {
+                    vector.x /= length;
+                    vector.y /= length;
+                    vector.z /= length;
+                }
+            }
+            if (!push(vector)) return false;
+            continue;
+        }
+
+        if (instruction.opcode == CudaSearchConditionOpcode::Magnitude ||
+            instruction.opcode == CudaSearchConditionOpcode::Normalize) {
+            DeviceConditionValue value;
+            if (!pop(DeviceConditionKind::Vector, &value)) return false;
+            const double length = sqrt(
+                    value.x * value.x + value.y * value.y +
+                    value.z * value.z);
+            if (instruction.opcode == CudaSearchConditionOpcode::Magnitude) {
+                if (!push(ConditionScalar(length))) return false;
+            } else {
+                if (length <= 1e-12) {
+                    value.x = value.y = value.z = 0.0;
+                } else {
+                    value.x /= length;
+                    value.y /= length;
+                    value.z /= length;
+                }
+                if (!push(value)) return false;
+            }
+            continue;
+        }
+
+        if (instruction.opcode == CudaSearchConditionOpcode::Distance ||
+            instruction.opcode == CudaSearchConditionOpcode::Dot) {
+            DeviceConditionValue right;
+            DeviceConditionValue left;
+            if (!pop(DeviceConditionKind::Vector, &right) ||
+                !pop(DeviceConditionKind::Vector, &left)) {
+                return false;
+            }
+            const double value =
+                    instruction.opcode == CudaSearchConditionOpcode::Distance
+                    ? sqrt((left.x-right.x)*(left.x-right.x) +
+                           (left.y-right.y)*(left.y-right.y) +
+                           (left.z-right.z)*(left.z-right.z))
+                    : left.x * right.x + left.y * right.y + left.z * right.z;
+            if (!isfinite(value) || !push(ConditionScalar(value))) return false;
+            continue;
+        }
+
+        if (instruction.opcode == CudaSearchConditionOpcode::RotationDistance) {
+            DeviceConditionValue right;
+            DeviceConditionValue left;
+            if (!pop(DeviceConditionKind::Rotation, &right) ||
+                !pop(DeviceConditionKind::Rotation, &left)) {
+                return false;
+            }
+            const double leftLength = sqrt(
+                    left.x * left.x + left.y * left.y +
+                    left.z * left.z + left.w * left.w);
+            const double rightLength = sqrt(
+                    right.x * right.x + right.y * right.y +
+                    right.z * right.z + right.w * right.w);
+            if (!isfinite(leftLength) || !isfinite(rightLength) ||
+                leftLength <= 1e-12 || rightLength <= 1e-12) {
+                return false;
+            }
+            double dot = fabs(
+                    left.x / leftLength * (right.x / rightLength) +
+                    left.y / leftLength * (right.y / rightLength) +
+                    left.z / leftLength * (right.z / rightLength) +
+                    left.w / leftLength * (right.w / rightLength));
+            dot = dot < 0.0 ? 0.0 : (dot > 1.0 ? 1.0 : dot);
+            if (!push(ConditionScalar(2.0 * acos(dot)))) return false;
+            continue;
+        }
+
+        if (instruction.opcode == CudaSearchConditionOpcode::InsideBox ||
+            instruction.opcode == CudaSearchConditionOpcode::InsidePrism) {
+            if (instruction.opcode == CudaSearchConditionOpcode::InsideBox) {
+                DeviceConditionValue sizeValue;
+                DeviceConditionValue center;
+                DeviceConditionValue position;
+                if (!pop(DeviceConditionKind::Vector, &sizeValue) ||
+                    !pop(DeviceConditionKind::Vector, &center) ||
+                    !pop(DeviceConditionKind::Vector, &position) ||
+                    !isfinite(sizeValue.x) || !isfinite(sizeValue.y) ||
+                    !isfinite(sizeValue.z) || sizeValue.x <= 0.0 ||
+                    sizeValue.y <= 0.0 || sizeValue.z <= 0.0) {
+                    return false;
+                }
+                const bool inside =
+                        fabs(position.x - center.x) <= sizeValue.x * 0.5 &&
+                        fabs(position.y - center.y) <= sizeValue.y * 0.5 &&
+                        fabs(position.z - center.z) <= sizeValue.z * 0.5;
+                if (!push(ConditionScalar(inside ? 1.0 : 0.0))) return false;
+                continue;
+            }
+            DeviceConditionValue depth;
+            DeviceConditionValue origin;
+            DeviceConditionValue position;
+            if (!pop(DeviceConditionKind::Scalar, &depth) ||
+                !pop(DeviceConditionKind::Vector, &origin) ||
+                !pop(DeviceConditionKind::Vector, &position) ||
+                !isfinite(instruction.x) || instruction.x < 0.0 ||
+                instruction.x >= static_cast<double>(prismCount)) {
+                return false;
+            }
+            const std::uint32_t prismIndex =
+                    static_cast<std::uint32_t>(instruction.x);
+            const bool inside = ConditionContainsPrism(
+                    prisms[prismIndex], prismVertices,
+                    position, origin, depth.x);
+            if (!push(ConditionScalar(inside ? 1.0 : 0.0))) return false;
+            continue;
+        }
+
+        if (instruction.opcode == CudaSearchConditionOpcode::Clamp ||
+            instruction.opcode == CudaSearchConditionOpcode::WeightedBlend) {
+            DeviceConditionValue c;
+            DeviceConditionValue b;
+            DeviceConditionValue a;
+            if (!pop(DeviceConditionKind::Scalar, &c) ||
+                !pop(DeviceConditionKind::Scalar, &b) ||
+                !pop(DeviceConditionKind::Scalar, &a)) {
+                return false;
+            }
+            if (instruction.opcode == CudaSearchConditionOpcode::Clamp) {
+                if (b.x > c.x) return false;
+                a.x = a.x < b.x ? b.x : (a.x > c.x ? c.x : a.x);
+            } else {
+                const double weight = c.x / 100.0;
+                a.x = a.x * (1.0 - weight) + b.x * weight;
+            }
+            if (!isfinite(a.x) || !push(a)) return false;
+            continue;
+        }
+
         if (size < 2u) return false;
         const DeviceConditionValue right = stack[--size];
         DeviceConditionValue &left = stack[size - 1u];
+        if (left.kind != DeviceConditionKind::Scalar ||
+            right.kind != DeviceConditionKind::Scalar ||
+            !left.valid || !right.valid) {
+            return false;
+        }
         switch (instruction.opcode) {
-        case CudaSearchConditionOpcode::Distance:
-            if (!left.vector || !right.vector) return false;
-            left = {sqrt((left.x-right.x)*(left.x-right.x) +
-                         (left.y-right.y)*(left.y-right.y) +
-                         (left.z-right.z)*(left.z-right.z))};
-            break;
         case CudaSearchConditionOpcode::Add: left.x += right.x; break;
         case CudaSearchConditionOpcode::Subtract: left.x -= right.x; break;
         case CudaSearchConditionOpcode::Multiply: left.x *= right.x; break;
         case CudaSearchConditionOpcode::Divide: left.x = right.x == 0.0 ? 0.0 : left.x / right.x; break;
-        case CudaSearchConditionOpcode::Greater: left = {left.x > right.x ? 1.0 : 0.0}; break;
-        case CudaSearchConditionOpcode::Less: left = {left.x < right.x ? 1.0 : 0.0}; break;
-        case CudaSearchConditionOpcode::GreaterOrEqual: left = {left.x >= right.x ? 1.0 : 0.0}; break;
-        case CudaSearchConditionOpcode::LessOrEqual: left = {left.x <= right.x ? 1.0 : 0.0}; break;
-        case CudaSearchConditionOpcode::Equal: left = {left.x == right.x ? 1.0 : 0.0}; break;
-        case CudaSearchConditionOpcode::LogicalAnd: left = {left.x != 0.0 && right.x != 0.0 ? 1.0 : 0.0}; break;
+        case CudaSearchConditionOpcode::Minimum:
+            left.x = left.x < right.x ? left.x : right.x;
+            break;
+        case CudaSearchConditionOpcode::Maximum:
+            left.x = left.x > right.x ? left.x : right.x;
+            break;
+        case CudaSearchConditionOpcode::Greater:
+            left = ConditionScalar(left.x > right.x ? 1.0 : 0.0);
+            break;
+        case CudaSearchConditionOpcode::Less:
+            left = ConditionScalar(left.x < right.x ? 1.0 : 0.0);
+            break;
+        case CudaSearchConditionOpcode::GreaterOrEqual:
+            left = ConditionScalar(left.x >= right.x ? 1.0 : 0.0);
+            break;
+        case CudaSearchConditionOpcode::LessOrEqual:
+            left = ConditionScalar(left.x <= right.x ? 1.0 : 0.0);
+            break;
+        case CudaSearchConditionOpcode::Equal:
+            left = ConditionScalar(left.x == right.x ? 1.0 : 0.0);
+            break;
+        case CudaSearchConditionOpcode::LogicalAnd:
+            left = ConditionScalar(
+                    left.x != 0.0 && right.x != 0.0 ? 1.0 : 0.0);
+            break;
+        case CudaSearchConditionOpcode::LogicalOr:
+            left = ConditionScalar(
+                    left.x != 0.0 || right.x != 0.0 ? 1.0 : 0.0);
+            break;
         default: return false;
         }
+        if (!isfinite(left.x)) return false;
     }
-    return size == 1u && !stack[0].vector && stack[0].x != 0.0;
+    return size == 1u && stack[0].valid &&
+            stack[0].kind == DeviceConditionKind::Scalar &&
+            stack[0].x != 0.0;
+}
+
+__global__ void EvaluateConditionForTestingKernel(
+        const CudaSearchConditionInstruction *instructions,
+        std::uint32_t instructionCount,
+        const CudaSearchExpressionPrism *prisms,
+        std::uint32_t prismCount,
+        const CudaSearchExpressionPoint2 *prismVertices,
+        const CudaCandidateState *state,
+        std::uint64_t iterationCount,
+        double lastImprovementTimeSeconds,
+        double lastRestartTimeSeconds,
+        double currentTimeSeconds,
+        double currentTimeMs,
+        std::uint32_t stuntsScore,
+        bool *result) {
+    if (blockIdx.x != 0u || threadIdx.x != 0u) return;
+    *result = EvaluateCondition(
+            instructions, instructionCount, prisms, prismCount,
+            prismVertices, *state, iterationCount,
+            lastImprovementTimeSeconds, lastRestartTimeSeconds,
+            currentTimeSeconds, currentTimeMs, stuntsScore);
 }
 
 enum class DeviceExpressionKind : std::uint32_t {
@@ -3225,6 +3660,9 @@ __global__ __launch_bounds__(
         std::uint32_t expressionPrismCount,
         const CudaSearchExpressionPoint2 *__restrict__ expressionPrismVertices,
         const CudaSearchConditionInstruction *__restrict__ condition,
+        const CudaSearchExpressionPrism *__restrict__ conditionPrisms,
+        std::uint32_t conditionPrismCount,
+        const CudaSearchExpressionPoint2 *__restrict__ conditionPrismVertices,
         std::uint32_t conditionInstructionCount,
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds,
@@ -3454,19 +3892,22 @@ __global__ __launch_bounds__(
         if (publicTime < evaluationStartTimeMs) {
             continue;
         }
-        if (conditionInstructionCount != 0u &&
-            !EvaluateCondition(
-                    condition, conditionInstructionCount, state,
-                    baseline ? 0u : candidateId + 1u,
-                    lastImprovementTimeSeconds,
-                    lastRestartTimeSeconds, currentTimeSeconds)) {
-            ++evaluationIndex;
-            if (state.race.progress.raceCompleted) break;
-            continue;
-        }
         std::uint32_t stuntsScore = 0u;
         if constexpr (SimulateStunts) {
             stuntsScore = state.stunts.stuntsScore;
+        }
+        if (conditionInstructionCount != 0u &&
+            !EvaluateCondition(
+                    condition, conditionInstructionCount,
+                    conditionPrisms, conditionPrismCount,
+                    conditionPrismVertices, state,
+                    baseline ? 0u : candidateId + 1u,
+                    lastImprovementTimeSeconds,
+                    lastRestartTimeSeconds, currentTimeSeconds,
+                    static_cast<double>(publicTime), stuntsScore)) {
+            ++evaluationIndex;
+            if (state.race.progress.raceCompleted) break;
+            continue;
         }
         DeviceSample sample = EvaluateState(
                 configuredEvaluator, expressionInstructions,
@@ -4048,6 +4489,72 @@ __global__ void FinalizeSearchBatchKernel(
 
 }  // namespace
 
+bool EvaluateCudaSearchConditionForTesting(
+        const CudaSearchConditionConfiguration &condition,
+        const CudaCandidateState &state,
+        std::uint64_t iterationCount,
+        double currentTimeSeconds,
+        double currentTimeMs,
+        std::uint32_t stuntsScore,
+        bool *result,
+        std::string *diagnostic) noexcept {
+    if (result == nullptr || condition.instructions.empty() ||
+        condition.instructions.size() > UINT32_MAX ||
+        condition.prisms.size() > UINT32_MAX) {
+        if (diagnostic != nullptr) *diagnostic = "invalid CUDA condition test input";
+        return false;
+    }
+    DeviceAllocation<CudaSearchConditionInstruction> instructions;
+    DeviceAllocation<CudaSearchExpressionPrism> prisms;
+    DeviceAllocation<CudaSearchExpressionPoint2> vertices;
+    DeviceAllocation<CudaCandidateState> deviceState;
+    DeviceAllocation<bool> deviceResult;
+    if (!instructions.Allocate(condition.instructions.size()) ||
+        !prisms.Allocate(condition.prisms.size()) ||
+        !vertices.Allocate(condition.prismVertices.size()) ||
+        !deviceState.Allocate(1u) || !deviceResult.Allocate(1u)) {
+        if (diagnostic != nullptr) *diagnostic = "CUDA condition test allocation failed";
+        return false;
+    }
+    const auto upload = [](auto &allocation, const auto &source) {
+        if (source.empty()) return cudaSuccess;
+        return cudaMemcpy(allocation.Get(), source.data(), allocation.Bytes(),
+                          cudaMemcpyHostToDevice);
+    };
+    cudaError_t error = upload(instructions, condition.instructions);
+    if (error == cudaSuccess) error = upload(prisms, condition.prisms);
+    if (error == cudaSuccess) error = upload(vertices, condition.prismVertices);
+    if (error == cudaSuccess) {
+        error = cudaMemcpy(deviceState.Get(), &state, sizeof(state),
+                           cudaMemcpyHostToDevice);
+    }
+    if (error != cudaSuccess) {
+        if (diagnostic != nullptr)
+            *diagnostic = CudaFailure("uploading CUDA condition test data", error);
+        return false;
+    }
+    EvaluateConditionForTestingKernel<<<1u, 1u>>>(
+            instructions.Get(),
+            static_cast<std::uint32_t>(condition.instructions.size()),
+            prisms.Get(), static_cast<std::uint32_t>(condition.prisms.size()),
+            vertices.Get(), deviceState.Get(), iterationCount,
+            condition.lastImprovementTimeSeconds,
+            condition.lastRestartTimeSeconds, currentTimeSeconds,
+            currentTimeMs, stuntsScore, deviceResult.Get());
+    error = cudaGetLastError();
+    if (error == cudaSuccess) {
+        error = cudaMemcpy(result, deviceResult.Get(), sizeof(*result),
+                           cudaMemcpyDeviceToHost);
+    }
+    if (error != cudaSuccess) {
+        if (diagnostic != nullptr)
+            *diagnostic = CudaFailure("evaluating CUDA condition test", error);
+        return false;
+    }
+    if (diagnostic != nullptr) diagnostic->clear();
+    return true;
+}
+
 struct CudaSearchExecutor::Impl {
     struct SimulationKernelMetrics {
         std::uint32_t registersPerThread = 0u;
@@ -4105,6 +4612,8 @@ struct CudaSearchExecutor::Impl {
     DeviceAllocation<CudaSearchExpressionPrism> expressionPrisms;
     DeviceAllocation<CudaSearchExpressionPoint2> expressionPrismVertices;
     DeviceAllocation<CudaSearchConditionInstruction> condition;
+    DeviceAllocation<CudaSearchExpressionPrism> conditionPrisms;
+    DeviceAllocation<CudaSearchExpressionPoint2> conditionPrismVertices;
     DeviceAllocation<CudaCandidateState> capturedWinnerState;
     DeviceAllocation<DeviceSample> candidateBestSamples;
     DeviceAllocation<cuda::finish::Refinement> finishRefinements;
@@ -4164,6 +4673,8 @@ struct CudaSearchExecutor::Impl {
         ADD_BYTES(expressionPrisms);
         ADD_BYTES(expressionPrismVertices);
         ADD_BYTES(condition);
+        ADD_BYTES(conditionPrisms);
+        ADD_BYTES(conditionPrismVertices);
         ADD_BYTES(capturedWinnerState);
         ADD_BYTES(candidateBestSamples);
         ADD_BYTES(finishRefinements);
@@ -5003,6 +5514,11 @@ struct CudaSearchExecutor::Impl {
                 ? static_cast<std::uint32_t>(
                           configuration.condition->instructions.size())
                 : 0u;
+        const std::uint32_t conditionPrismCount =
+                configuration.condition
+                ? static_cast<std::uint32_t>(
+                          configuration.condition->prisms.size())
+                : 0u;
         const double lastImprovementTimeSeconds =
                 configuration.condition
                 ? configuration.condition->lastImprovementTimeSeconds
@@ -5032,6 +5548,9 @@ struct CudaSearchExecutor::Impl {
                             configuration.expressionPrisms.size()),
                     expressionPrismVertices.Get(),
                     condition.Get(),
+                    conditionPrisms.Get(),
+                    conditionPrismCount,
+                    conditionPrismVertices.Get(),
                     conditionInstructionCount,
                     lastImprovementTimeSeconds,
                     lastRestartTimeSeconds,
@@ -5117,6 +5636,9 @@ struct CudaSearchExecutor::Impl {
                             configuration.expressionPrisms.size()),
                     expressionPrismVertices.Get(),
                     condition.Get(),
+                    conditionPrisms.Get(),
+                    conditionPrismCount,
+                    conditionPrismVertices.Get(),
                     conditionInstructionCount,
                     lastImprovementTimeSeconds,
                     lastRestartTimeSeconds,
@@ -6294,6 +6816,14 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
                     preparedConfiguration.condition
                             ? preparedConfiguration.condition->instructions.size()
                             : 0u) ||
+            !impl->conditionPrisms.Allocate(
+                    preparedConfiguration.condition
+                            ? preparedConfiguration.condition->prisms.size()
+                            : 0u) ||
+            !impl->conditionPrismVertices.Allocate(
+                    preparedConfiguration.condition
+                            ? preparedConfiguration.condition->prismVertices.size()
+                            : 0u) ||
             !impl->capturedWinnerState.Allocate(1u) ||
             !impl->candidateBestSamples.Allocate(winnerSampleSlots) ||
             !impl->finishRefinements.Allocate(
@@ -6458,6 +6988,12 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
             UPLOAD(impl->condition,
                    preparedConfiguration.condition->instructions,
                    "uploading CUDA condition program");
+            UPLOAD(impl->conditionPrisms,
+                   preparedConfiguration.condition->prisms,
+                   "uploading CUDA condition prism descriptors");
+            UPLOAD(impl->conditionPrismVertices,
+                   preparedConfiguration.condition->prismVertices,
+                   "uploading CUDA condition prism vertices");
         }
         UPLOAD(impl->compactInputIndices,
                compactInputIndices,

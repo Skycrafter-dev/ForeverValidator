@@ -560,6 +560,24 @@ enum class PhysicsSandboxCudaConditionOpcode : std::uint32_t {
     LessOrEqual,
     Equal,
     LogicalAnd,
+    ComposeVector,
+    Direction,
+    Rotation,
+    RotationSource,
+    Magnitude,
+    Normalize,
+    Dot,
+    RotationDistance,
+    PercentRatio,
+    Absolute,
+    Clamp,
+    Minimum,
+    Maximum,
+    LogicalOr,
+    LogicalNot,
+    InsideBox,
+    InsidePrism,
+    WeightedBlend,
 };
 
 enum class PhysicsSandboxCudaConditionValue : std::uint32_t {
@@ -606,6 +624,11 @@ enum class PhysicsSandboxCudaConditionValue : std::uint32_t {
     LastRestartTime,
     CurrentTime,
     CheckpointCount,
+    StuntPoints,
+    FinishTime,
+    SimulationTime,
+    RaceCompleted,
+    CarRotation,
 };
 
 struct PhysicsSandboxCudaConditionInstruction {
@@ -620,6 +643,8 @@ struct PhysicsSandboxCudaConditionInstruction {
 
 struct PhysicsSandboxCudaConditionProgram {
     std::vector<PhysicsSandboxCudaConditionInstruction> instructions;
+    std::vector<PhysicsSandboxCudaExpressionPrism> prisms;
+    std::vector<PhysicsSandboxCudaExpressionPoint2> prismVertices;
     double lastImprovementTimeSeconds = 0.0;
     double lastRestartTimeSeconds = 0.0;
 };

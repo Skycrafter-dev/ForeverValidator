@@ -1980,36 +1980,317 @@ simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
             source);
 }
 
-std::optional<std::string> ValidateCudaExpressionPrisms(
-        const PhysicsSandboxCudaExpressionEvaluator &evaluator) {
+std::optional<std::string> ValidateCudaPrisms(
+        const std::vector<PhysicsSandboxCudaExpressionPrism> &prisms,
+        const std::vector<PhysicsSandboxCudaExpressionPoint2> &prismVertices,
+        const char *label) {
     constexpr std::size_t kMaximumPrisms = 256u;
     constexpr std::size_t kMaximumVertices = 65536u;
-    if (evaluator.prisms.size() > kMaximumPrisms) {
-        return "CUDA expression contains too many prism constants";
+    if (prisms.size() > kMaximumPrisms) {
+        return std::string(label) + " contains too many prism constants";
     }
-    if (evaluator.prismVertices.size() > kMaximumVertices) {
-        return "CUDA expression prism geometry is too large";
+    if (prismVertices.size() > kMaximumVertices) {
+        return std::string(label) + " prism geometry is too large";
     }
-    for (const PhysicsSandboxCudaExpressionPoint2 &vertex :
-         evaluator.prismVertices) {
+    for (const PhysicsSandboxCudaExpressionPoint2 &vertex : prismVertices) {
         if (!std::isfinite(vertex.x) || !std::isfinite(vertex.y)) {
-            return "CUDA expression prism contains a non-finite vertex";
+            return std::string(label) + " prism contains a non-finite vertex";
         }
     }
-    for (const PhysicsSandboxCudaExpressionPrism &prism : evaluator.prisms) {
+    for (const PhysicsSandboxCudaExpressionPrism &prism : prisms) {
         if (static_cast<std::uint32_t>(prism.plane) >
             static_cast<std::uint32_t>(PhysicsSandboxCudaExpressionPlane::YZ)) {
-            return "CUDA expression prism has an invalid plane";
+            return std::string(label) + " prism has an invalid plane";
         }
         if (prism.vertexCount < 3u || prism.vertexCount > 256u) {
-            return "CUDA expression prism must contain between 3 and 256 vertices";
+            return std::string(label) +
+                    " prism must contain between 3 and 256 vertices";
         }
         const std::uint64_t end =
                 static_cast<std::uint64_t>(prism.vertexOffset) +
                 static_cast<std::uint64_t>(prism.vertexCount);
-        if (end > evaluator.prismVertices.size()) {
-            return "CUDA expression prism vertex range is invalid";
+        if (end > prismVertices.size()) {
+            return std::string(label) + " prism vertex range is invalid";
         }
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> ValidateCudaExpressionPrisms(
+        const PhysicsSandboxCudaExpressionEvaluator &evaluator) {
+    return ValidateCudaPrisms(
+            evaluator.prisms, evaluator.prismVertices, "CUDA expression");
+}
+
+enum class CudaConditionValidationKind {
+    Scalar,
+    Vector,
+    Rotation,
+};
+
+std::optional<std::string> ValidateCudaConditionProgram(
+        const PhysicsSandboxCudaConditionProgram &program) {
+    using Opcode = PhysicsSandboxCudaConditionOpcode;
+    using Source = PhysicsSandboxCudaConditionValue;
+    constexpr std::size_t kMaximumInstructions = 256u;
+    constexpr std::size_t kMaximumStack = 32u;
+    if (program.instructions.empty() ||
+        program.instructions.size() > kMaximumInstructions) {
+        return "CUDA condition program must contain between 1 and 256 instructions";
+    }
+    if (const auto prismError = ValidateCudaPrisms(
+                program.prisms, program.prismVertices, "CUDA condition")) {
+        return prismError;
+    }
+
+    std::vector<CudaConditionValidationKind> stack;
+    stack.reserve(kMaximumStack);
+    const auto push = [&](CudaConditionValidationKind kind,
+                          const char *label) -> std::optional<std::string> {
+        if (stack.size() >= kMaximumStack) {
+            return std::string("CUDA condition stack exceeds 32 values at ") +
+                    label;
+        }
+        stack.push_back(kind);
+        return std::nullopt;
+    };
+    const auto pop = [&](CudaConditionValidationKind expected,
+                         const char *label) -> std::optional<std::string> {
+        if (stack.empty()) {
+            return std::string("CUDA condition stack underflow at ") + label;
+        }
+        if (stack.back() != expected) {
+            return std::string("CUDA condition type mismatch at ") + label;
+        }
+        stack.pop_back();
+        return std::nullopt;
+    };
+    const auto unary = [&](CudaConditionValidationKind input,
+                           CudaConditionValidationKind output,
+                           const char *label) -> std::optional<std::string> {
+        if (const auto error = pop(input, label)) return error;
+        return push(output, label);
+    };
+    const auto binary = [&](CudaConditionValidationKind input,
+                            CudaConditionValidationKind output,
+                            const char *label) -> std::optional<std::string> {
+        if (const auto error = pop(input, label)) return error;
+        if (const auto error = pop(input, label)) return error;
+        return push(output, label);
+    };
+    const auto ternary = [&](CudaConditionValidationKind input,
+                             CudaConditionValidationKind output,
+                             const char *label) -> std::optional<std::string> {
+        if (const auto error = pop(input, label)) return error;
+        if (const auto error = pop(input, label)) return error;
+        if (const auto error = pop(input, label)) return error;
+        return push(output, label);
+    };
+    const auto validSource = [](Source source) {
+        return static_cast<std::uint32_t>(source) <=
+                static_cast<std::uint32_t>(Source::CarRotation);
+    };
+    const auto vectorSource = [](Source source) {
+        return static_cast<std::uint32_t>(source) <=
+                static_cast<std::uint32_t>(Source::PreviousAngularVelocity);
+    };
+
+    for (const PhysicsSandboxCudaConditionInstruction &instruction :
+         program.instructions) {
+        switch (instruction.opcode) {
+        case Opcode::Constant:
+            if (!std::isfinite(instruction.x)) {
+                return "CUDA condition contains a non-finite constant";
+            }
+            if (const auto error = push(
+                        CudaConditionValidationKind::Scalar, "constant")) {
+                return error;
+            }
+            break;
+        case Opcode::ConstantVector:
+            if (!std::isfinite(instruction.x) ||
+                !std::isfinite(instruction.y) ||
+                !std::isfinite(instruction.z)) {
+                return "CUDA condition contains a non-finite vector constant";
+            }
+            if (const auto error = push(
+                        CudaConditionValidationKind::Vector,
+                        "vector constant")) {
+                return error;
+            }
+            break;
+        case Opcode::Scalar:
+            if (!validSource(instruction.value) ||
+                instruction.value == Source::CarRotation) {
+                return "CUDA condition has an invalid scalar source";
+            }
+            if (vectorSource(instruction.value) &&
+                (instruction.x < 1.0 || instruction.x > 3.0 ||
+                 std::floor(instruction.x) != instruction.x)) {
+                return "CUDA condition vector component source is invalid";
+            }
+            if (const auto error = push(
+                        CudaConditionValidationKind::Scalar,
+                        "scalar source")) {
+                return error;
+            }
+            break;
+        case Opcode::Vector:
+            if (!validSource(instruction.value) ||
+                !vectorSource(instruction.value)) {
+                return "CUDA condition has an invalid vector source";
+            }
+            if (const auto error = push(
+                        CudaConditionValidationKind::Vector,
+                        "vector source")) {
+                return error;
+            }
+            break;
+        case Opcode::RotationSource:
+            if (instruction.value != Source::CarRotation) {
+                return "CUDA condition has an invalid rotation source";
+            }
+            if (const auto error = push(
+                        CudaConditionValidationKind::Rotation,
+                        "rotation source")) {
+                return error;
+            }
+            break;
+        case Opcode::ComposeVector:
+        case Opcode::Direction:
+            if (const auto error = ternary(
+                        CudaConditionValidationKind::Scalar,
+                        CudaConditionValidationKind::Vector,
+                        instruction.opcode == Opcode::Direction
+                                ? "direction" : "vector")) {
+                return error;
+            }
+            break;
+        case Opcode::Rotation:
+            if (const auto error = ternary(
+                        CudaConditionValidationKind::Scalar,
+                        CudaConditionValidationKind::Rotation,
+                        "rotation")) {
+                return error;
+            }
+            break;
+        case Opcode::Magnitude:
+            if (const auto error = unary(
+                        CudaConditionValidationKind::Vector,
+                        CudaConditionValidationKind::Scalar,
+                        "magnitude")) {
+                return error;
+            }
+            break;
+        case Opcode::Normalize:
+            if (const auto error = unary(
+                        CudaConditionValidationKind::Vector,
+                        CudaConditionValidationKind::Vector,
+                        "normalize")) {
+                return error;
+            }
+            break;
+        case Opcode::Dot:
+        case Opcode::Distance:
+            if (const auto error = binary(
+                        CudaConditionValidationKind::Vector,
+                        CudaConditionValidationKind::Scalar,
+                        instruction.opcode == Opcode::Dot ? "dot" : "distance")) {
+                return error;
+            }
+            break;
+        case Opcode::RotationDistance:
+            if (const auto error = binary(
+                        CudaConditionValidationKind::Rotation,
+                        CudaConditionValidationKind::Scalar,
+                        "rotation distance")) {
+                return error;
+            }
+            break;
+        case Opcode::PercentRatio:
+        case Opcode::KilometersPerHour:
+        case Opcode::Degrees:
+        case Opcode::Absolute:
+        case Opcode::LogicalNot:
+            if (const auto error = unary(
+                        CudaConditionValidationKind::Scalar,
+                        CudaConditionValidationKind::Scalar,
+                        "unary scalar operation")) {
+                return error;
+            }
+            break;
+        case Opcode::Clamp:
+        case Opcode::WeightedBlend:
+            if (const auto error = ternary(
+                        CudaConditionValidationKind::Scalar,
+                        CudaConditionValidationKind::Scalar,
+                        instruction.opcode == Opcode::Clamp
+                                ? "clamp" : "weighted blend")) {
+                return error;
+            }
+            break;
+        case Opcode::InsideBox:
+            if (const auto error = ternary(
+                        CudaConditionValidationKind::Vector,
+                        CudaConditionValidationKind::Scalar,
+                        "inside box")) {
+                return error;
+            }
+            break;
+        case Opcode::InsidePrism:
+            if (!std::isfinite(instruction.x) || instruction.x < 0.0 ||
+                std::floor(instruction.x) != instruction.x ||
+                instruction.x >= static_cast<double>(program.prisms.size())) {
+                return "CUDA condition inside-prism index is invalid";
+            }
+            if (const auto error = pop(
+                        CudaConditionValidationKind::Scalar,
+                        "inside prism depth")) {
+                return error;
+            }
+            if (const auto error = pop(
+                        CudaConditionValidationKind::Vector,
+                        "inside prism origin")) {
+                return error;
+            }
+            if (const auto error = pop(
+                        CudaConditionValidationKind::Vector,
+                        "inside prism position")) {
+                return error;
+            }
+            if (const auto error = push(
+                        CudaConditionValidationKind::Scalar,
+                        "inside prism")) {
+                return error;
+            }
+            break;
+        case Opcode::Add:
+        case Opcode::Subtract:
+        case Opcode::Multiply:
+        case Opcode::Divide:
+        case Opcode::Minimum:
+        case Opcode::Maximum:
+        case Opcode::Greater:
+        case Opcode::Less:
+        case Opcode::GreaterOrEqual:
+        case Opcode::LessOrEqual:
+        case Opcode::Equal:
+        case Opcode::LogicalAnd:
+        case Opcode::LogicalOr:
+            if (const auto error = binary(
+                        CudaConditionValidationKind::Scalar,
+                        CudaConditionValidationKind::Scalar,
+                        "binary scalar operation")) {
+                return error;
+            }
+            break;
+        default:
+            return "CUDA condition contains an invalid opcode";
+        }
+    }
+    if (stack.size() != 1u ||
+        stack.back() != CudaConditionValidationKind::Scalar) {
+        return "CUDA condition program must leave one scalar Boolean result";
     }
     return std::nullopt;
 }
@@ -3938,13 +4219,13 @@ CreatePhysicsSandboxCudaSearchSession(
                 &internal.expressionPrisms,
                 &internal.expressionPrismVertices);
         if (configuration.condition) {
-            if (configuration.condition->instructions.empty() ||
-                configuration.condition->instructions.size() > 256u) {
+            if (const auto conditionError =
+                        ValidateCudaConditionProgram(*configuration.condition)) {
                 return PhysicsSandboxResult<
                         PhysicsSandboxCudaSearchSession>::Failure(
                         SearchError(
                                 PhysicsSandboxErrorCode::InvalidRequest,
-                                "CUDA condition program must contain between 1 and 256 instructions"));
+                                *conditionError));
             }
             simulation::CudaSearchConditionConfiguration condition;
             condition.lastImprovementTimeSeconds =
@@ -3963,6 +4244,20 @@ CreatePhysicsSandboxCudaSearchSession(
                         instruction.x,
                         instruction.y,
                         instruction.z});
+            }
+            condition.prisms.reserve(configuration.condition->prisms.size());
+            for (const PhysicsSandboxCudaExpressionPrism &prism :
+                 configuration.condition->prisms) {
+                condition.prisms.push_back({
+                        static_cast<std::uint32_t>(prism.plane),
+                        prism.vertexOffset,
+                        prism.vertexCount});
+            }
+            condition.prismVertices.reserve(
+                    configuration.condition->prismVertices.size());
+            for (const PhysicsSandboxCudaExpressionPoint2 &vertex :
+                 configuration.condition->prismVertices) {
+                condition.prismVertices.push_back({vertex.x, vertex.y});
             }
             internal.condition = std::move(condition);
         }

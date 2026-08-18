@@ -160,6 +160,24 @@ enum class CudaSearchConditionOpcode : std::uint32_t {
     LessOrEqual,
     Equal,
     LogicalAnd,
+    ComposeVector,
+    Direction,
+    Rotation,
+    RotationSource,
+    Magnitude,
+    Normalize,
+    Dot,
+    RotationDistance,
+    PercentRatio,
+    Absolute,
+    Clamp,
+    Minimum,
+    Maximum,
+    LogicalOr,
+    LogicalNot,
+    InsideBox,
+    InsidePrism,
+    WeightedBlend,
 };
 
 enum class CudaSearchConditionValue : std::uint32_t {
@@ -206,6 +224,11 @@ enum class CudaSearchConditionValue : std::uint32_t {
     LastRestartTime,
     CurrentTime,
     CheckpointCount,
+    StuntPoints,
+    FinishTime,
+    SimulationTime,
+    RaceCompleted,
+    CarRotation,
 };
 
 struct CudaSearchConditionInstruction {
@@ -218,6 +241,8 @@ struct CudaSearchConditionInstruction {
 
 struct CudaSearchConditionConfiguration {
     std::vector<CudaSearchConditionInstruction> instructions;
+    std::vector<CudaSearchExpressionPrism> prisms;
+    std::vector<CudaSearchExpressionPoint2> prismVertices;
     double lastImprovementTimeSeconds = 0.0;
     double lastRestartTimeSeconds = 0.0;
 };
@@ -370,6 +395,16 @@ private:
 };
 
 const char *CudaSearchStatusName(CudaSearchStatus status) noexcept;
+
+bool EvaluateCudaSearchConditionForTesting(
+        const CudaSearchConditionConfiguration &condition,
+        const CudaCandidateState &state,
+        std::uint64_t iterationCount,
+        double currentTimeSeconds,
+        double currentTimeMs,
+        std::uint32_t stuntsScore,
+        bool *result,
+        std::string *diagnostic) noexcept;
 
 }  // namespace forevervalidator::simulation
 
