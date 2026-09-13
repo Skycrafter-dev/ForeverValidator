@@ -20,6 +20,7 @@
 #include "simulation/backends/cuda/cuda_static_configuration_storage.h"
 #include "simulation/backends/cuda/cuda_timeline_executor.h"
 #include "simulation/backends/cuda/cuda_search_executor.h"
+#include "simulation/backends/cuda/cuda_execution_context.h"
 #include "engine/scene/static_scene_model.h"
 #include "engine/game/trackmania_race.h"
 struct ReplaySimulationTimelineResult {
@@ -105,6 +106,8 @@ public:
     ReplaySimulationSession &operator=(const ReplaySimulationSession &) = delete;
 
     std::unique_ptr<ReplaySimulationSession> ClonePrepared() const;
+    std::optional<forevervalidator::simulation::CudaExecutionContext>
+    CaptureCudaExecutionContext(std::uint64_t cursor) const;
 
     void Reset();
     bool PreloadChallenge(CGameCtnChallengeConstruction &construction);

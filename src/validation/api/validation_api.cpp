@@ -27,6 +27,7 @@
 #include "validation/evaluation/replay_validation_session.h"
 #include "validation/api/physics_sandbox_static_scene_test_access.h"
 #include "validation/api/physics_sandbox_cuda_test_access.h"
+#include "validation/api/physics_sandbox_cuda_execution_access.h"
 #include "validation/planning/replay_asset_route.h"
 #include "validation/planning/replay_challenge_map_preload.h"
 
@@ -3602,6 +3603,76 @@ PhysicsSandboxResult<PhysicsSandbox> ClonePhysicsSandbox(
 PhysicsSandboxCudaSearchSession::PhysicsSandboxCudaSearchSession(
         std::unique_ptr<Impl> impl)
     : impl_(std::move(impl)) {}
+
+PhysicsSandboxResult<PhysicsSandboxCudaExecutionContext>
+PhysicsSandboxCudaExecutionAccess::Capture(const PhysicsSandbox &sandbox) noexcept {
+    using Result = PhysicsSandboxResult<PhysicsSandboxCudaExecutionContext>;
+    try {
+        if (!sandbox.impl_ || !sandbox.impl_->loaded || !sandbox.impl_->session ||
+            sandbox.impl_->options.backend != SimulationBackend::Cuda ||
+            sandbox.impl_->options.timelineMode != PhysicsSandboxTimelineMode::Canonical)
+            return Result::Failure(SandboxError(PhysicsSandboxErrorCode::InvalidRequest,
+                "Programmable CUDA requires a loaded canonical CUDA sandbox"));
+        const auto &source = *sandbox.impl_;
+        const auto view = source.ReadView();
+        if (!view) return Result::Failure(view.Error());
+        auto context = source.session->CaptureCudaExecutionContext(source.cursor);
+        if (!context) return Result::Failure(SandboxError(PhysicsSandboxErrorCode::SimulationFailed,
+            "Could not capture the programmable CUDA physics context"));
+        PhysicsSandboxCudaExecutionContext result;
+        result.physics = std::move(*context);
+        result.state = view.Value();
+        result.prestartDurationMs = source.options.prestartDurationMs;
+        result.firstCursor = source.cursor;
+        const auto end = source.prestartTicks + source.simulationHorizonMs/source.options.tickDurationMs;
+        if (!source.controlPlan || source.cursor > end || end > source.controlPlan->Size())
+            return Result::Failure(SandboxError(PhysicsSandboxErrorCode::InvalidRequest,
+                "Programmable CUDA timeline exceeds the simulation horizon"));
+        result.ticks.reserve(end-source.cursor);
+        for (std::size_t i=source.cursor;i<end;++i)
+            result.ticks.push_back(simulation::FlattenCudaControlTick(source.controlPlan->Tick(i)));
+        return Result::Success(std::move(result));
+    } catch (const std::bad_alloc &) {
+        return Result::Failure(SandboxError(PhysicsSandboxErrorCode::AllocationFailed,
+            "Could not allocate the programmable CUDA context"));
+    } catch (...) {
+        return Result::Failure(SandboxError(PhysicsSandboxErrorCode::UnexpectedFailure,
+            "Could not capture the programmable CUDA context"));
+    }
+}
+
+PhysicsSandboxResult<PhysicsSandboxState> PhysicsSandboxCudaExecutionAccess::ImportState(
+        const PhysicsSandboxState &origin, const simulation::CudaCandidateState &packed,
+        const PhysicsSandboxStateView &view, std::vector<PhysicsSandboxInputEvent> inputs) noexcept {
+    using Result = PhysicsSandboxResult<PhysicsSandboxState>;
+    try {
+        if (!origin.impl_ || origin.impl_->backend != SimulationBackend::Cuda ||
+            packed.schemaVersion != simulation::CudaCandidateState::SchemaVersion ||
+            packed.validationSeed != origin.impl_->validationSeed ||
+            view.timeMs > origin.impl_->simulationHorizonMs ||
+            view.timeMs % origin.impl_->tickDurationMs != 0 ||
+            packed.controlCursor != (origin.impl_->prestartDurationMs+view.timeMs)/origin.impl_->tickDurationMs)
+            return Result::Failure(SandboxError(PhysicsSandboxErrorCode::InvalidRequest,
+                "Incompatible programmable CUDA snapshot"));
+        auto clone = std::make_shared<ReplaySimulationInstanceClone>();
+        if (simulation::DecodeCudaCandidateState(packed,clone.get()) != simulation::CudaStateConversionResult::Success)
+            return Result::Failure(SandboxError(PhysicsSandboxErrorCode::SimulationFailed,
+                "Could not decode the programmable CUDA snapshot"));
+        auto state = std::make_shared<PhysicsSandboxState::Impl>(*origin.impl_);
+        state->view = view;
+        state->runtimeClone = std::move(clone);
+        state->inputs = SandboxInputStorage::Full(std::move(inputs));
+        state->controlPlan.reset();
+        state->cursor = static_cast<std::size_t>(packed.controlCursor);
+        return Result::Success(PhysicsSandboxState(std::move(state)));
+    } catch (const std::bad_alloc &) {
+        return Result::Failure(SandboxError(PhysicsSandboxErrorCode::AllocationFailed,
+            "Could not allocate the programmable CUDA snapshot"));
+    } catch (...) {
+        return Result::Failure(SandboxError(PhysicsSandboxErrorCode::UnexpectedFailure,
+            "Could not import the programmable CUDA snapshot"));
+    }
+}
 PhysicsSandboxCudaSearchSession::~PhysicsSandboxCudaSearchSession() =
         default;
 PhysicsSandboxCudaSearchSession::PhysicsSandboxCudaSearchSession(

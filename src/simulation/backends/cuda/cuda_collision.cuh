@@ -360,15 +360,29 @@ __device__ inline void InitializeResponseOrder(
     }
 }
 
+__device__ inline void CopyCollision(
+        CudaCollision &destination,
+        const CudaCollision &source) {
+    destination.separation = source.separation;
+    destination.impulseNormal = source.impulseNormal;
+    destination.contactPoint = source.contactPoint;
+    destination.materialA = source.materialA;
+    destination.materialB = source.materialB;
+    destination.sphereMergePrimary = source.sphereMergePrimary;
+    destination.extraNegated = source.extraNegated;
+    destination.movingShapeIndex = source.movingShapeIndex;
+    destination.staticSurfaceIndex = source.staticSurfaceIndex;
+    destination.staticActorIndex = source.staticActorIndex;
+}
+
 __device__ inline void SwapOrdered(
         CudaCollisionScratch &scratch,
         std::uint32_t left,
         std::uint32_t right) {
-    const CudaCollision temporary =
-            CollisionAt(scratch, left);
-    CollisionAt(scratch, left) =
-            CollisionAt(scratch, right);
-    CollisionAt(scratch, right) = temporary;
+    CudaCollision temporary{};
+    CopyCollision(temporary, CollisionAt(scratch, left));
+    CopyCollision(CollisionAt(scratch, left), CollisionAt(scratch, right));
+    CopyCollision(CollisionAt(scratch, right), temporary);
 }
 
 __device__ inline void SwapOrdered(
@@ -443,6 +457,7 @@ __device__ inline void AddMain(
     destination.sphereMergePrimary = value.sphereMergePrimary;
     destination.extraNegated = value.extraNegated;
     destination.movingShapeIndex = value.movingShapeIndex;
+    destination.staticSurfaceIndex = value.staticSurfaceIndex;
     destination.staticActorIndex = value.staticActorIndex;
 }
 

@@ -26,6 +26,7 @@ struct PhysicsSandboxCudaTestAccess;
 }
 
 class PhysicsSandboxCudaSearchSession;
+struct PhysicsSandboxCudaExecutionAccess;
 
 enum class PhysicsSandboxErrorCode : std::uint8_t {
     InvalidSandbox,
@@ -686,6 +687,7 @@ private:
     explicit PhysicsSandboxState(std::shared_ptr<const Impl> impl);
     std::shared_ptr<const Impl> impl_;
     friend class PhysicsSandbox;
+    friend struct PhysicsSandboxCudaExecutionAccess;
     friend class PhysicsSandboxCudaSearchSession;
 };
 
@@ -797,6 +799,7 @@ private:
                     std::uint32_t count) noexcept;
     friend struct static_scene_test::PhysicsSandboxStaticSceneTestAccess;
     friend struct cuda_test::PhysicsSandboxCudaTestAccess;
+    friend struct PhysicsSandboxCudaExecutionAccess;
     friend class PhysicsSandboxCudaSearchSession;
     friend PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>
             CreatePhysicsSandboxCudaSearchSession(

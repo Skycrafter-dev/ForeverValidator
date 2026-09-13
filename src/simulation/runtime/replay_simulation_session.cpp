@@ -1827,6 +1827,28 @@ bool ReplaySimulationSession::PrepareRuntimeCloneRestore(
            impl->instance.runtime->PrepareRuntimeCloneRestore(clone.runtime);
 }
 
+std::optional<forevervalidator::simulation::CudaExecutionContext>
+ReplaySimulationSession::CaptureCudaExecutionContext(std::uint64_t cursor) const {
+#if !FOREVERVALIDATOR_HAS_CUDA
+    (void)cursor;
+    return {};
+#else
+    using namespace forevervalidator::simulation;
+    if (impl->backend != forevervalidator::SimulationBackend::Cuda ||
+        !impl->instance.runtime || !impl->cudaDeviceScene.Ready() ||
+        !impl->cudaDeviceConfiguration.Ready()) return {};
+    const auto initial = CaptureRuntimeClone();
+    if (!initial) return {};
+    CudaExecutionContext result;
+    if (EncodeCudaCandidateState(*initial, impl->incrementalValidationSeed,
+            cursor, 0u, initial->randomState, &result.initialState) !=
+            CudaStateConversionResult::Success) return {};
+    result.deviceScene = impl->cudaDeviceScene.DeviceData();
+    result.deviceStaticConfiguration = impl->cudaDeviceConfiguration.DeviceData();
+    return result;
+#endif
+}
+
 void ReplaySimulationSession::RestoreRuntimeClone(
         ReplaySimulationInstanceClone clone) noexcept {
     impl->instance.race.RestoreRuntimeClone(std::move(clone.race));

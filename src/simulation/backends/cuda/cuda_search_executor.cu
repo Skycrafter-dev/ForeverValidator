@@ -148,8 +148,10 @@ struct DeviceBatchSummary {
     bool bestChanged = false;
     bool bestValid = false;
     bool bestMutation = false;
+    std::uint8_t reserved0 = 0u;
     std::uint64_t bestCandidateId = 0u;
     std::uint32_t bestMutationCount = 0u;
+    std::uint32_t reserved1 = 0u;
 };
 
 template<typename T>

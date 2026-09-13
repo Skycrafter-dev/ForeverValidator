@@ -20,6 +20,7 @@ struct DeviceSample {
     bool valid = false;
     bool mutation = false;
     bool preciseFinish = false;
+    std::uint8_t reserved = 0u;
 };
 
 struct BetterSample {
