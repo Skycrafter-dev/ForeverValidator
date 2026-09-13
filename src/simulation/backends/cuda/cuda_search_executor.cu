@@ -1831,26 +1831,26 @@ __device__ GmVec3 ConditionLocalSpeed(
 
 __device__ DeviceConditionValue ConditionAngles(
         const GmQuat &q) {
-    const double sinrCosp = 2.0 *
-            (static_cast<double>(q.w) * q.x +
+    const double sinPitch = 2.0 *
+            (static_cast<double>(q.w) * q.x -
              static_cast<double>(q.y) * q.z);
-    const double cosrCosp = 1.0 - 2.0 *
+    const double sinYaw = 2.0 *
+            (static_cast<double>(q.w) * q.y +
+             static_cast<double>(q.x) * q.z);
+    const double cosYaw = 1.0 - 2.0 *
             (static_cast<double>(q.x) * q.x +
              static_cast<double>(q.y) * q.y);
-    const double sinp = 2.0 *
-            (static_cast<double>(q.w) * q.y -
-             static_cast<double>(q.z) * q.x);
-    const double sinyCosp = 2.0 *
+    const double sinRoll = 2.0 *
             (static_cast<double>(q.w) * q.z +
              static_cast<double>(q.x) * q.y);
-    const double cosyCosp = 1.0 - 2.0 *
-            (static_cast<double>(q.y) * q.y +
+    const double cosRoll = 1.0 - 2.0 *
+            (static_cast<double>(q.x) * q.x +
              static_cast<double>(q.z) * q.z);
-    const double pitch = fabs(sinp) >= 1.0
-            ? copysign(1.57079632679489661923, sinp)
-            : asin(sinp);
-    return {atan2(sinyCosp, cosyCosp), pitch,
-            atan2(sinrCosp, cosrCosp), true};
+    const double pitch = fabs(sinPitch) >= 1.0
+            ? copysign(1.57079632679489661923, sinPitch)
+            : asin(sinPitch);
+    return {atan2(sinYaw, cosYaw), pitch,
+            atan2(sinRoll, cosRoll), true};
 }
 
 __device__ DeviceConditionValue ConditionSource(
