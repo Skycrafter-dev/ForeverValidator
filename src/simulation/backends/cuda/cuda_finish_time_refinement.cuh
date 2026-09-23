@@ -215,8 +215,9 @@ __device__ inline physics::Status StepAndRefine(
                 (angular.x * angular.x + angular.y * angular.y) +
                 angular.z * angular.z);
         const float scaled =
-                ((linearLength + angularLength) * dt) /
-                candidate.body.parameters.maxStepDistance;
+                exact::Divide(
+                        (linearLength + angularLength) * dt,
+                        candidate.body.parameters.maxStepDistance);
         std::uint32_t substeps =
                 exact::TruncateToUint32Modulo(scaled) + 1u;
         if (substeps > 1000u) substeps = 1000u;
@@ -226,9 +227,9 @@ __device__ inline physics::Status StepAndRefine(
         const std::uint64_t tickStartNs =
                 TickStartNanoseconds(tick.timeMs);
         for (std::uint32_t index = 0u; index < substeps; ++index) {
-            const float substepDt =
-                    index + 1u < substeps
-                    ? dt / exact::FromUnsignedInteger(substeps)
+            const float substepDt = index + 1u < substeps
+                    ? exact::Divide(
+                              dt, exact::FromUnsignedInteger(substeps))
                     : remaining;
             const CudaCandidatePhysicsState preSubstep = candidate;
             const bool wasFinished =

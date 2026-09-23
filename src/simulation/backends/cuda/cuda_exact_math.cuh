@@ -302,6 +302,10 @@ __device__ inline float FromUnsignedInteger(std::uint32_t value) {
     return __uint2float_rn(value);
 }
 
+__device__ inline float Divide(float numerator, float denominator) {
+    return numerator / denominator;
+}
+
 __device__ inline std::uint32_t TruncateToUint32Modulo(float value) {
     if (!isfinite(value) ||
         fabsf(value) >= 18446744073709551616.0) {

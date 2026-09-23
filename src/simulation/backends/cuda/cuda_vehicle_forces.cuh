@@ -122,11 +122,13 @@ __device__ inline bool WaterAcceptsRegion(
     const float lowerY = world.center.y - halfY;
     const float upperY = world.center.y + halfY;
     const float xIndexFloat =
-            (world.center.x - configuration->water.origin.x) /
-            configuration->water.cellSize.x;
+            exact::Divide(
+                    world.center.x - configuration->water.origin.x,
+                    configuration->water.cellSize.x);
     const float zIndexFloat =
-            (world.center.z - configuration->water.origin.y) /
-            configuration->water.cellSize.y;
+            exact::Divide(
+                    world.center.z - configuration->water.origin.y,
+                    configuration->water.cellSize.y);
     const std::uint32_t x =
             exact::TruncateToUint32Modulo(xIndexFloat);
     const std::uint32_t z =
@@ -293,7 +295,7 @@ __device__ inline void AddCentralImpulse(
     const GmVec3 world =
             LocalToWorld(candidate.body, localImpulse);
     const float inverseMass =
-            1.0f / candidate.body.parameters.mass;
+            exact::Divide(1.0f, candidate.body.parameters.mass);
     candidate.body.current.linearSpeed.x =
             world.x * inverseMass +
             candidate.body.current.linearSpeed.x;
@@ -354,7 +356,7 @@ __device__ inline int ApplyWaterForces(
             const float horizontalSpeed =
                     exact::Sqrt(horizontalSpeedSq);
             splashCurveInput =
-                    -horizontalSpeed / localSpeed.y;
+                    exact::Divide(-horizontalSpeed, localSpeed.y);
             if (splashCurveInput != splashCurveInput) {
                 return 0;
             }
@@ -518,19 +520,23 @@ __device__ inline bool IsGroundContact(
     return false;
 }
 
-__device__ inline bool HasMaterialContact(
+__device__ inline bool AllPresentWheelContactsMatchMaterial(
         const CudaVehicleState &vehicle,
         std::uint32_t material) {
+    std::uint32_t missingContactCount = 0u;
     for (std::uint32_t index = 0u;
          index < facts::WheelCount(vehicle); ++index) {
         const auto &wheel = vehicle.wheels.values[index].realTime;
-        if (wheel.contactPresent &&
-            static_cast<std::uint32_t>(wheel.contactMaterial) ==
-                    material) {
-            return true;
+        if (!wheel.contactPresent) {
+            ++missingContactCount;
+            continue;
+        }
+        if (static_cast<std::uint32_t>(wheel.contactMaterial) !=
+            material) {
+            return false;
         }
     }
-    return false;
+    return missingContactCount != facts::WheelCount(vehicle);
 }
 
 __device__ inline const VehicleMaterialDefinition *Material(
@@ -577,7 +583,7 @@ __device__ inline std::uint32_t FakeContactTextureIndex(
         std::uint32_t dimension) {
     const float wrapped = exact::Fmod(coordinate, period);
     const float scaled =
-            (fabsf(wrapped) / period) *
+            exact::Divide(fabsf(wrapped), period) *
             exact::FromUnsignedInteger(dimension);
     return exact::TruncateToUint32Modulo(scaled);
 }
@@ -644,7 +650,8 @@ __device__ inline void CreateFakeContacts(
                 VehicleFakeContactTextureBytesPerPixel];
         if (pixel == 0u) continue;
         const float pixelRatio =
-                exact::FromUnsignedInteger(pixel) / 255.0f;
+                exact::Divide(
+                        exact::FromUnsignedInteger(pixel), 255.0f);
         float fakeSpeed =
                 (pixelRatio * linearSpeed.z) *
                 material->fakeContactSpeedScale;
@@ -655,10 +662,14 @@ __device__ inline void CreateFakeContacts(
         contact.localNormal = {0.0f, 1.0f, 0.0f};
         contact.localPoint = restTranslation;
         contact.localSpeed = {0.0f, -fakeSpeed, 0.0f};
+        contact.replacement = {};
         contact.peerMaterial =
                 static_cast<std::uint32_t>(
                         wheel.realTime.contactMaterial);
+        contact.peerZAxis = {};
+        contact.peerCorpusId = 0u;
         contact.wheelIndex = index;
+        contact.accepted = true;
         const GmVec3 peerAxis =
                 wheel.realTime.peerZAxisInCarLocal;
         const CHmsCorpusId peerId =
@@ -710,7 +721,8 @@ __device__ inline void ApplyFrictionForces(
                 force.z * force.z;
         if (VectorEpsilonSquared < lengthSquared) {
             const float inverseLength =
-                    1.0f / exact::Sqrt(lengthSquared);
+                    exact::Divide(
+                            1.0f, exact::Sqrt(lengthSquared));
             force.x = inverseLength * force.x;
             force.y = force.y * inverseLength;
             force.z = inverseLength * force.z;
@@ -767,7 +779,8 @@ __device__ inline void ApplyFrictionForces(
             const float speedLength =
                     exact::Sqrt(speedSquared);
             if (ScalarEpsilon < speedLength) {
-                const float inverseLength = 1.0f / speedLength;
+                const float inverseLength =
+                        exact::Divide(1.0f, speedLength);
                 const GmVec3 unit = {
                         speed.x * inverseLength,
                         speed.y * inverseLength,
@@ -843,7 +856,8 @@ __device__ inline void GroundMaterial(
     }
     if (count != 0u) {
         const float inverse =
-                1.0f / exact::FromUnsignedInteger(count);
+                exact::Divide(
+                        1.0f, exact::FromUnsignedInteger(count));
         values.x *= inverse;
         values.y *= inverse;
         values.z *= inverse;
@@ -856,7 +870,8 @@ __device__ inline float SlopeBlend(
     if (!(minimum <= value)) return 0.0f;
     if (!(maximum >= value)) return 1.0f;
     const float angle =
-            ((value - minimum) / (maximum - minimum)) *
+            exact::Divide(
+                    value - minimum, maximum - minimum) *
             static_cast<double>(Pi) * 0.5;
     return 1.0f - exact::Cos(angle);
 }
@@ -898,7 +913,7 @@ __device__ inline float VisualSteerYaw(
             cuda::facts::Tuning(configuration).visual.wheelSpeedBase;
     float asinValue = 0.0f;
     if (!(denominator < ScalarEpsilon)) {
-        const float input = 1.0f / denominator;
+        const float input = exact::Divide(1.0f, denominator);
         if (input < -SafeTrigInteriorLimit) {
             asinValue = -HalfPi;
         } else if (SafeTrigInteriorLimit < input) {
@@ -1015,7 +1030,7 @@ __device__ inline void UpdateAirControl(
                 torque.z * torque.z + xy;
         const float length = exact::Sqrt(lengthSquared);
         if (length >= ScalarEpsilon) {
-            const float inverse = 1.0f / length;
+            const float inverse = exact::Divide(1.0f, length);
             const float quadratic =
                     cuda::facts::Tuning(configuration).bodyAirResponse.
                             airTorqueQuadraticCoef *
@@ -1045,11 +1060,12 @@ __device__ inline void UpdateTurbo(CudaVehicleState &vehicle,
         if (vehicle.turbo.type !=
             CSceneVehicleCar::ETurboType_Inactive) {
             vehicle.turbo.progressRatio =
-                    exact::FromUnsignedInteger(
-                            tick - vehicle.turbo.startTick) /
-                    exact::FromUnsignedInteger(
-                            vehicle.turbo.endTick -
-                            vehicle.turbo.startTick);
+                    exact::Divide(
+                            exact::FromUnsignedInteger(
+                                    tick - vehicle.turbo.startTick),
+                            exact::FromUnsignedInteger(
+                                    vehicle.turbo.endTick -
+                                    vehicle.turbo.startTick));
             return;
         }
     }
@@ -1069,8 +1085,7 @@ __device__ inline bool GroundContact(
             static_cast<std::uint32_t>(
                     contact.contactMaterial) == material) {
             peerAxis = contact.peerZAxisInCarLocal;
-            memory::CopyBytes<sizeof(peerCorpusId)>(
-                    &peerCorpusId, &contact.peerCorpusId);
+            peerCorpusId = contact.peerCorpusId.Value();
             return true;
         }
     }
@@ -1092,28 +1107,27 @@ __device__ inline void EnableTurbo(
         vehicle.turbo.impulseScale = impulseScale;
     } else if (type ==
                        CSceneVehicleCar::ETurboType_Roulette) {
-        std::uint32_t currentSource = 0u;
-        memory::CopyBytes<sizeof(currentSource)>(
-                &currentSource, &vehicle.turbo.sourceCorpusId);
+        const std::uint32_t currentSource =
+                vehicle.turbo.sourceCorpusId.Value();
         if (currentSource != sourceCorpusId) {
             const std::uint32_t remainder =
                     (tick - vehicle.turbo.rouletteTickOrigin) %
                     TurboRoulettePeriodMs;
             const float phaseValue =
-                    exact::FromUnsignedInteger(remainder) /
-                    exact::FromUnsignedInteger(
-                            TurboRoulettePeriodMs);
+                    exact::Divide(
+                            exact::FromUnsignedInteger(remainder),
+                            exact::FromUnsignedInteger(
+                                    TurboRoulettePeriodMs));
             const float phase =
-                    phaseValue < 4.0f / 7.0f
+                    phaseValue < exact::Divide(4.0f, 7.0f)
                     ? 0.0f
-                    : (phaseValue < 6.0f / 7.0f
+                    : (phaseValue < exact::Divide(6.0f, 7.0f)
                        ? 0.5f : 1.0f);
             vehicle.turbo.type2Phase = phase;
             vehicle.turbo.impulseScale =
                     (phase + 1.0f) * impulseScale;
-            memory::CopyBytes<sizeof(sourceCorpusId)>(
-                    &vehicle.turbo.sourceCorpusId,
-                    &sourceCorpusId);
+            vehicle.turbo.sourceCorpusId =
+                    CHmsCorpusId::FromValue(sourceCorpusId);
         }
     }
     vehicle.turbo.endTick = tick + duration;
@@ -1255,7 +1269,8 @@ __device__ inline void ApplySpecialContactResponse(
                     impulse.z * impulse.z;
             if (lengthSquared > VectorEpsilonSquared) {
                 const float inverse =
-                        1.0f / exact::Sqrt(lengthSquared);
+                        exact::Divide(
+                                1.0f, exact::Sqrt(lengthSquared));
                 impulse.x *= inverse;
                 impulse.y *= inverse;
                 impulse.z *= inverse;
@@ -1317,7 +1332,8 @@ __device__ inline void UpdateFeedbackSpring(
     const float drive = ClampSymmetric(
             unclamped, vehicle.feedback.springDriveLimit);
     const float delta =
-            (drive / vehicle.feedback.springDriveLimit) *
+            exact::Divide(
+                    drive, vehicle.feedback.springDriveLimit) *
             vehicle.feedback.springVelocityLimit;
     spring.value = ClampSymmetric(
             spring.value, vehicle.feedback.springValueLimit);
@@ -1340,7 +1356,9 @@ __device__ inline void UpdateFeedback(
                     candidate.body,
                     candidate.body.current.force);
     const float forceScale =
-            1.0f / cuda::facts::Tuning(configuration).feedback.forceDivisor;
+            exact::Divide(
+                    1.0f,
+                    cuda::facts::Tuning(configuration).feedback.forceDivisor);
     vehicle.gearedDrive.scaledCurrentForce.x *= forceScale;
     vehicle.gearedDrive.scaledCurrentForce.y =
             forceScale *
@@ -1360,7 +1378,7 @@ __device__ inline void UpdateFeedback(
     UpdateFeedbackSpring(
             vehicle, vehicle.feedback.forwardSpring, dt,
             savedForce.z, savedImpulse.z, true);
-    const float direction = HasMaterialContact(
+    const float direction = AllPresentWheelContactsMatchMaterial(
             vehicle, FeedbackRampContactId)
             ? 1.0f
             : -1.0f;
@@ -1457,8 +1475,9 @@ __device__ inline void WheelSuspensionForce(
 __device__ inline float BurnoutPhase(
         std::uint32_t elapsed,
         std::uint32_t duration) {
-    return exact::FromUnsignedInteger(elapsed) * Pi /
-           exact::FromUnsignedInteger(duration);
+    return exact::Divide(
+            exact::FromUnsignedInteger(elapsed) * Pi,
+            exact::FromUnsignedInteger(duration));
 }
 
 __device__ inline float BurnoutFade(
@@ -1638,8 +1657,10 @@ __device__ inline float SteerAssistRamp(
         return 1.0f;
     }
     return exact::Sin(
-            (speed /
-             cuda::facts::Tuning(configuration).steering.assistFullSpeed) *
+            exact::Divide(
+                    speed,
+                    cuda::facts::Tuning(configuration).steering.
+                            assistFullSpeed) *
             HalfPi);
 }
 
@@ -1667,8 +1688,10 @@ __device__ inline float SlipAccelerationMix(
         return 1.0f;
     }
     const float slip =
-            (requested - limit) / limit /
-            cuda::facts::Tuning(configuration).gearedDrive.slipRatioScale;
+            exact::Divide(
+                    exact::Divide(requested - limit, limit),
+                    cuda::facts::Tuning(configuration).gearedDrive.
+                            slipRatioScale);
     return 1.0f - ClampZeroOne(slip);
 }
 
@@ -1858,9 +1881,10 @@ __device__ inline ForceStatus ComputeModel3Ground(
         if (!(cuda::facts::Tuning(configuration).steering.
                       assistFullSpeed < speedMagnitude)) {
             steerRamp = exact::Sin(
-                    (speedMagnitude /
-                     cuda::facts::Tuning(configuration).steering.
-                             assistFullSpeed) *
+                    exact::Divide(
+                            speedMagnitude,
+                            cuda::facts::Tuning(configuration).steering.
+                                    assistFullSpeed) *
                     HalfPi);
         }
         const float maximumSide =
@@ -2045,11 +2069,12 @@ __device__ inline ForceStatus ComputeModel3Ground(
     AddCentralForce(candidate, {
             0.0f,
             0.0f,
-            (-cuda::facts::Tuning(configuration).gearedDrive.
-                     forceZScale *
-             currentForce.z) /
+            exact::Divide(
+                    -cuda::facts::Tuning(configuration).gearedDrive.
+                                    forceZScale *
+                            currentForce.z,
                     cuda::facts::Tuning(configuration).bodyAirResponse.
-                            groundedSolidFeedback1,
+                            groundedSolidFeedback1),
     });
     return ForceStatus::Success;
 }
@@ -2109,7 +2134,8 @@ __device__ inline void EnterCircularBurnout(
             normalSum.z * normalSum.z;
     if (VectorEpsilonSquared < normalLengthSquared) {
         const float inverseLength =
-                1.0f / exact::Sqrt(normalLengthSquared);
+                exact::Divide(
+                        1.0f, exact::Sqrt(normalLengthSquared));
         drive.burnoutContactNormal = {
                 normalSum.x * inverseLength,
                 normalSum.y * inverseLength,
@@ -2283,7 +2309,7 @@ __device__ inline void ApplyCircularBurnout(
     const float radius = exact::Sqrt(radiusSquared);
     GmVec3 radialDirection = radial;
     if (radiusSquared > VectorEpsilonSquared) {
-        const float inverseRadius = 1.0f / radius;
+        const float inverseRadius = exact::Divide(1.0f, radius);
         radialDirection = {
                 radial.x * inverseRadius,
                 radial.y * inverseRadius,
@@ -2322,7 +2348,7 @@ __device__ inline void ApplyCircularBurnout(
         const float tangentSpeedSquared =
                 tangentSpeed * tangentSpeed;
         const float correctionMagnitude =
-                (tangentSpeedSquared / radius) *
+                exact::Divide(tangentSpeedSquared, radius) *
                 exact::Exp(correctionExponent);
         AddCentralForce(candidate, {
                 radialDirection.x * correctionMagnitude,
@@ -2408,7 +2434,7 @@ __device__ inline void ApplyCircularBurnout(
                     angularY;
         }
         const float tangentAngularSpeed =
-                tangentSpeed / radius;
+                exact::Divide(tangentSpeed, radius);
         float tangentDampingTorque = 0.0f;
         if ((angleNorm <= 0.0f &&
              tangentAngularSpeed > 0.0f) ||
@@ -2489,29 +2515,32 @@ __device__ inline void ApplyDirtSlide(
                     vehicle.controls.lowSpeedGateA +
             1.0f;
     const GmVec3 front = {
-            (cuda::facts::Tuning(configuration).gearedDrive.
-                     dirtSlideSideForceScale *
-             unitSpeed.x) /
-                    sideDenominator,
-            0.0f,
-            cuda::facts::Tuning(configuration).gearedDrive.
-                            dirtSlideForwardGateScale *
-                    vehicle.controls.lowSpeedGateA *
-                    1.5f * absoluteUnitX * absoluteXGate *
+            exact::Divide(
                     cuda::facts::Tuning(configuration).gearedDrive.
-                            dirtSlideForwardForceScale /
-                    denominator,
+                                    dirtSlideSideForceScale *
+                            unitSpeed.x,
+                    sideDenominator),
+            0.0f,
+            exact::Divide(
+                    cuda::facts::Tuning(configuration).gearedDrive.
+                                    dirtSlideForwardGateScale *
+                            vehicle.controls.lowSpeedGateA *
+                            1.5f * absoluteUnitX * absoluteXGate *
+                            cuda::facts::Tuning(configuration).gearedDrive.
+                                    dirtSlideForwardForceScale,
+                    denominator),
     };
     const GmVec3 rear = {
             -front.x,
             0.0f,
-            cuda::facts::Tuning(configuration).gearedDrive.
-                            dirtSlideForwardGateScale *
-                    vehicle.controls.lowSpeedGateA *
-                    absoluteUnitX * absoluteXGate *
+            exact::Divide(
                     cuda::facts::Tuning(configuration).gearedDrive.
-                            dirtSlideForwardForceScale /
-                    denominator,
+                                    dirtSlideForwardGateScale *
+                            vehicle.controls.lowSpeedGateA *
+                            absoluteUnitX * absoluteXGate *
+                            cuda::facts::Tuning(configuration).gearedDrive.
+                                    dirtSlideForwardForceScale,
+                    denominator),
     };
     for (std::uint32_t index = 0u;
          index < facts::WheelCount(vehicle); ++index) {
@@ -2728,8 +2757,9 @@ __device__ inline ForceStatus ComputeModel6Ground(
                         damperModulationMaxAbsorb;
         if (minAbsorb != maxAbsorb) {
             normalizedDamper =
-                    (wheel.realTime.damperAbsorb - minAbsorb) /
-                    (maxAbsorb - minAbsorb);
+                    exact::Divide(
+                            wheel.realTime.damperAbsorb - minAbsorb,
+                            maxAbsorb - minAbsorb);
         }
         const float damper = tuning::Evaluate(
                 configuration,
@@ -2844,8 +2874,9 @@ __device__ inline ForceStatus ComputeModel6Ground(
     }
     UpdateGearDirection(vehicle, linearSpeed);
     const float rolloverInput =
-            (linearSpeed.x * linearSpeed.x) /
-            (fabsf(linearSpeed.z) + 1.0f);
+            exact::Divide(
+                    linearSpeed.x * linearSpeed.x,
+                    fabsf(linearSpeed.z) + 1.0f);
     AddTorque(candidate, {
             0.0f,
             0.0f,
@@ -3107,10 +3138,12 @@ __device__ inline ForceStatus ComputeModel6Ground(
     AddCentralForce(candidate, {
             0.0f,
             0.0f,
-            (-cuda::facts::Tuning(configuration).gearedDrive.forceZScale *
-             currentForce.z) /
+            exact::Divide(
+                    -cuda::facts::Tuning(configuration).gearedDrive.
+                                    forceZScale *
+                            currentForce.z,
                     cuda::facts::Tuning(configuration).bodyAirResponse.
-                            groundedSolidFeedback1,
+                            groundedSolidFeedback1),
     });
     vehicle.slipMemory.active = slipSeen != 0;
     vehicle.gearedDrive.localSpeed = linearSpeed;
@@ -3215,6 +3248,8 @@ __device__ inline ForceStatus ComputeForcesModel6(
                     vehicle, configuration, linearSpeed);
     vehicle.gearedDrive.localSpeed = linearSpeed;
     force_detail::Model6Result modelResult;
+    modelResult.surfaceFeedback = 0.0f;
+    modelResult.slipFlag = 0;
     if constexpr (Handling == CudaHandlingSpecialization::Legacy) {
         const ForceStatus modelStatus =
                 force_detail::ComputeModel3Ground<

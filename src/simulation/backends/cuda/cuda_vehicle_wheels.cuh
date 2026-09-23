@@ -86,7 +86,8 @@ __device__ inline GmVec3 NormalizeOr(
     if (!(lengthSquared > minimumLengthSquared)) {
         return shortResult;
     }
-    const float scale = 1.0f / exact::Sqrt(lengthSquared);
+    const float scale = exact::Divide(
+            1.0f, exact::Sqrt(lengthSquared));
     return {
             value.x * scale,
             value.y * scale,
@@ -109,8 +110,8 @@ __device__ inline void IntegrateRealTime(
             wheel.accumulatedContactNormal.z *
                     wheel.accumulatedContactNormal.z;
     if (normalLengthSquared > VectorEpsilonSquared) {
-        const float inverseLength =
-                1.0f / exact::Sqrt(normalLengthSquared);
+        const float inverseLength = exact::Divide(
+                1.0f, exact::Sqrt(normalLengthSquared));
         wheel.accumulatedContactNormal.x *= inverseLength;
         wheel.accumulatedContactNormal.y *= inverseLength;
         wheel.accumulatedContactNormal.z =
@@ -162,9 +163,10 @@ __device__ inline void UpdateSpeed(
             return;
         }
         wheel.realTime.wheelAngularSpeed =
-                vehicleForwardSpeed /
-                facts::WheelRollingRadius(
-                        configuration, wheelIndex);
+                exact::Divide(
+                        vehicleForwardSpeed,
+                        facts::WheelRollingRadius(
+                                configuration, wheelIndex));
         return;
     }
     float targetAngularSpeed = 0.0f;
@@ -268,8 +270,9 @@ ComputeWheelVisualInvariants(
         float visualSpeedDenominator) {
     float yaw = 0.0f;
     if (!(visualSpeedDenominator < 1.0e-5f)) {
-        yaw = -vehicle.controls.currentSteering /
-              visualSpeedDenominator;
+        yaw = exact::Divide(
+                -vehicle.controls.currentSteering,
+                visualSpeedDenominator);
     }
     float maximumDegrees =
             wheel_detail::DefaultMaxSteerDegrees;
@@ -288,8 +291,9 @@ ComputeWheelVisualInvariants(
                 fabsf(vehicleForwardSpeed) * 3.6f);
     }
     const float maximumRadians =
-            (maximumDegrees * wheel_detail::Pi) /
-            wheel_detail::DegreesDivisor;
+            exact::Divide(
+                    maximumDegrees * wheel_detail::Pi,
+                    wheel_detail::DegreesDivisor);
     return {
             exact::SinCos(yaw),
             -vehicle.controls.currentSteering *
@@ -332,8 +336,9 @@ __device__ inline void UpdateWheelVisual(
         } else {
             float yaw = 0.0f;
             if (!(visualSpeedDenominator < 1.0e-5f)) {
-                yaw = -vehicle.controls.currentSteering /
-                      visualSpeedDenominator;
+                yaw = exact::Divide(
+                        -vehicle.controls.currentSteering,
+                        visualSpeedDenominator);
             }
             wheel_detail::RotateVisualY(
                     wheel.realTime.visualRotation, yaw);
@@ -354,8 +359,9 @@ __device__ inline void UpdateWheelVisual(
                         fabsf(vehicleForwardSpeed) * 3.6f);
             }
             const float maximumRadians =
-                    (maximumDegrees * wheel_detail::Pi) /
-                    wheel_detail::DegreesDivisor;
+                    exact::Divide(
+                            maximumDegrees * wheel_detail::Pi,
+                            wheel_detail::DegreesDivisor);
             visualSteerAngle =
                     -vehicle.controls.currentSteering *
                     maximumRadians;
@@ -432,8 +438,8 @@ __device__ inline void IntegrateWheelSuspension(
                 displacement * dt *
                         tuning.wheelAbsorbFollowCoef +
                 baseAbsorb;
-        wheel.realTime.damperVelocity =
-                (target - wheel.realTime.damperAbsorb) / dt;
+        wheel.realTime.damperVelocity = exact::Divide(
+                target - wheel.realTime.damperAbsorb, dt);
         wheel.realTime.damperAbsorb = target;
         wheel.realTime.maxReplacementY = 0.0f;
         wheel.currentPose.translation.y += -target;

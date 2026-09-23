@@ -40,7 +40,7 @@ __device__ inline bool ForceFieldValue(
         !(distanceSquared > 1.0e-10f)) {
         return false;
     }
-    const float scale = -field.strength / distanceSquared;
+    const float scale = exact::Divide(-field.strength, distanceSquared);
     value.x = delta.x * scale;
     value.y = delta.y * scale;
     value.z = scale * delta.z;

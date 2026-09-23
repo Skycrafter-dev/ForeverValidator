@@ -1,0 +1,129 @@
+--- a/vulkan_search_steady_velocity_water.slang
++++ b/vulkan_search_steady_velocity_water_cooperative.slang
+@@ -15284,7 +15284,6 @@
+ 
+ namespace forevervalidator::simulation::vulkan_search {
+ 
+-[noinline]
+ forevervalidator::simulation::cuda::vehicle::ForceStatus
+ ExecuteSearchForcePass(
+     CudaPackedStaticConfigurationHeader* configuration,
+@@ -15300,7 +15299,6 @@
+             state, configuration, dt);
+ }
+ 
+-[noinline]
+ uint ExecuteSearchCollisionDetection(
+     CudaPackedSceneHeader* scene,
+     CudaPackedStaticConfigurationHeader* configuration,
+@@ -15315,7 +15313,6 @@
+             scene, configuration, state, *scratch);
+ }
+ 
+-[noinline]
+ uint ExecuteSearchCollisionResponse(
+     CudaPackedSceneHeader* scene,
+     CudaPackedStaticConfigurationHeader* configuration,
+@@ -15327,8 +15324,6 @@
+             scene, configuration, state, *scratch);
+ }
+ 
+-[noRefInline]
+-[noinline]
+ forevervalidator::simulation::cuda::physics::Status
+ ExecuteSearchCollisionSubstep(
+     CudaPackedSceneHeader* scene,
+@@ -15358,7 +15353,6 @@
+     return forevervalidator::simulation::cuda::physics::Status::Success;
+ }
+ 
+-[noinline]
+ forevervalidator::simulation::cuda::physics::Status ExecuteSearchPhysicsStep(
+     CudaPackedSceneHeader* scene,
+     CudaPackedStaticConfigurationHeader* configuration,
+@@ -15388,30 +15382,27 @@
+                 TruncateToUint32Modulo(scaled) + 1u;
+         if (substeps > 1000u) substeps = 1000u;
+         float remaining = dt;
++        float split = dt;
+         if (substeps > 1u)
+         {
+-            const float split =
++            split =
+                 forevervalidator::simulation::cuda::exact::Divide(
+                     dt,
+                     forevervalidator::simulation::cuda::exact::
+                         FromUnsignedInteger(substeps));
+-            for (uint count = substeps - 1u; count != 0u; --count)
+-            {
+-                forevervalidator::simulation::cuda::physics::Status status =
+-                    ExecuteSearchCollisionSubstep(
+-                        scene, configuration, state, scratch, split);
+-                if (status != forevervalidator::simulation::cuda::physics::
+-                                      Status::Success)
+-                    return status;
+-                remaining -= split;
+-            }
+         }
+-        forevervalidator::simulation::cuda::physics::Status finalStatus =
+-            ExecuteSearchCollisionSubstep(
+-                scene, configuration, state, scratch, remaining);
+-        if (finalStatus != forevervalidator::simulation::cuda::physics::
+-                                   Status::Success)
+-            return finalStatus;
++        for (uint count = substeps; count != 0u; --count)
++        {
++            const bool finalSubstep = count == 1u;
++            forevervalidator::simulation::cuda::physics::Status status =
++                ExecuteSearchCollisionSubstep(
++                    scene, configuration, state, scratch,
++                    finalSubstep ? remaining : split);
++            if (status != forevervalidator::simulation::cuda::physics::
++                                  Status::Success)
++                return status;
++            if (!finalSubstep) remaining -= split;
++        }
+         state.body.write = state.body.temporary;
+     }
+     if (state.vehicle.mobil.physicsUpdatesEnabled)
+@@ -15625,7 +15616,7 @@
+ }
+ 
+ [shader("compute")]
+-[numthreads(32, 1, 1)]
++[numthreads(16, 1, 1)]
+ void ExecuteVulkanSearchCandidates(
+     uint3 dispatchThreadId : SV_DispatchThreadID)
+ {
+@@ -15713,7 +15704,6 @@
+         {
+             statuses[slot] = 2u;
+             samples[slot + 1u] = localBest;
+-            *deviceState = localState;
+             return;
+         }
+ 
+@@ -15759,7 +15749,6 @@
+                 100000u * scratch->collisionCount;
+             statuses[slot] = 4u;
+             samples[slot + 1u] = localBest;
+-            *deviceState = localState;
+             return;
+         }
+ 
+@@ -15772,7 +15761,6 @@
+                     *scratch, fullState->collisionReplacementOverflow);
+             if (localState.stuntsEnabled != 0u)
+             {
+-                *deviceState = localState;
+                 forevervalidator::simulation::cuda::stunts::Status stuntStatus =
+                     forevervalidator::simulation::cuda::stunts::Update(
+                         *fullState, tick);
+@@ -15853,7 +15841,6 @@
+     evaluationIndices[slot] = evaluationIndex;
+     evaluatorReportedValues[slot] = evaluatorReported ? 1u : 0u;
+     samples[slot + 1u] = localBest;
+-    *deviceState = localState;
+ }
+ 
+ }

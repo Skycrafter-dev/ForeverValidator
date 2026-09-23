@@ -90,8 +90,8 @@ __device__ inline void Normalize(GmQuat &quaternion) {
     const float lengthSquared =
             (xy + quaternion.y * quaternion.y) +
             quaternion.z * quaternion.z;
-    const float inverseLength =
-            1.0f / exact::Sqrt(lengthSquared);
+    const float inverseLength = exact::Divide(
+            1.0f, exact::Sqrt(lengthSquared));
     quaternion.w *= inverseLength;
     quaternion.x *= inverseLength;
     quaternion.y *= inverseLength;
@@ -131,7 +131,8 @@ __device__ inline void IntegrateStep(
         return;
     }
 
-    const float inverseMass = 1.0f / body.parameters.mass;
+    const float inverseMass = exact::Divide(
+            1.0f, body.parameters.mass);
     const float forceMassX = source.force.x * inverseMass;
     const float forceMassY = source.force.y * inverseMass;
     const float forceMassZ = source.force.z * inverseMass;
@@ -251,8 +252,8 @@ __device__ inline void IntegrateStep(
                         destination.angularSpeed.z;
         const float maximum = body.maxAngularSpeed.value;
         if (maximum * maximum < angularLength) {
-            const float scale =
-                    maximum / exact::Sqrt(angularLength);
+            const float scale = exact::Divide(
+                    maximum, exact::Sqrt(angularLength));
             destination.angularSpeed.x *= scale;
             destination.angularSpeed.y =
                     scale * destination.angularSpeed.y;
@@ -322,8 +323,8 @@ __device__ inline void AccumulateReplacement(
             if (sumLengthSquared < clampedProjection) {
                 clampedProjection = sumLengthSquared;
             }
-            const float scale =
-                    clampedProjection / sumLengthSquared;
+            const float scale = exact::Divide(
+                    clampedProjection, sumLengthSquared);
             const float projectedX = scale * workX;
             const float projectedY = scale * workY;
             const float projectedZ = scale * workZ;
@@ -345,8 +346,8 @@ __device__ inline GmVec3 FinalizeReplacement(
     if (!(DirectionEpsilon * DirectionEpsilon < lengthSquared)) {
         return {};
     }
-    const float inverseLength =
-            1.0f / exact::Sqrt(lengthSquared);
+    const float inverseLength = exact::Divide(
+            1.0f, exact::Sqrt(lengthSquared));
     const float unitX = inverseLength * sumX;
     const float unitY = inverseLength * sumY;
     const float unitZ = inverseLength * sumZ;

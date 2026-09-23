@@ -18,6 +18,9 @@
 #ifndef FOREVERVALIDATOR_HAS_CUDA
 #define FOREVERVALIDATOR_HAS_CUDA 0
 #endif
+#ifndef FOREVERVALIDATOR_HAS_VULKAN
+#define FOREVERVALIDATOR_HAS_VULKAN 0
+#endif
 
 namespace forevervalidator {
 
@@ -41,7 +44,36 @@ enum class SimulationBackend : std::uint8_t {
     Batched,
     SpeculativeTicking,
     Cuda,
+    Vulkan,
 };
+
+enum class VulkanBackendStatus : std::uint8_t {
+    NotCompiled,
+    LoaderUnavailable,
+    NoDevice,
+    UnsupportedDevice,
+    InitializationFailed,
+    Ready,
+};
+
+struct VulkanBackendDiagnostics {
+    VulkanBackendStatus status = VulkanBackendStatus::NotCompiled;
+    std::uint32_t apiVersion = 0u;
+    std::uint32_t driverVersion = 0u;
+    std::uint32_t vendorId = 0u;
+    std::uint32_t deviceId = 0u;
+    std::uint64_t deviceLocalMemoryBytes = 0u;
+    std::uint32_t subgroupSize = 0u;
+    std::string deviceName;
+    std::string driverName;
+    std::string diagnostic;
+
+    bool IsReady() const noexcept {
+        return status == VulkanBackendStatus::Ready;
+    }
+};
+
+VulkanBackendDiagnostics QueryVulkanBackendDiagnostics() noexcept;
 
 enum class CudaBackendStatus : std::uint8_t {
     NotCompiled,

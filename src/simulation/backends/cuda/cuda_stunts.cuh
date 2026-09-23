@@ -70,6 +70,13 @@ __device__ inline float MatrixElement(
     return row == 0u ? basis.x : (row == 1u ? basis.y : basis.z);
 }
 
+__device__ inline void SetQuaternionComponent(
+        GmQuat &value, std::uint32_t index, float component) {
+    if (index == 0u) value.x = component;
+    else if (index == 1u) value.y = component;
+    else value.z = component;
+}
+
 __device__ inline GmQuat QuaternionFromMatrix(const GmMat3 &matrix) {
     GmQuat result{};
     const float trace =
@@ -78,7 +85,7 @@ __device__ inline GmQuat QuaternionFromMatrix(const GmMat3 &matrix) {
             MatrixElement(matrix, 2u, 2u);
     if (trace > 0.0f) {
         const float root = exact::Sqrt(trace + 1.0f);
-        const float scale = 0.5f / root;
+        const float scale = exact::Divide(0.5f, root);
         result.w = root * 0.5f;
         result.x =
                 (MatrixElement(matrix, 2u, 1u) -
@@ -112,21 +119,20 @@ __device__ inline GmQuat QuaternionFromMatrix(const GmMat3 &matrix) {
              (MatrixElement(matrix, final, final) +
               MatrixElement(matrix, next, next))) +
             1.0f);
-    const float scale = 0.5f / root;
-    float *components[3] = {&result.x, &result.y, &result.z};
-    *components[dominant] = root * 0.5f;
+    const float scale = exact::Divide(0.5f, root);
+    SetQuaternionComponent(result, dominant, root * 0.5f);
     result.w =
             (MatrixElement(matrix, final, next) -
              MatrixElement(matrix, next, final)) *
             scale;
-    *components[next] =
+    SetQuaternionComponent(result, next,
             (MatrixElement(matrix, dominant, next) +
              MatrixElement(matrix, next, dominant)) *
-            scale;
-    *components[final] =
+            scale);
+    SetQuaternionComponent(result, final,
             (MatrixElement(matrix, dominant, final) +
              MatrixElement(matrix, final, dominant)) *
-            scale;
+            scale);
     return result;
 }
 
@@ -142,7 +148,8 @@ __device__ inline void QuaternionRotation(
         angle = 0.0f;
         return;
     }
-    const float inverseLength = 1.0f / exact::Sqrt(lengthSquared);
+    const float inverseLength =
+            exact::Divide(1.0f, exact::Sqrt(lengthSquared));
     axis.x *= inverseLength;
     axis.y *= inverseLength;
     axis.z *= inverseLength;
@@ -163,7 +170,8 @@ __device__ inline void QuaternionRotation(
                     : (dominant == 1u ? axis.y : axis.z);
     angle = 2.0f *
             exact::Atan2(
-                    quaternionComponent / axisComponent,
+                    exact::Divide(
+                            quaternionComponent, axisComponent),
                     rotation.w);
 }
 
@@ -199,8 +207,8 @@ __device__ inline std::uint32_t RotationCount(
         bool badLanding) {
     const float magnitude = fabsf(rotation);
     return static_cast<std::uint32_t>(
-            badLanding ? magnitude / Pi
-                       : (magnitude + HalfPi) / Pi);
+            badLanding ? exact::Divide(magnitude, Pi)
+                       : exact::Divide(magnitude + HalfPi, Pi));
 }
 
 __device__ inline void Reset(CudaStuntState &race) {
@@ -274,23 +282,22 @@ __device__ inline bool IsMasterJump(
     const std::uint32_t queryEnd =
             endTimeMs +
             race.replayStuntState.inputQueryTimeOffsetMs;
-    const CTrackManiaRace::ReplayStuntInputSnapshot *selected = nullptr;
+    CTrackManiaRace::ReplayStuntInputSnapshot selected{};
+    bool found = false;
     for (std::uint32_t index = race.stuntInputHistorySize;
          index != 0u; --index) {
-        const auto &candidate = race.stuntInputHistory[index - 1u];
+        const auto candidate = race.stuntInputHistory[index - 1u];
         if (candidate.tickTimeMs <= queryEnd) {
-            selected = &candidate;
+            selected = candidate;
+            found = true;
             break;
         }
     }
-    if (selected == nullptr) {
+    if (!found) {
         return true;
     }
-    const auto *lastChangeTimeMs =
-            reinterpret_cast<const std::uint32_t *>(
-                    &selected->lastChangeTimeMs);
     for (std::uint32_t index = 0u; index < 6u; ++index) {
-        if (lastChangeTimeMs[index] > queryStart) {
+        if (selected.lastChangeTimeMs[index] > queryStart) {
             return false;
         }
     }
@@ -495,8 +502,10 @@ __device__ inline Status Compute(
     }
 
     float repeatMalus =
-            static_cast<float>(race.stuntFigureScores[figure]) *
-            FigureRepeatMalus / 100.0f;
+            exact::Divide(
+                    static_cast<float>(race.stuntFigureScores[figure]) *
+                            FigureRepeatMalus,
+                    100.0f);
     if (0.75f < repeatMalus) repeatMalus = 0.75f;
     std::uint32_t repeatedScore = static_cast<std::uint32_t>(
             (1.0f - repeatMalus) *
@@ -639,10 +648,12 @@ __device__ inline Status UpdateState(
                     speedMagnitude <= detail::LandingSpeedEpsilon
                             ? 0.0f
                             : exact::Atan2(
-                                      race.replayStuntState.sideSpeed /
-                                              speedMagnitude,
-                                      race.replayStuntState.forwardSpeed /
-                                              speedMagnitude);
+                                      exact::Divide(
+                                              race.replayStuntState.sideSpeed,
+                                              speedMagnitude),
+                                      exact::Divide(
+                                              race.replayStuntState.forwardSpeed,
+                                              speedMagnitude));
             const Status status =
                     detail::Compute(race, stuntEvents);
             if (status != Status::Success) return status;

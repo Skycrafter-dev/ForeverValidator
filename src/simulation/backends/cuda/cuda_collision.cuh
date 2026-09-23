@@ -520,7 +520,8 @@ __device__ inline GmVec3 Normalize(
     const float lengthSquared = Dot(result, result);
     if (epsilonSquared < lengthSquared) {
         result = Scale(
-                result, 1.0f / exact::Sqrt(lengthSquared));
+                result, exact::Divide(
+                                1.0f, exact::Sqrt(lengthSquared)));
     }
     return result;
 }
@@ -765,9 +766,7 @@ __device__ inline void ExpandBoundsForRounding(
 
 __device__ inline std::uint16_t LocalMaterialIndex(
         GmLocalMaterialIndex value) {
-    std::uint16_t result = 0u;
-    memory::CopyBytes<sizeof(result)>(&result, &value);
-    return result;
+    return value.Index();
 }
 
 __device__ inline std::uint32_t SurfaceMaterial(
@@ -824,7 +823,7 @@ struct UnitSphereTriangleQuery {
             return 0;
         }
         const float distance = exact::Sqrt(distanceSquared);
-        const float inverse = 1.0f / distance;
+        const float inverse = exact::Divide(1.0f, distance);
         const GmVec3 normal = Scale(toCenter, inverse);
         const GmVec3 penetration = Scale(
                 toCenter, (distance - radius) * inverse);
@@ -851,7 +850,7 @@ struct UnitSphereTriangleQuery {
             return 0;
         }
         const float endpointDistance = exact::Sqrt(distance);
-        const float inverse = 1.0f / endpointDistance;
+        const float inverse = exact::Divide(1.0f, endpointDistance);
         const GmVec3 normal = Scale(toCenter, inverse);
         const GmVec3 penetration = Scale(
                 toCenter,
@@ -1103,9 +1102,9 @@ __device__ inline int EllipsoidMesh(
         std::uint32_t cachedCellCount = 0u) {
     const GmVec3 radii = shape.localBounds.halfExtents;
     const GmVec3 inverseRadii = {
-            1.0f / radii.x,
-            1.0f / radii.y,
-            1.0f / radii.z,
+            exact::Divide(1.0f, radii.x),
+            exact::Divide(1.0f, radii.y),
+            exact::Divide(1.0f, radii.z),
     };
     const GmIso4 ellipsoidToMesh =
             Compose(shapeWorld, surface.worldToLocal);
@@ -1228,7 +1227,8 @@ __device__ inline int EllipsoidMesh(
         }
         const float normalLength =
                 exact::Sqrt(normalLengthSquared);
-        const float inverseNormalLength = 1.0f / normalLength;
+        const float inverseNormalLength =
+                exact::Divide(1.0f, normalLength);
         const GmVec3 triangleNormal = {
                 normalX * inverseNormalLength,
                 normalY * inverseNormalLength,
@@ -1286,9 +1286,9 @@ __device__ inline EllipsoidMeshContext PrepareEllipsoidMeshContext(
         const GmIso4 &shapeWorld) {
     const GmVec3 radii = shape.localBounds.halfExtents;
     const GmVec3 inverseRadii = {
-            1.0f / radii.x,
-            1.0f / radii.y,
-            1.0f / radii.z,
+            exact::Divide(1.0f, radii.x),
+            exact::Divide(1.0f, radii.y),
+            exact::Divide(1.0f, radii.z),
     };
     const GmIso4 ellipsoidToMesh =
             Compose(shapeWorld, surface.worldToLocal);
@@ -1351,7 +1351,8 @@ __device__ inline bool TestEllipsoidMeshTriangle(
     }
     const float normalLength =
             exact::Sqrt(normalLengthSquared);
-    const float inverseNormalLength = 1.0f / normalLength;
+    const float inverseNormalLength =
+            exact::Divide(1.0f, normalLength);
     const GmVec3 triangleNormal = {
             normalX * inverseNormalLength,
             normalY * inverseNormalLength,

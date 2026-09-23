@@ -1072,7 +1072,8 @@ Result<ValidationReport> RunReplayValidation(
             simulationSession);
     if (preloadResult != ReplayChallengePreloadResult::Success) {
         ValidationError error = PreloadError(preloadResult, identity);
-        if (options.backend == SimulationBackend::Cuda &&
+        if ((options.backend == SimulationBackend::Cuda ||
+             options.backend == SimulationBackend::Vulkan) &&
             !simulationSession.CudaInitializationDiagnostic().empty()) {
             error.diagnostic =
                     simulationSession.CudaInitializationDiagnostic();
@@ -1101,7 +1102,8 @@ Result<ValidationReport> RunReplayValidation(
     if (!validation) {
         ValidationError error =
                 ExecutionError(validation.Error(), identity);
-        if (options.backend == SimulationBackend::Cuda &&
+        if ((options.backend == SimulationBackend::Cuda ||
+             options.backend == SimulationBackend::Vulkan) &&
             !simulationSession.CudaInitializationDiagnostic().empty()) {
             error.diagnostic =
                     simulationSession.CudaInitializationDiagnostic();
@@ -1752,6 +1754,7 @@ struct PhysicsSandbox::Impl {
 
 struct PhysicsSandboxCudaSearchSession::Impl {
     std::unique_ptr<simulation::CudaSearchExecutor> executor;
+    std::unique_ptr<simulation::VulkanSearchExecutor> vulkanExecutor;
     std::shared_ptr<const SandboxInputStorage> inputs;
     std::vector<PhysicsSandboxInputEvent> lateInputs;
     std::shared_ptr<const SandboxControlPlanStorage> controlPlan;
@@ -1766,6 +1769,59 @@ struct PhysicsSandboxCudaSearchSession::Impl {
     MapEnvironment mapEnvironment = MapEnvironment::Unknown;
     VehicleModel vehicleModel = VehicleModel::Unknown;
     std::optional<PlayMode> playMode;
+    SimulationBackend backend = SimulationBackend::Cuda;
+
+    bool HasExecutor() const noexcept {
+        return executor != nullptr || vulkanExecutor != nullptr;
+    }
+
+    simulation::CudaSearchBatchExecution EvaluateBaseline(
+            const std::function<bool()> &cancellationRequested) {
+        return vulkanExecutor
+                ? vulkanExecutor->EvaluateBaseline(cancellationRequested)
+                : executor->EvaluateBaseline(cancellationRequested);
+    }
+
+    simulation::CudaSearchBatchExecution RunBatch(
+            std::uint64_t firstCandidateId,
+            std::uint32_t candidateCount,
+            const std::function<bool()> &cancellationRequested) {
+        return vulkanExecutor
+                ? vulkanExecutor->RunBatch(
+                          firstCandidateId, candidateCount,
+                          cancellationRequested)
+                : executor->RunBatch(
+                          firstCandidateId, candidateCount,
+                          cancellationRequested);
+    }
+
+    bool ReserveBatchCapacity(
+            std::uint32_t candidateCount,
+            std::string *diagnostic) {
+        return vulkanExecutor
+                ? vulkanExecutor->ReserveBatchCapacity(
+                          candidateCount, diagnostic)
+                : executor->ReserveBatchCapacity(
+                          candidateCount, diagnostic);
+    }
+
+    std::uint32_t BatchCapacity() const noexcept {
+        return vulkanExecutor
+                ? vulkanExecutor->BatchCapacity()
+                : executor->BatchCapacity();
+    }
+
+    bool UpdateConditionTimes(
+            double lastImprovementTimeSeconds,
+            double lastRestartTimeSeconds) noexcept {
+        return vulkanExecutor
+                ? vulkanExecutor->UpdateConditionTimes(
+                          lastImprovementTimeSeconds,
+                          lastRestartTimeSeconds)
+                : executor->UpdateConditionTimes(
+                          lastImprovementTimeSeconds,
+                          lastRestartTimeSeconds);
+    }
 
     PhysicsSandboxResult<PhysicsSandboxCudaSearchBatch> Convert(
             simulation::CudaSearchBatchExecution execution);
@@ -2176,7 +2232,8 @@ PhysicsSandboxResult<PhysicsSandboxStateView> PhysicsSandbox::LoadScenarioFile(
                 *session);
         if (preloadResult != ReplayChallengePreloadResult::Success) {
             ValidationError error = PreloadError(preloadResult, identity);
-            if (impl_->options.backend == SimulationBackend::Cuda &&
+            if ((impl_->options.backend == SimulationBackend::Cuda ||
+                 impl_->options.backend == SimulationBackend::Vulkan) &&
                 !session->CudaInitializationDiagnostic().empty()) {
                 error.diagnostic =
                         session->CudaInitializationDiagnostic();
@@ -3188,7 +3245,7 @@ PhysicsSandboxCudaSearchSession::Impl::Convert(
     state->controlPlan.reset();
     state->scenarioFingerprint = scenarioFingerprint;
     state->validationSeed = validationSeed;
-    state->backend = SimulationBackend::Cuda;
+    state->backend = backend;
     state->tickDurationMs = tickDurationMs;
     state->prestartDurationMs = prestartDurationMs;
     state->simulationHorizonMs = static_cast<std::uint32_t>(durationMs);
@@ -3211,7 +3268,7 @@ PhysicsSandboxResult<PhysicsSandboxCudaSearchBatch>
 PhysicsSandboxCudaSearchSession::EvaluateBaseline(
         const std::function<bool()> &cancellationRequested) noexcept {
     try {
-        if (!impl_ || !impl_->executor) {
+        if (!impl_ || !impl_->HasExecutor()) {
             return PhysicsSandboxResult<
                     PhysicsSandboxCudaSearchBatch>::Failure(
                     SearchError(
@@ -3219,8 +3276,7 @@ PhysicsSandboxCudaSearchSession::EvaluateBaseline(
                             "CUDA search session is invalid"));
         }
         return impl_->Convert(
-                impl_->executor->EvaluateBaseline(
-                        cancellationRequested));
+                impl_->EvaluateBaseline(cancellationRequested));
     } catch (const std::bad_alloc &) {
         return PhysicsSandboxResult<
                 PhysicsSandboxCudaSearchBatch>::Failure(
@@ -3253,14 +3309,14 @@ PhysicsSandboxCudaSearchSession::RunBatch(
         std::uint32_t candidateCount,
         const std::function<bool()> &cancellationRequested) noexcept {
     try {
-        if (!impl_ || !impl_->executor) {
+        if (!impl_ || !impl_->HasExecutor()) {
             return PhysicsSandboxResult<
                     PhysicsSandboxCudaSearchBatch>::Failure(
                     SearchError(
                             PhysicsSandboxErrorCode::InvalidSandbox,
                             "CUDA search session is invalid"));
         }
-        return impl_->Convert(impl_->executor->RunBatch(
+        return impl_->Convert(impl_->RunBatch(
                 firstCandidateId,
                 candidateCount,
                 cancellationRequested));
@@ -3283,14 +3339,14 @@ PhysicsSandboxResult<std::uint32_t>
 PhysicsSandboxCudaSearchSession::ReserveBatchCapacity(
         std::uint32_t candidateCount) noexcept {
     try {
-        if (!impl_ || !impl_->executor || candidateCount == 0u) {
+        if (!impl_ || !impl_->HasExecutor() || candidateCount == 0u) {
             return PhysicsSandboxResult<std::uint32_t>::Failure(
                     SearchError(
                             PhysicsSandboxErrorCode::InvalidRequest,
                             "invalid CUDA calibration batch capacity"));
         }
         std::string diagnostic;
-        if (!impl_->executor->ReserveBatchCapacity(
+        if (!impl_->ReserveBatchCapacity(
                     candidateCount, &diagnostic)) {
             return PhysicsSandboxResult<std::uint32_t>::Failure(
                     SearchError(
@@ -3300,7 +3356,7 @@ PhysicsSandboxCudaSearchSession::ReserveBatchCapacity(
                                     : diagnostic));
         }
         return PhysicsSandboxResult<std::uint32_t>::Success(
-                impl_->executor->BatchCapacity());
+                impl_->BatchCapacity());
     } catch (const std::bad_alloc &) {
         return PhysicsSandboxResult<std::uint32_t>::Failure(
                 SearchError(
@@ -3318,13 +3374,13 @@ PhysicsSandboxResult<bool>
 PhysicsSandboxCudaSearchSession::UpdateConditionTimes(
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds) noexcept {
-    if (!impl_ || !impl_->executor) {
+    if (!impl_ || !impl_->HasExecutor()) {
         return PhysicsSandboxResult<bool>::Failure(
                 SearchError(
                         PhysicsSandboxErrorCode::InvalidSandbox,
                         "CUDA search session is invalid"));
     }
-    if (!impl_->executor->UpdateConditionTimes(
+    if (!impl_->UpdateConditionTimes(
                 lastImprovementTimeSeconds,
                 lastRestartTimeSeconds)) {
         return PhysicsSandboxResult<bool>::Failure(
@@ -3342,7 +3398,8 @@ CreatePhysicsSandboxCudaSearchSession(
     try {
         if (!sandbox.impl_ || !sandbox.impl_->loaded ||
             !sandbox.impl_->session ||
-            sandbox.impl_->options.backend != SimulationBackend::Cuda ||
+            (sandbox.impl_->options.backend != SimulationBackend::Cuda &&
+             sandbox.impl_->options.backend != SimulationBackend::Vulkan) ||
             configuration.maximumBatchSize == 0u ||
             configuration.modifiers.empty()) {
             return PhysicsSandboxResult<
@@ -3352,6 +3409,8 @@ CreatePhysicsSandboxCudaSearchSession(
                             "invalid CUDA search session request"));
         }
         const PhysicsSandbox::Impl &source = *sandbox.impl_;
+        const bool useVulkan =
+                source.options.backend == SimulationBackend::Vulkan;
         const std::uint32_t tickDurationMs =
                 source.options.tickDurationMs;
         const PhysicsSandboxResult<PhysicsSandboxStateView> current =
@@ -3474,7 +3533,7 @@ CreatePhysicsSandboxCudaSearchSession(
                     configuration.incumbent->preciseFinish;
             internal.incumbent = incumbent;
         }
-        if (configuration.useSessionSpecialization) {
+        if (configuration.useSessionSpecialization && !useVulkan) {
             internal.sessionSpecialization =
                     source.session->CudaSearchSpecialization();
             if (!internal.sessionSpecialization) {
@@ -3582,12 +3641,16 @@ CreatePhysicsSandboxCudaSearchSession(
         }
 
         std::string diagnostic;
-        std::unique_ptr<simulation::CudaSearchExecutor> executor =
-                source.session->CreateCudaSearchExecutor(
-                        std::move(internal),
-                        source.cursor,
-                        &diagnostic);
-        if (!executor) {
+        std::unique_ptr<simulation::CudaSearchExecutor> executor;
+        std::unique_ptr<simulation::VulkanSearchExecutor> vulkanExecutor;
+        if (useVulkan) {
+            vulkanExecutor = source.session->CreateVulkanSearchExecutor(
+                    std::move(internal), source.cursor, &diagnostic);
+        } else {
+            executor = source.session->CreateCudaSearchExecutor(
+                    std::move(internal), source.cursor, &diagnostic);
+        }
+        if (!executor && !vulkanExecutor) {
             return PhysicsSandboxResult<
                     PhysicsSandboxCudaSearchSession>::Failure(
                     SearchError(
@@ -3599,6 +3662,8 @@ CreatePhysicsSandboxCudaSearchSession(
         auto impl =
                 std::make_unique<PhysicsSandboxCudaSearchSession::Impl>();
         impl->executor = std::move(executor);
+        impl->vulkanExecutor = std::move(vulkanExecutor);
+        impl->backend = source.options.backend;
         impl->inputs = source.inputs;
         impl->lateInputs.assign(lateBegin, allSourceInputs.end());
         impl->controlPlan = source.controlPlan;

@@ -12,6 +12,8 @@ option(FOREVERVALIDATOR_ENABLE_RELEASE_IPO
        ON)
 option(FOREVERVALIDATOR_ENABLE_CUDA
        "Build the optional NVIDIA CUDA simulation backend" OFF)
+option(FOREVERVALIDATOR_ENABLE_VULKAN
+       "Build the portable Vulkan Compute simulation backend" ON)
 set(FOREVERVALIDATOR_CUDA_SPLIT_COMPILE_JOBS "1" CACHE STRING
     "Parallel NVCC optimization jobs per CUDA translation unit; may change code generation (1 disables)")
 set(FOREVERVALIDATOR_CUDA_SEARCH_PREBUILT_OBJECT "" CACHE FILEPATH
@@ -40,6 +42,10 @@ if(FOREVERVALIDATOR_ENABLE_CUDA)
             "--split-compile=${FOREVERVALIDATOR_CUDA_SPLIT_COMPILE_JOBS}"
             FOREVERVALIDATOR_CUDA_SPLIT_COMPILE_SUPPORTED)
     endif()
+endif()
+
+if(FOREVERVALIDATOR_ENABLE_VULKAN)
+    find_package(Vulkan 1.2 REQUIRED)
 endif()
 
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -113,6 +119,195 @@ target_include_directories(forevervalidator_core
 target_link_libraries(forevervalidator_core
     PUBLIC OpenSSL::Crypto ZLIB::ZLIB)
 forevervalidator_configure_target(forevervalidator_core)
+if(FOREVERVALIDATOR_ENABLE_VULKAN)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(FOREVERVALIDATOR_VULKAN_TIMELINE_SPIRV
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulation/backends/vulkan/vulkan_timeline.spv")
+    set(FOREVERVALIDATOR_VULKAN_TIMELINE_HEADER
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/forevervalidator_vulkan_timeline_spirv.h")
+    set(FOREVERVALIDATOR_VULKAN_FINISH_REFINEMENT_SPIRV
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulation/backends/vulkan/vulkan_finish_refinement.spv")
+    set(FOREVERVALIDATOR_VULKAN_FINISH_REFINEMENT_HEADER
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/forevervalidator_vulkan_finish_refinement_spirv.h")
+    set(FOREVERVALIDATOR_VULKAN_FINISH_PROBE_SPIRV
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulation/backends/vulkan/vulkan_finish_probe.spv")
+    set(FOREVERVALIDATOR_VULKAN_FINISH_PROBE_HEADER
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/forevervalidator_vulkan_finish_probe_spirv.h")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_GENERATE_SPIRV
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulation/backends/vulkan/vulkan_search_generate.spv")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_GENERATE_HEADER
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/forevervalidator_vulkan_search_generate_spirv.h")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_INITIALIZE_SPIRV
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulation/backends/vulkan/vulkan_search_initialize.spv")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_INITIALIZE_HEADER
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/forevervalidator_vulkan_search_initialize_spirv.h")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_PREPARE_SPIRV
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulation/backends/vulkan/vulkan_search_prepare.spv")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_PREPARE_HEADER
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/forevervalidator_vulkan_search_prepare_spirv.h")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_SPIRV
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulation/backends/vulkan/vulkan_search_physics.spv")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_HEADER
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/forevervalidator_vulkan_search_physics_spirv.h")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_SPIRV
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulation/backends/vulkan/vulkan_search_physics_steady_velocity_water.spv")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_HEADER
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/forevervalidator_vulkan_search_physics_steady_velocity_water_spirv.h")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_FORCE_SPIRV
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulation/backends/vulkan/vulkan_search_physics_steady_velocity_water_force.spv")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_FORCE_HEADER
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/forevervalidator_vulkan_search_physics_steady_velocity_water_force_spirv.h")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_DETECT_SPIRV
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulation/backends/vulkan/vulkan_search_physics_steady_velocity_water_detect.spv")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_DETECT_HEADER
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/forevervalidator_vulkan_search_physics_steady_velocity_water_detect_spirv.h")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_RESPOND_SPIRV
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulation/backends/vulkan/vulkan_search_physics_steady_velocity_water_respond.spv")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_RESPOND_HEADER
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/forevervalidator_vulkan_search_physics_steady_velocity_water_respond_spirv.h")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_EVALUATE_SPIRV
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulation/backends/vulkan/vulkan_search_evaluate.spv")
+    set(FOREVERVALIDATOR_VULKAN_SEARCH_EVALUATE_HEADER
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/forevervalidator_vulkan_search_evaluate_spirv.h")
+    add_custom_command(
+        OUTPUT "${FOREVERVALIDATOR_VULKAN_TIMELINE_HEADER}"
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+                --input "${FOREVERVALIDATOR_VULKAN_TIMELINE_SPIRV}"
+                --output "${FOREVERVALIDATOR_VULKAN_TIMELINE_HEADER}"
+                --symbol ForeverValidatorVulkanTimelineSpirv
+        DEPENDS
+                "${FOREVERVALIDATOR_VULKAN_TIMELINE_SPIRV}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+        VERBATIM)
+    add_custom_command(
+        OUTPUT "${FOREVERVALIDATOR_VULKAN_FINISH_REFINEMENT_HEADER}"
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+                --input "${FOREVERVALIDATOR_VULKAN_FINISH_REFINEMENT_SPIRV}"
+                --output "${FOREVERVALIDATOR_VULKAN_FINISH_REFINEMENT_HEADER}"
+                --symbol ForeverValidatorVulkanFinishRefinementSpirv
+        DEPENDS
+                "${FOREVERVALIDATOR_VULKAN_FINISH_REFINEMENT_SPIRV}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+        VERBATIM)
+    add_custom_command(
+        OUTPUT "${FOREVERVALIDATOR_VULKAN_FINISH_PROBE_HEADER}"
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+                --input "${FOREVERVALIDATOR_VULKAN_FINISH_PROBE_SPIRV}"
+                --output "${FOREVERVALIDATOR_VULKAN_FINISH_PROBE_HEADER}"
+                --symbol ForeverValidatorVulkanFinishProbeSpirv
+        DEPENDS
+                "${FOREVERVALIDATOR_VULKAN_FINISH_PROBE_SPIRV}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+        VERBATIM)
+    add_custom_command(
+        OUTPUT "${FOREVERVALIDATOR_VULKAN_SEARCH_GENERATE_HEADER}"
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+                --input "${FOREVERVALIDATOR_VULKAN_SEARCH_GENERATE_SPIRV}"
+                --output "${FOREVERVALIDATOR_VULKAN_SEARCH_GENERATE_HEADER}"
+                --symbol ForeverValidatorVulkanSearchGenerateSpirv
+        DEPENDS
+                "${FOREVERVALIDATOR_VULKAN_SEARCH_GENERATE_SPIRV}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+        VERBATIM)
+    add_custom_command(
+        OUTPUT "${FOREVERVALIDATOR_VULKAN_SEARCH_INITIALIZE_HEADER}"
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+                --input "${FOREVERVALIDATOR_VULKAN_SEARCH_INITIALIZE_SPIRV}"
+                --output "${FOREVERVALIDATOR_VULKAN_SEARCH_INITIALIZE_HEADER}"
+                --symbol ForeverValidatorVulkanSearchInitializeSpirv
+        DEPENDS
+                "${FOREVERVALIDATOR_VULKAN_SEARCH_INITIALIZE_SPIRV}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+        VERBATIM)
+    add_custom_command(
+        OUTPUT "${FOREVERVALIDATOR_VULKAN_SEARCH_PREPARE_HEADER}"
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+                --input "${FOREVERVALIDATOR_VULKAN_SEARCH_PREPARE_SPIRV}"
+                --output "${FOREVERVALIDATOR_VULKAN_SEARCH_PREPARE_HEADER}"
+                --symbol ForeverValidatorVulkanSearchPrepareSpirv
+        DEPENDS
+                "${FOREVERVALIDATOR_VULKAN_SEARCH_PREPARE_SPIRV}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+        VERBATIM)
+    add_custom_command(
+        OUTPUT "${FOREVERVALIDATOR_VULKAN_SEARCH_EVALUATE_HEADER}"
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+                --input "${FOREVERVALIDATOR_VULKAN_SEARCH_EVALUATE_SPIRV}"
+                --output "${FOREVERVALIDATOR_VULKAN_SEARCH_EVALUATE_HEADER}"
+                --symbol ForeverValidatorVulkanSearchEvaluateSpirv
+        DEPENDS
+                "${FOREVERVALIDATOR_VULKAN_SEARCH_EVALUATE_SPIRV}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+        VERBATIM)
+    add_custom_command(
+        OUTPUT "${FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_HEADER}"
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+                --input "${FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_SPIRV}"
+                --output "${FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_HEADER}"
+                --symbol ForeverValidatorVulkanSearchPhysicsSpirv
+        DEPENDS
+                "${FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_SPIRV}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+        VERBATIM)
+    add_custom_command(
+        OUTPUT "${FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_HEADER}"
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+                --input "${FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_SPIRV}"
+                --output "${FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_HEADER}"
+                --symbol ForeverValidatorVulkanSearchPhysicsSteadyVelocityWaterSpirv
+        DEPENDS
+                "${FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_SPIRV}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+        VERBATIM)
+    foreach(PHASE IN ITEMS FORCE DETECT RESPOND)
+        add_custom_command(
+            OUTPUT "${FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_${PHASE}_HEADER}"
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+                    --input "${FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_${PHASE}_SPIRV}"
+                    --output "${FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_${PHASE}_HEADER}"
+                    --symbol "ForeverValidatorVulkanSearchPhysicsSteadyVelocityWater${PHASE}Spirv"
+            DEPENDS
+                    "${FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_${PHASE}_SPIRV}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.py"
+            VERBATIM)
+    endforeach()
+    add_custom_target(forevervalidator_vulkan_timeline_spirv
+        DEPENDS
+                "${FOREVERVALIDATOR_VULKAN_TIMELINE_HEADER}"
+                "${FOREVERVALIDATOR_VULKAN_FINISH_REFINEMENT_HEADER}"
+                "${FOREVERVALIDATOR_VULKAN_FINISH_PROBE_HEADER}"
+                "${FOREVERVALIDATOR_VULKAN_SEARCH_GENERATE_HEADER}"
+                "${FOREVERVALIDATOR_VULKAN_SEARCH_INITIALIZE_HEADER}"
+                "${FOREVERVALIDATOR_VULKAN_SEARCH_PREPARE_HEADER}"
+                "${FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_HEADER}"
+                "${FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_HEADER}"
+                "${FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_FORCE_HEADER}"
+                "${FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_DETECT_HEADER}"
+                "${FOREVERVALIDATOR_VULKAN_SEARCH_PHYSICS_STEADY_VELOCITY_WATER_RESPOND_HEADER}"
+                "${FOREVERVALIDATOR_VULKAN_SEARCH_EVALUATE_HEADER}")
+    add_dependencies(forevervalidator_core
+        forevervalidator_vulkan_timeline_spirv)
+    target_include_directories(forevervalidator_core PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    target_link_libraries(forevervalidator_core PUBLIC Vulkan::Vulkan)
+    target_compile_definitions(forevervalidator_core PUBLIC
+        FOREVERVALIDATOR_HAS_VULKAN=1)
+    message(STATUS "ForeverValidator Vulkan Compute backend enabled")
+else()
+    target_compile_definitions(forevervalidator_core PUBLIC
+        FOREVERVALIDATOR_HAS_VULKAN=0)
+    message(STATUS "ForeverValidator Vulkan Compute backend disabled")
+endif()
 if(FOREVERVALIDATOR_ENABLE_CUDA)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(FOREVERVALIDATOR_CUDA_SEARCH_LTO_IR
@@ -136,6 +331,7 @@ if(FOREVERVALIDATOR_ENABLE_CUDA)
                 "${CMAKE_CURRENT_BINARY_DIR}/generated"
         COMMAND ${FOREVERVALIDATOR_CUDA_COMPILER_COMMAND}
                 -O3 -DNDEBUG -std=c++17 -arch=sm_75
+                --expt-relaxed-constexpr
                 --fmad=false --prec-div=true --prec-sqrt=true --ftz=false
                 -DFOREVERVALIDATOR_HAS_CUDA=1
                 -DFOREVERVALIDATOR_RELEASE_IPO_BUILD=1
@@ -204,6 +400,7 @@ if(FOREVERVALIDATOR_ENABLE_CUDA)
     target_compile_definitions(forevervalidator_core PUBLIC
         FOREVERVALIDATOR_HAS_CUDA=1)
     target_compile_options(forevervalidator_core PRIVATE
+        "$<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>"
         "$<$<COMPILE_LANGUAGE:CUDA>:--fmad=false>"
         "$<$<COMPILE_LANGUAGE:CUDA>:--prec-div=true>"
         "$<$<COMPILE_LANGUAGE:CUDA>:--prec-sqrt=true>"
@@ -308,6 +505,23 @@ if(FOREVERVALIDATOR_BUILD_BENCHMARKS)
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
+    if(FOREVERVALIDATOR_ENABLE_VULKAN)
+        add_executable(vulkan_search_benchmark
+            tools/cuda_search_benchmark.cpp)
+        target_include_directories(
+            vulkan_search_benchmark PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_link_libraries(
+            vulkan_search_benchmark PRIVATE
+            forevervalidator_native
+            forevervalidator_core)
+        target_compile_definitions(
+            vulkan_search_benchmark PRIVATE
+            FOREVERVALIDATOR_SEARCH_BENCHMARK_VULKAN=1)
+        forevervalidator_configure_target(vulkan_search_benchmark)
+    endif()
+
     if(FOREVERVALIDATOR_ENABLE_CUDA)
 
         add_executable(cuda_backend_benchmark
@@ -357,6 +571,21 @@ if(FOREVERVALIDATOR_BUILD_BENCHMARKS)
             forevervalidator_core)
         forevervalidator_configure_target(
             cuda_replay_parity)
+    endif()
+
+    if(FOREVERVALIDATOR_ENABLE_VULKAN)
+        add_executable(vulkan_replay_parity
+            tools/vulkan_replay_parity.cpp)
+        target_include_directories(
+            vulkan_replay_parity PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_link_libraries(
+            vulkan_replay_parity PRIVATE
+            forevervalidator_native
+            forevervalidator_core)
+        forevervalidator_configure_target(
+            vulkan_replay_parity)
     endif()
 
     add_executable(optimized_cpu_ellipsoid_mesh_kernel_benchmark
@@ -619,6 +848,22 @@ if(FOREVERVALIDATOR_BUILD_TESTS)
         forevervalidator-cuda-static-configuration-tests)
     add_test(NAME forevervalidator-cuda-static-configuration
              COMMAND forevervalidator-cuda-static-configuration-tests)
+
+    if(FOREVERVALIDATOR_ENABLE_VULKAN)
+        add_executable(forevervalidator-vulkan-timeline-tests
+            tests/vulkan_timeline_executor_tests.cpp)
+        target_include_directories(
+            forevervalidator-vulkan-timeline-tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_link_libraries(
+            forevervalidator-vulkan-timeline-tests PRIVATE
+            forevervalidator_core)
+        forevervalidator_configure_target(
+            forevervalidator-vulkan-timeline-tests)
+        add_test(NAME forevervalidator-vulkan-timeline
+                 COMMAND forevervalidator-vulkan-timeline-tests)
+    endif()
 
     if(FOREVERVALIDATOR_ENABLE_CUDA)
         add_executable(forevervalidator-cuda-arithmetic-tests

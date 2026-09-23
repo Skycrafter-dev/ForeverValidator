@@ -125,15 +125,16 @@ __device__ inline Status Step(
                  angular.y * angular.y) +
                 angular.z * angular.z);
         const float scaled =
-                ((linearLength + angularLength) * dt) /
-                candidate.body.parameters.maxStepDistance;
+                exact::Divide(
+                        (linearLength + angularLength) * dt,
+                        candidate.body.parameters.maxStepDistance);
         std::uint32_t substeps =
                 exact::TruncateToUint32Modulo(scaled) + 1u;
         if (substeps > 1000u) substeps = 1000u;
         float remaining = dt;
         if (substeps > 1u) {
-            const float split =
-                    dt / exact::FromUnsignedInteger(substeps);
+            const float split = exact::Divide(
+                    dt, exact::FromUnsignedInteger(substeps));
             for (std::uint32_t count = substeps - 1u;
                  count != 0u; --count) {
                 const Status status =

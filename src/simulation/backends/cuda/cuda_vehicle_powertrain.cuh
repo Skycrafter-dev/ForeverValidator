@@ -28,7 +28,7 @@ __device__ inline float TransmissionValue(
         int gear) {
     std::uint32_t count = 0u;
     const float *values = tuning::TransmissionValues(
-            configuration, array, &count);
+            configuration, array, count);
     const std::uint32_t index =
             gear >= 0 ? static_cast<std::uint32_t>(gear) : 0u;
     return index < count ? values[index] : 0.0f;
@@ -245,9 +245,10 @@ __device__ inline void IntegrateLegacyEngine(
             detail::LegacyEngineWeightedSpeedYScale *
                     speed.y * speed.y);
     const float targetInput =
-            (weightedSpeed /
-             (configuration->tuning.engineSpeedNorm *
-              detail::LegacyEngineSpeedNormScale)) *
+            exact::Divide(
+                    weightedSpeed,
+                    configuration->tuning.engineSpeedNorm *
+                            detail::LegacyEngineSpeedNormScale) *
             detail::TransmissionValue(
                     configuration,
                     CudaTransmissionArrayId::GearSpeedRatio,

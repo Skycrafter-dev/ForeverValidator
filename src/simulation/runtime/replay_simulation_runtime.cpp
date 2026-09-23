@@ -332,7 +332,8 @@ struct ReplaySimulationRuntime::State : CHmsCollisionSubstepObserver {
         race.SetCurrentTransformCheckpointFreewheelClearEnabled(
                 backend == forevervalidator::SimulationBackend::Reference ||
                 backend == forevervalidator::SimulationBackend::OptimizedCpu ||
-                backend == forevervalidator::SimulationBackend::Cuda);
+                backend == forevervalidator::SimulationBackend::Cuda ||
+                backend == forevervalidator::SimulationBackend::Vulkan);
     }
 
     void BeforeCollisionSubstep(CHmsCorpus &corpus, float dt) override;
@@ -491,7 +492,8 @@ ReplaySimulationStepExecution ReplaySimulationRuntime::Step(
         const ReplayControlTick &tick) {
     State &state = *state_;
     ReplaySimulationStepExecution execution;
-    if (state.backend == forevervalidator::SimulationBackend::Cuda) {
+    if (state.backend == forevervalidator::SimulationBackend::Cuda ||
+        state.backend == forevervalidator::SimulationBackend::Vulkan) {
         execution.result =
                 ReplaySimulationRunResult::CudaExecutionFailed;
         return execution;

@@ -71,13 +71,13 @@ __device__ inline void UpdateBodyContactSnapshot(
     if (normalLength > VectorEpsilonSquared) {
         contacts.bodyContactNormalSum = Scale(
                 contacts.bodyContactNormalSum,
-                1.0f / exact::Sqrt(normalLength));
+                exact::Divide(1.0f, exact::Sqrt(normalLength)));
     }
     contacts.bodyContactNormalSum =
             Scale(contacts.bodyContactNormalSum, -1.0f);
-    const float inverseCount =
-            1.0f / exact::FromUnsignedInteger(
-                           contacts.bodyContactCount);
+    const float inverseCount = exact::Divide(
+            1.0f,
+            exact::FromUnsignedInteger(contacts.bodyContactCount));
     contacts.bodyContactPointSum =
             Scale(contacts.bodyContactPointSum, inverseCount);
 
@@ -92,12 +92,13 @@ __device__ inline void UpdateBodyContactSnapshot(
     if (horizontalLength > VectorEpsilonSquared) {
         horizontal = Scale(
                 horizontal,
-                1.0f / exact::Sqrt(horizontalLength));
+                exact::Divide(1.0f, exact::Sqrt(horizontalLength)));
     }
     frame.bodyContactHorizontalAngle =
-            fabsf(exact::Atan2(
-                    fabsf(horizontal.x), -horizontal.y)) /
-            Pi;
+            exact::Divide(
+                    fabsf(exact::Atan2(
+                            fabsf(horizontal.x), -horizontal.y)),
+                    Pi);
     GmVec3 vertical = {
             0.0f,
             contacts.bodyContactNormalSum.y,
@@ -109,12 +110,13 @@ __device__ inline void UpdateBodyContactSnapshot(
     if (verticalLength > VectorEpsilonSquared) {
         vertical = Scale(
                 vertical,
-                1.0f / exact::Sqrt(verticalLength));
+                exact::Divide(1.0f, exact::Sqrt(verticalLength)));
     }
     frame.bodyContactVerticalAngle =
-            fabsf(exact::Atan2(
-                    fabsf(vertical.z), -vertical.y)) /
-            Pi;
+            exact::Divide(
+                    fabsf(exact::Atan2(
+                            fabsf(vertical.z), -vertical.y)),
+                    Pi);
     frame.bodyContactZPositive = 0.0f < vertical.z;
     frame.hasBodyContact = true;
 }
@@ -169,8 +171,8 @@ __device__ inline void UpdateMaterialFeedback(
     if (targetIntensity < cappedIntensity) {
         cappedIntensity = targetIntensity;
     }
-    const float speedTarget =
-            absoluteForward / material.feedbackSpeedDivisor;
+    const float speedTarget = exact::Divide(
+            absoluteForward, material.feedbackSpeedDivisor);
     auto &frame = vehicle.frameHistory.physicsCurrent;
     const float feedbackSpeed = Smooth(
             frame.materialFeedbackSpeed,

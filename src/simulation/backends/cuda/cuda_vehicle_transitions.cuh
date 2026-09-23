@@ -34,6 +34,13 @@ __device__ inline float MatrixElement(
                      : (row == 1u ? basis.y : basis.z);
 }
 
+__device__ inline void SetQuaternionComponent(
+        GmQuat &value, std::uint32_t index, float component) {
+    if (index == 0u) value.x = component;
+    else if (index == 1u) value.y = component;
+    else value.z = component;
+}
+
 __device__ inline GmQuat QuaternionFromMatrix(
         const GmMat3 &matrix) {
     GmQuat result{};
@@ -43,7 +50,7 @@ __device__ inline GmQuat QuaternionFromMatrix(
             MatrixElement(matrix, 2u, 2u);
     if (trace > 0.0f) {
         const float root = cuda::exact::Sqrt(trace + 1.0f);
-        const float scale = 0.5f / root;
+        const float scale = cuda::exact::Divide(0.5f, root);
         result.w = root * 0.5f;
         result.x =
                 (MatrixElement(matrix, 2u, 1u) -
@@ -76,21 +83,20 @@ __device__ inline GmQuat QuaternionFromMatrix(
              (MatrixElement(matrix, final, final) +
               MatrixElement(matrix, next, next))) +
             1.0f);
-    const float scale = 0.5f / root;
-    float *vector[3] = {&result.x, &result.y, &result.z};
-    *vector[dominant] = root * 0.5f;
+    const float scale = cuda::exact::Divide(0.5f, root);
+    SetQuaternionComponent(result, dominant, root * 0.5f);
     result.w =
             (MatrixElement(matrix, final, next) -
              MatrixElement(matrix, next, final)) *
             scale;
-    *vector[next] =
+    SetQuaternionComponent(result, next,
             (MatrixElement(matrix, dominant, next) +
              MatrixElement(matrix, next, dominant)) *
-            scale;
-    *vector[final] =
+            scale);
+    SetQuaternionComponent(result, final,
             (MatrixElement(matrix, dominant, final) +
              MatrixElement(matrix, final, dominant)) *
-            scale;
+            scale);
     return result;
 }
 

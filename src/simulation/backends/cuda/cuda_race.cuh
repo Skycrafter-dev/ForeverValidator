@@ -27,7 +27,8 @@ __device__ inline bool AcceptCheckpointSlot(
         CudaCandidatePhysicsState &candidate,
         std::uint32_t checkpointIndex,
         std::uint32_t checkpointSlot,
-        const GmIso4 *spawn) {
+        const GmIso4 &spawn,
+        bool hasSpawn) {
     CudaRacePhysicsState &race = candidate.race;
     if (checkpointIndex >= race.checkpointSlotsPassed.count ||
         checkpointSlot >= race.checkpointSlotsPassed.count ||
@@ -41,16 +42,16 @@ __device__ inline bool AcceptCheckpointSlot(
         ++race.progress.checkpointCount;
     }
     ++race.progress.totalCheckpointEventCount;
-    if (spawn != nullptr) {
+    if (hasSpawn) {
         if (!race.currentSpawnLocationInitialized) {
-            race.player.previousSpawnLocation = *spawn;
+            race.player.previousSpawnLocation = spawn;
             race.currentSpawnLocationInitialized = true;
         }
         race.lastAcceptedSpawnLocation.present = true;
-        race.lastAcceptedSpawnLocation.value = *spawn;
+        race.lastAcceptedSpawnLocation.value = spawn;
         race.playerSpawnLocation.present = true;
-        race.playerSpawnLocation.value = *spawn;
-        SetSpawn(race, *spawn, false);
+        race.playerSpawnLocation.value = spawn;
+        SetSpawn(race, spawn, false);
     } else {
         SetSpawn(
                 race, race.player.previousSpawnLocation, false);
@@ -74,18 +75,19 @@ __device__ inline void Checkpoint(
         ClearFreewheel(candidate);
     }
     if (actor.checkpointSlot == UINT32_MAX) return;
-    const GmIso4 *spawn = nullptr;
-    GmIso4 currentSpawn{};
+    GmIso4 spawn{};
+    bool hasSpawn = false;
     if (actor.respawnUsesCurrentTransform) {
-        currentSpawn = race.player.currentSpawnLocation;
-        spawn = &currentSpawn;
+        spawn = race.player.currentSpawnLocation;
+        hasSpawn = true;
     } else if (actor.hasCheckpointSpawn) {
-        spawn = &actor.checkpointSpawn;
+        spawn = actor.checkpointSpawn;
+        hasSpawn = true;
     }
     if (AcceptCheckpointSlot(
                 candidate,
                 race.progress.currentLapCheckpointCount,
-                actor.checkpointSlot, spawn)) {
+                actor.checkpointSlot, spawn, hasSpawn)) {
         race.progress.lastAcceptedBlockId =
                 race.progress.lastContactBlockId;
     }
@@ -112,8 +114,10 @@ __device__ inline void Finish(
     }
     const std::uint32_t finishSlot =
             progress.requiredCheckpointCount;
+    const GmIso4 unusedSpawn{};
     if (!AcceptCheckpointSlot(
-                candidate, finishSlot, finishSlot, nullptr)) {
+                candidate, finishSlot, finishSlot,
+                unusedSpawn, false)) {
         return;
     }
     ++progress.finishCount;

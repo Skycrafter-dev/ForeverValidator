@@ -35,6 +35,10 @@
 #include "simulation/backends/cuda/cuda_vehicle_prefix_certification.h"
 #include "simulation/backends/cuda/cuda_vehicle_force_certification.h"
 #include "simulation/backends/cuda/cuda_timeline_executor.h"
+#include "simulation/backends/vulkan/vulkan_compute_runtime.h"
+#include "simulation/backends/vulkan/vulkan_scene_storage.h"
+#include "simulation/backends/vulkan/vulkan_search_executor.h"
+#include "simulation/backends/vulkan/vulkan_timeline_executor.h"
 #if FOREVERVALIDATOR_HAS_CUDA
 #include <cuda_runtime.h>
 #include "simulation/backends/cuda/cuda_session_specialization.h"
@@ -883,6 +887,9 @@ struct ReplaySimulationSession::Impl {
     std::optional<
             forevervalidator::simulation::CudaSceneTransferMetrics>
             cudaSceneTransfer;
+    forevervalidator::simulation::VulkanDeviceScene vulkanDeviceScene;
+    std::optional<forevervalidator::simulation::VulkanTransferMetrics>
+            vulkanSceneTransfer;
     forevervalidator::simulation::CudaHostStaticConfiguration
             cudaHostConfiguration;
     forevervalidator::simulation::CudaDeviceStaticConfiguration
@@ -890,6 +897,10 @@ struct ReplaySimulationSession::Impl {
     std::optional<forevervalidator::simulation::
                           CudaStaticConfigurationTransferMetrics>
             cudaConfigurationTransfer;
+    forevervalidator::simulation::VulkanDeviceStaticConfiguration
+            vulkanDeviceConfiguration;
+    std::optional<forevervalidator::simulation::VulkanTransferMetrics>
+            vulkanConfigurationTransfer;
     std::string cudaInitializationDiagnostic;
     std::shared_ptr<forevervalidator::simulation::cuda::specialization::
                             SessionModule>
@@ -905,22 +916,41 @@ struct ReplaySimulationSession::Impl {
 
     ReplaySimulationRunResult PrepareCudaConfiguration(
             const ReplaySimulationDefinition &definition) {
-        if (backend != forevervalidator::SimulationBackend::Cuda) {
+        const bool useCuda =
+                backend == forevervalidator::SimulationBackend::Cuda;
+        const bool useVulkan =
+                backend == forevervalidator::SimulationBackend::Vulkan;
+        if (!useCuda && !useVulkan) {
             return ReplaySimulationRunResult::Success;
         }
-        if (!forevervalidator::simulation::
-                    QueryCudaRuntimeDiagnostics().IsReady()) {
+        if (useCuda && !forevervalidator::simulation::
+                               QueryCudaRuntimeDiagnostics().IsReady()) {
             cudaInitializationDiagnostic =
                     forevervalidator::simulation::
                             QueryCudaRuntimeDiagnostics().diagnostic;
             return ReplaySimulationRunResult::CudaUnavailable;
         }
-        if (!cudaSceneTransfer.has_value() ||
-            !cudaSceneTransfer->success || !cudaDeviceScene.Ready()) {
+        if (useVulkan && !forevervalidator::simulation::vulkan::
+                                 QueryRuntimeDiagnostics().IsReady()) {
             cudaInitializationDiagnostic =
-                    cudaSceneTransfer.has_value()
-                    ? cudaSceneTransfer->diagnostic
-                    : "CUDA immutable scene was not uploaded";
+                    forevervalidator::simulation::vulkan::
+                            QueryRuntimeDiagnostics().diagnostic;
+            return ReplaySimulationRunResult::CudaUnavailable;
+        }
+        const bool sceneReady = useCuda
+                ? (cudaSceneTransfer.has_value() &&
+                   cudaSceneTransfer->success && cudaDeviceScene.Ready())
+                : (vulkanSceneTransfer.has_value() &&
+                   vulkanSceneTransfer->success && vulkanDeviceScene.Ready());
+        if (!sceneReady) {
+            cudaInitializationDiagnostic =
+                    useCuda
+                    ? (cudaSceneTransfer.has_value()
+                       ? cudaSceneTransfer->diagnostic
+                       : "CUDA immutable scene was not uploaded")
+                    : (vulkanSceneTransfer.has_value()
+                       ? vulkanSceneTransfer->diagnostic
+                       : "Vulkan immutable scene was not uploaded");
             return ReplaySimulationRunResult::CudaInitializationFailed;
         }
         forevervalidator::simulation::CudaHostStaticConfiguration built;
@@ -935,23 +965,40 @@ struct ReplaySimulationSession::Impl {
                             static_cast<unsigned>(buildResult));
             return ReplaySimulationRunResult::CudaInitializationFailed;
         }
-        if (cudaDeviceConfiguration.Ready() &&
-            cudaDeviceConfiguration.ConfigurationHash() ==
-                    built.deterministicHash) {
+        const bool cached = useCuda
+                ? (cudaDeviceConfiguration.Ready() &&
+                   cudaDeviceConfiguration.ConfigurationHash() ==
+                           built.deterministicHash)
+                : (vulkanDeviceConfiguration.Ready() &&
+                   vulkanDeviceConfiguration.ConfigurationHash() ==
+                           built.deterministicHash);
+        if (cached) {
             cudaHostConfiguration = std::move(built);
             return ReplaySimulationRunResult::Success;
         }
-        cudaConfigurationTransfer =
-                cudaDeviceConfiguration.Upload(built);
-        if (!cudaConfigurationTransfer->success) {
+        bool uploadSuccess = false;
+        if (useCuda) {
+            cudaConfigurationTransfer =
+                    cudaDeviceConfiguration.Upload(built);
+            uploadSuccess = cudaConfigurationTransfer->success;
             cudaInitializationDiagnostic =
                     cudaConfigurationTransfer->diagnostic;
+        } else {
+            vulkanConfigurationTransfer =
+                    vulkanDeviceConfiguration.Upload(built);
+            uploadSuccess = vulkanConfigurationTransfer->success;
+            cudaInitializationDiagnostic =
+                    vulkanConfigurationTransfer->diagnostic;
+        }
+        if (!uploadSuccess) {
             cudaHostConfiguration.Clear();
             return ReplaySimulationRunResult::CudaInitializationFailed;
         }
         cudaHostConfiguration = std::move(built);
         cudaInitializationDiagnostic =
-                "CUDA immutable scene and configuration are ready";
+                useCuda
+                ? "CUDA immutable scene and configuration are ready"
+                : "Vulkan immutable scene and configuration are ready";
         return ReplaySimulationRunResult::Success;
     }
 
@@ -960,8 +1007,14 @@ struct ReplaySimulationSession::Impl {
             std::uint32_t validationSeed,
             std::uint64_t controlCursor) {
         ReplaySimulationTimelineResult result;
-        if (!instance.runtime || !cudaDeviceScene.Ready() ||
-            !cudaDeviceConfiguration.Ready()) {
+        const bool useVulkan =
+                backend == forevervalidator::SimulationBackend::Vulkan;
+        if (!instance.runtime ||
+            (useVulkan
+             ? (!vulkanDeviceScene.Ready() ||
+                !vulkanDeviceConfiguration.Ready())
+             : (!cudaDeviceScene.Ready() ||
+                !cudaDeviceConfiguration.Ready()))) {
             cudaInitializationDiagnostic =
                     "CUDA timeline prerequisites are not ready";
             result.result =
@@ -1014,11 +1067,20 @@ struct ReplaySimulationSession::Impl {
             return result;
         }
 
-        forevervalidator::simulation::CudaTimelineBatchResult executed =
-                forevervalidator::simulation::ExecuteCudaTimelineBatch(
-                        cudaDeviceScene.DeviceData(),
-                        cudaDeviceConfiguration.DeviceData(),
-                        {std::move(input)});
+        forevervalidator::simulation::CudaTimelineBatchResult executed;
+        if (useVulkan) {
+            executed = forevervalidator::simulation::
+                    ExecuteVulkanTimelineBatch(
+                            vulkanDeviceScene,
+                            vulkanDeviceConfiguration,
+                            {std::move(input)});
+        } else {
+            executed = forevervalidator::simulation::
+                    ExecuteCudaTimelineBatch(
+                            cudaDeviceScene.DeviceData(),
+                            cudaDeviceConfiguration.DeviceData(),
+                            {std::move(input)});
+        }
         cudaTimelineMetrics = executed.metrics;
         cudaInitializationDiagnostic = executed.diagnostic;
         if (executed.status != forevervalidator::simulation::
@@ -1150,9 +1212,13 @@ void ReplaySimulationSession::Reset() {
     impl->cudaHostScene.Clear();
     impl->cudaDeviceScene.Reset();
     impl->cudaSceneTransfer.reset();
+    impl->vulkanDeviceScene.Reset();
+    impl->vulkanSceneTransfer.reset();
     impl->cudaHostConfiguration.Clear();
     impl->cudaDeviceConfiguration.Reset();
     impl->cudaConfigurationTransfer.reset();
+    impl->vulkanDeviceConfiguration.Reset();
+    impl->vulkanConfigurationTransfer.reset();
     impl->cudaInitializationDiagnostic.clear();
     impl->cudaTimelineMetrics.reset();
     impl->incrementalValidationSeed = 0u;
@@ -1170,7 +1236,8 @@ bool ReplaySimulationSession::InstallStaticScene(
     sandbox::PhysicsSandboxRenderSceneHandle renderScene =
             BuildStaticRenderScene(models);
     forevervalidator::simulation::CudaHostScene cudaScene;
-    if (impl->backend == forevervalidator::SimulationBackend::Cuda) {
+    if (impl->backend == forevervalidator::SimulationBackend::Cuda ||
+        impl->backend == forevervalidator::SimulationBackend::Vulkan) {
         const auto cudaBuild =
                 forevervalidator::simulation::BuildCudaHostScene(
                         models, &cudaScene);
@@ -1209,6 +1276,12 @@ void ReplaySimulationSession::ActivateStaticScene() {
                 impl->cudaDeviceScene.Upload(impl->cudaHostScene);
         impl->cudaInitializationDiagnostic =
                 impl->cudaSceneTransfer->diagnostic;
+    } else if (impl->backend ==
+               forevervalidator::SimulationBackend::Vulkan) {
+        impl->vulkanSceneTransfer =
+                impl->vulkanDeviceScene.Upload(impl->cudaHostScene);
+        impl->cudaInitializationDiagnostic =
+                impl->vulkanSceneTransfer->diagnostic;
     }
 }
 
@@ -1295,7 +1368,8 @@ ReplaySimulationTimelineResult ReplaySimulationSession::SimulateTimeline(
         return result;
     }
 
-    if (impl->backend == forevervalidator::SimulationBackend::Cuda) {
+    if (impl->backend == forevervalidator::SimulationBackend::Cuda ||
+        impl->backend == forevervalidator::SimulationBackend::Vulkan) {
         return impl->ExecuteCudaTimeline(
                 controlTicks, validationSeed, 0u);
     } else if (impl->backend ==
@@ -1497,7 +1571,8 @@ ReplaySimulationTimelineResult ReplaySimulationSession::AdvanceIncremental(
                         execution.respawnExecutedCount;
             }
         }
-    } else if (impl->backend == forevervalidator::SimulationBackend::Cuda) {
+    } else if (impl->backend == forevervalidator::SimulationBackend::Cuda ||
+               impl->backend == forevervalidator::SimulationBackend::Vulkan) {
         std::vector<ReplayControlTick> cudaTicks;
         try {
             cudaTicks.assign(
@@ -1820,6 +1895,59 @@ ReplaySimulationSession::CreateCudaSearchExecutor(
 #endif
 }
 
+std::unique_ptr<forevervalidator::simulation::VulkanSearchExecutor>
+ReplaySimulationSession::CreateVulkanSearchExecutor(
+        forevervalidator::simulation::CudaSearchExecutorConfiguration
+                configuration,
+        std::uint64_t initialControlCursor,
+        std::string *diagnostic) const {
+#if !FOREVERVALIDATOR_HAS_VULKAN
+    (void)configuration;
+    (void)initialControlCursor;
+    if (diagnostic != nullptr) {
+        *diagnostic = "Vulkan support is not compiled into this build";
+    }
+    return {};
+#else
+    if (impl->backend != forevervalidator::SimulationBackend::Vulkan ||
+        !impl->instance.runtime || !impl->vulkanDeviceScene.Ready() ||
+        !impl->vulkanDeviceConfiguration.Ready()) {
+        if (diagnostic != nullptr) {
+            *diagnostic = "Vulkan search prerequisites are not ready";
+        }
+        return {};
+    }
+    const std::shared_ptr<const ReplaySimulationInstanceClone> initial =
+            CaptureRuntimeClone();
+    if (!initial) {
+        if (diagnostic != nullptr) {
+            *diagnostic = "Vulkan search branch state capture failed";
+        }
+        return {};
+    }
+    const auto conversion =
+            forevervalidator::simulation::EncodeCudaCandidateState(
+                    *initial,
+                    impl->incrementalValidationSeed,
+                    initialControlCursor,
+                    0u,
+                    initial->randomState,
+                    &configuration.branchState);
+    if (conversion != forevervalidator::simulation::
+                              CudaStateConversionResult::Success) {
+        if (diagnostic != nullptr) {
+            *diagnostic = "Vulkan search branch state conversion failed";
+        }
+        return {};
+    }
+    return forevervalidator::simulation::VulkanSearchExecutor::Create(
+            configuration,
+            impl->vulkanDeviceScene,
+            impl->vulkanDeviceConfiguration,
+            diagnostic);
+#endif
+}
+
 bool ReplaySimulationSession::PrepareRuntimeCloneRestore(
         const ReplaySimulationInstanceClone &clone) {
     return impl->instance.runtime &&
@@ -1886,7 +2014,7 @@ ReplaySimulationSession::ExecuteCudaCandidateBatchForTesting(
     result.status =
             forevervalidator::simulation::CudaTimelineStatus::DeviceFailure;
     result.diagnostic =
-            "CUDA support is not compiled into this build";
+            "GPU support is not compiled into this build";
     return result;
 #else
     if (impl->backend != forevervalidator::SimulationBackend::Cuda ||
@@ -3535,18 +3663,24 @@ ReplayCudaVehiclePrefixDifferential
 ReplaySimulationSession::RunCudaTimelineTickDifferentialForTesting(
         const ReplayControlTick &tick) {
     ReplayCudaVehiclePrefixDifferential result;
-#if !FOREVERVALIDATOR_HAS_CUDA
+#if !FOREVERVALIDATOR_HAS_CUDA && !FOREVERVALIDATOR_HAS_VULKAN
     static_cast<void>(tick);
     result.diagnostic =
-            "CUDA support is not compiled into this build";
+            "GPU support is not compiled into this build";
     return result;
 #else
-    if (impl->backend != forevervalidator::SimulationBackend::Cuda ||
+    const bool useVulkan =
+            impl->backend == forevervalidator::SimulationBackend::Vulkan;
+    if ((!useVulkan &&
+         impl->backend != forevervalidator::SimulationBackend::Cuda) ||
         !impl->instance.runtime ||
-        !impl->cudaDeviceConfiguration.Ready() ||
-        !impl->cudaDeviceScene.Ready()) {
+        (useVulkan
+         ? (!impl->vulkanDeviceConfiguration.Ready() ||
+            !impl->vulkanDeviceScene.Ready())
+         : (!impl->cudaDeviceConfiguration.Ready() ||
+            !impl->cudaDeviceScene.Ready()))) {
         result.diagnostic =
-                "CUDA timeline-tick differential prerequisites are not ready";
+                "GPU timeline-tick differential prerequisites are not ready";
         return result;
     }
     const auto runtime =
@@ -3626,10 +3760,15 @@ ReplaySimulationSession::RunCudaTimelineTickDifferentialForTesting(
             forevervalidator::simulation::
                     FlattenCudaControlTick(tick));
     const forevervalidator::simulation::CudaTimelineBatchResult gpu =
-            forevervalidator::simulation::ExecuteCudaTimelineBatch(
-                    impl->cudaDeviceScene.DeviceData(),
-                    impl->cudaDeviceConfiguration.DeviceData(),
-                    {input});
+            useVulkan
+            ? forevervalidator::simulation::ExecuteVulkanTimelineBatch(
+                      impl->vulkanDeviceScene,
+                      impl->vulkanDeviceConfiguration,
+                      {input})
+            : forevervalidator::simulation::ExecuteCudaTimelineBatch(
+                      impl->cudaDeviceScene.DeviceData(),
+                      impl->cudaDeviceConfiguration.DeviceData(),
+                      {input});
     if (gpu.status !=
                 forevervalidator::simulation::
                         CudaTimelineStatus::Success ||
@@ -3638,7 +3777,7 @@ ReplaySimulationSession::RunCudaTimelineTickDifferentialForTesting(
                 forevervalidator::simulation::
                         CudaTimelineStatus::Success) {
         result.diagnostic =
-                "CUDA timeline-tick execution failed: " +
+                "GPU timeline-tick execution failed: " +
                 gpu.diagnostic;
         return result;
     }
@@ -3664,7 +3803,8 @@ ReplaySimulationSession::RunCudaTimelineTickDifferentialForTesting(
         result.cpuByte = cpuBytes[mismatch];
         result.gpuByte = gpuBytes[mismatch];
         result.diagnostic =
-                "CUDA complete timeline tick diverged at candidate byte " +
+                std::string(useVulkan ? "Vulkan" : "CUDA") +
+                " complete timeline tick diverged at candidate byte " +
                 std::to_string(mismatch) +
                 " time_ms=" + std::to_string(tick.timeMs) +
                 " controls=(" +
@@ -3738,15 +3878,16 @@ ReplaySimulationSession::RunCudaTimelineTickDifferentialForTesting(
     result.success = true;
     result.firstMismatchByte = SIZE_MAX;
     result.diagnostic =
-            "CUDA complete timeline tick is bit-exact";
+            std::string(useVulkan ? "Vulkan" : "CUDA") +
+            " complete timeline tick is bit-exact";
     return result;
 #endif
 }
 
 bool ReplaySimulationSession::StageCudaTimelinePrefixForTesting(
         const ReplayControlTick &tick) {
-    return impl->backend ==
-                    forevervalidator::SimulationBackend::Cuda &&
+    return (impl->backend == forevervalidator::SimulationBackend::Cuda ||
+            impl->backend == forevervalidator::SimulationBackend::Vulkan) &&
             impl->instance.runtime &&
             impl->instance.runtime->PrepareStepForTesting(tick);
 }

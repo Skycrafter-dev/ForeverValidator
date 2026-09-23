@@ -1,7 +1,12 @@
 #ifndef FOREVERVALIDATOR_CUDA_SEARCH_BRANCH_STATE_CUH
 #define FOREVERVALIDATOR_CUDA_SEARCH_BRANCH_STATE_CUH
 
+#if defined(__CUDACC__)
 #include <cuda_runtime.h>
+#define FOREVERVALIDATOR_BRANCH_HD __host__ __device__
+#else
+#define FOREVERVALIDATOR_BRANCH_HD
+#endif
 
 #include <cstdint>
 #include <limits>
@@ -28,7 +33,7 @@ struct DeviceControlState {
     std::int64_t stuntLastChangeTime[6]{};
 };
 
-__host__ __device__ inline int StuntActionIndex(std::uint32_t action) {
+FOREVERVALIDATOR_BRANCH_HD inline int StuntActionIndex(std::uint32_t action) {
     switch (action) {
     case 5u: return 0;
     case 6u: return 1;
@@ -40,12 +45,12 @@ __host__ __device__ inline int StuntActionIndex(std::uint32_t action) {
     }
 }
 
-__host__ __device__ inline bool IsActiveSwitch(
+FOREVERVALIDATOR_BRANCH_HD inline bool IsActiveSwitch(
         const CudaSearchInputEvent &event) {
     return event.valueKind == 1u && event.value != 0;
 }
 
-__host__ __device__ inline void ApplyControlEvent(
+FOREVERVALIDATOR_BRANCH_HD inline void ApplyControlEvent(
         DeviceControlState &state,
         const CudaSearchInputEvent &event,
         std::int64_t timeOriginMs = 0) {
@@ -86,7 +91,7 @@ __host__ __device__ inline void ApplyControlEvent(
     }
 }
 
-__host__ __device__ inline ReplayVehicleControlState ControlsFromState(
+FOREVERVALIDATOR_BRANCH_HD inline ReplayVehicleControlState ControlsFromState(
         const DeviceControlState &state) {
     float steering = 0.0f;
     const std::int32_t digitalSteerTime =
@@ -129,7 +134,7 @@ __host__ __device__ inline ReplayVehicleControlState ControlsFromState(
     return {gateA, gateB, steering};
 }
 
-__host__ __device__ inline ReplayStuntInputState StuntsFromState(
+FOREVERVALIDATOR_BRANCH_HD inline ReplayStuntInputState StuntsFromState(
         const DeviceControlState &state,
         std::uint32_t prestartDurationMs) {
     ReplayStuntInputState result;
@@ -208,7 +213,6 @@ inline bool PartitionSearchInputs(
     std::int32_t previousTime = INT32_MIN;
     for (const CudaSearchInputEvent &input : inputs) {
         if (input.timeMs < previousTime ||
-            input.timeMs < 0 ||
             (input.valueKind == 2u &&
              (input.value < -65536 || input.value > 65536)) ||
             (input.valueKind == 1u &&
@@ -243,5 +247,7 @@ inline CudaSearchInputEvent AbsoluteSuffixEvent(
 }
 
 }  // namespace forevervalidator::simulation::cuda_search_detail
+
+#undef FOREVERVALIDATOR_BRANCH_HD
 
 #endif

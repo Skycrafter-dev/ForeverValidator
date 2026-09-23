@@ -128,7 +128,7 @@ __device__ inline float Evaluate(
         const float span =
                 keys[nextKeyIndex].position - firstPosition;
         blend = fabsf(span) >= KeyEpsilon
-                ? (input - firstPosition) / span
+                ? exact::Divide(input - firstPosition, span)
                 : 0.0f;
     }
     if (keyIndex == nextKeyIndex || forceConstant ||
@@ -160,16 +160,14 @@ __device__ inline float EvaluateSpeed(
 __device__ inline const float *TransmissionValues(
         const CudaPackedStaticConfigurationHeader *configuration,
         CudaTransmissionArrayId id,
-        std::uint32_t *count = nullptr) {
+        std::uint32_t &count) {
     const auto *arrays =
             reinterpret_cast<const CudaTransmissionArray *>(
                     &configuration->tuning.gearedDrive.
                             transmissionArrays);
     const CudaTransmissionArray &array =
             arrays[static_cast<std::uint32_t>(id)];
-    if (count != nullptr) {
-        *count = array.valueCount;
-    }
+    count = array.valueCount;
     return Section<float>(
                    configuration,
                    configuration->transmissionValues) +

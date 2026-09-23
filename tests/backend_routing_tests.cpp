@@ -19,6 +19,7 @@ int main() {
     static_assert(static_cast<std::uint8_t>(
                           SimulationBackend::SpeculativeTicking) == 3u);
     static_assert(static_cast<std::uint8_t>(SimulationBackend::Cuda) == 4u);
+    static_assert(static_cast<std::uint8_t>(SimulationBackend::Vulkan) == 5u);
 
     if (ResolveLeafBackend(SimulationBackend::Reference) !=
         SimulationBackend::Reference) {
@@ -42,6 +43,12 @@ int main() {
     }
     if (!IsSimulationBackendSupported(SimulationBackend::Cuda)) {
         std::cerr << "Cuda was not registered as selectable\n";
+        return 1;
+    }
+    if (ResolveLeafBackend(SimulationBackend::Vulkan) !=
+            SimulationBackend::Vulkan ||
+        !IsSimulationBackendSupported(SimulationBackend::Vulkan)) {
+        std::cerr << "Vulkan was not registered as a leaf backend\n";
         return 1;
     }
     if (!forevervalidator::CudaBackendDiagnostics::

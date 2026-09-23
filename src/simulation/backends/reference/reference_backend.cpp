@@ -9,6 +9,7 @@ bool IsSimulationBackendSupported(SimulationBackend backend) noexcept {
     case SimulationBackend::SpeculativeTicking:
     case SimulationBackend::Batched:
     case SimulationBackend::Cuda:
+    case SimulationBackend::Vulkan:
         return true;
     }
     return false;

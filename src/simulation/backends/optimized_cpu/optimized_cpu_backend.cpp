@@ -10,6 +10,8 @@ SimulationBackend ResolveLeafBackend(SimulationBackend backend) noexcept {
         return SimulationBackend::SpeculativeTicking;
     case SimulationBackend::Cuda:
         return SimulationBackend::Cuda;
+    case SimulationBackend::Vulkan:
+        return SimulationBackend::Vulkan;
     case SimulationBackend::Batched:
         return SimulationBackend::Reference;
     case SimulationBackend::Reference:

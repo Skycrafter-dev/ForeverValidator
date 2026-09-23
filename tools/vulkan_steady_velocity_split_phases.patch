@@ -1,0 +1,413 @@
+--- a/vulkan_search_steady_velocity_water_cooperative.slang
++++ b/vulkan_search_steady_velocity_water_split_phases.slang
+@@ -4408,7 +4408,10 @@
+         CudaPackedSceneHeader *scene,
+         CudaPackedStaticConfigurationHeader *configuration,
+         __constref CudaCandidatePhysicsState candidate,
+-        inout cuda__collision__VulkanCollisionSearchScratch scratch) {
++        inout cuda__collision__VulkanCollisionSearchScratch scratch,
++        uint traversalFirst = 0u,
++        uint traversalEnd = UINT32_MAX,
++        bool finalizeOrder = true) {
+     detail::Clear<TrackDiagnostics>(scratch);
+     {
+ 
+@@ -4462,8 +4465,8 @@
+                 scratch.shapeCapacity >= collisionShapeCount;
+         bool refreshSurfaceCache = !scratch.surfaceCacheValid;
+         if (useSurfaceCache) {
+-            for (uint traversal = 0u;
+-                 traversal < collisionShapeCount;
++            for (uint traversal = traversalFirst;
++                 traversal < min(collisionShapeCount, traversalEnd);
+                  ++traversal) {
+                 const uint shapeIndex = traversal;
+                 {
+@@ -4518,8 +4521,8 @@
+                     bool hasUnifiedMovingBounds = false;
+                     GmVec3 unifiedLower;
+                     GmVec3 unifiedUpper;
+-                    for (uint traversal = 0u;
+-                         traversal < collisionShapeCount;
++                    for (uint traversal = traversalFirst;
++                         traversal < min(collisionShapeCount, traversalEnd);
+                          ++traversal) {
+                         GmIso4 shapeWorld;
+ #if defined(FOREVERVALIDATOR_CUDA_RESEARCH_EIGHT_ROOT_SHAPES)
+@@ -4640,9 +4643,10 @@
+                                 cell.surfaceIndex != UINT32_MAX &&
+                                 cell.surfaceIndex <
+                                         scene->surfaces.count) {
+-                                for (uint traversal = 0u;
+-                                     traversal <
+-                                             collisionShapeCount;
++                                for (uint traversal = traversalFirst;
++                                     traversal < min(
++                                             collisionShapeCount,
++                                             traversalEnd);
+                                      ++traversal) {
+                                     if (detail::BoundsIntersect(
+                                                 (*detail::MovingBoundsAt(
+@@ -4873,8 +4877,8 @@
+             
+ }
+ #endif
+-            for (uint traversal = 0u;
+-                 traversal < collisionShapeCount;
++            for (uint traversal = traversalFirst;
++                 traversal < min(collisionShapeCount, traversalEnd);
+                  ++traversal) {
+                 const uint shapeIndex = traversal;
+                 CudaVehicleCollisionShape shape =
+@@ -4940,7 +4944,7 @@
+                     return cuda__collision__Status_Overflow;
+                 }
+             }
+-            detail::SortForResponse(scratch);
++            if (finalizeOrder) detail::SortForResponse(scratch);
+             return scratch.overflow
+                     ? cuda__collision__Status_Overflow
+                     : cuda__collision__Status_Success;
+@@ -4952,8 +4956,8 @@
+             EightOrderedEllipsoids
+             ? 8u
+             : configuration->collisionShapes.count;
+-    for (uint traversal = 0u;
+-         traversal < collisionShapeCount;
++    for (uint traversal = traversalFirst;
++         traversal < min(collisionShapeCount, traversalEnd);
+          ++traversal) {
+         const uint shapeIndex = traversal;
+         {
+@@ -5021,7 +5025,7 @@
+         detail::MergeShapeContacts(scratch);
+         if (scratch.overflow) return cuda__collision__Status_Overflow;
+     }
+-    detail::SortForResponse(scratch);
++    if (finalizeOrder) detail::SortForResponse(scratch);
+     if (scratch.overflow) return cuda__collision__Status_Overflow;
+     return cuda__collision__Status_Success;
+ }
+@@ -15844,3 +15848,322 @@
+ }
+ 
+ }
++
++
++namespace forevervalidator::simulation::vulkan_search {
++
++inline CudaCandidatePhysicsState* SplitCandidateState(
++        VulkanSearchParameters* parameters, uint slot) {
++    uint8_t* stateBytes = reinterpret<uint8_t*>(parameters->candidateStates);
++    return reinterpret<CudaCandidatePhysicsState*>(
++        stateBytes + uint64_t(slot) * parameters->stateWordCount * 4u);
++}
++
++inline cuda__collision__VulkanCollisionSearchScratch* SplitScratch(
++        VulkanSearchParameters* parameters, uint slot) {
++    return reinterpret<cuda__collision__VulkanCollisionSearchScratch*>(
++        parameters->collisionScratch) + uint64_t(slot) * 4u;
++}
++
++inline void InitializeSplitScratchLanes(
++        VulkanSearchParameters* parameters, uint slot) {
++    cuda__collision__VulkanCollisionSearchScratch* lanes =
++        SplitScratch(parameters, slot);
++    for (uint lane = 0u; lane < 4u; ++lane) {
++        lanes[lane] = {};
++        lanes[lane].surfaceCacheEnabled = 1u;
++        lanes[lane].collisionStorage =
++            reinterpret<cuda__collision__CudaCollisionSearchTile*>(
++                parameters->collisionStorage);
++        lanes[lane].shapeCollisionStorage =
++            reinterpret<cuda__collision__CudaCollisionSearchTile*>(
++                parameters->shapeCollisionStorage);
++        lanes[lane].shapeWorldStorage =
++            reinterpret<GmIso4*>(parameters->shapeWorldStorage);
++        lanes[lane].movingBoundsStorage =
++            reinterpret<GmBoxAligned*>(parameters->movingBoundsStorage);
++        lanes[lane].unifiedMovingBoundsStorage =
++            reinterpret<GmBoxAligned*>(parameters->unifiedMovingBoundsStorage);
++        lanes[lane].surfaceHitStorage =
++            reinterpret<cuda__collision__CudaCollisionSurfaceHit*>(
++                parameters->surfaceHitStorage);
++        lanes[lane].meshRangeStorage =
++            reinterpret<cuda__collision__CudaCollisionMeshRange*>(
++                parameters->meshRangeStorage);
++        lanes[lane].meshCellStorage =
++            reinterpret<uint*>(parameters->meshCellStorage);
++        lanes[lane].responseOrderStorage =
++            reinterpret<uint16_t*>(parameters->responseOrderStorage);
++        lanes[lane].slot = slot * 4u + lane;
++        lanes[lane].stride = parameters->scratchStride;
++        lanes[lane].shapeCapacity = parameters->shapeCapacity;
++    }
++}
++
++struct SplitStepState {
++    uint remaining;
++    float remainingTime;
++    float splitTime;
++};
++
++inline SplitStepState* SplitStep(
++        VulkanSearchParameters* parameters, uint slot) {
++    return reinterpret<SplitStepState*>(parameters->candidateTicks) + slot;
++}
++
++inline void SplitFailure(
++        VulkanSearchParameters* parameters, uint slot, uint detail) {
++    forevervalidator::simulation::VulkanTimelineResult* results =
++        reinterpret<forevervalidator::simulation::VulkanTimelineResult*>(
++            parameters->timelineResults);
++    uint* statuses = reinterpret<uint*>(parameters->statuses);
++    results[slot].status = 6u;
++    results[slot].failureTick = searchPush.tickIndex;
++    results[slot].failureDetail = detail;
++    statuses[slot] = uint(DeviceCandidateStatus::UnsupportedPhysicsTransition);
++}
++
++[shader("compute")]
++[numthreads(16, 1, 1)]
++void ExecuteVulkanSearchForcePhase(
++    uint3 dispatchThreadId : SV_DispatchThreadID)
++{
++    VulkanSearchParameters* parameters =
++        reinterpret<VulkanSearchParameters*>(searchPush.parameters);
++    uint slot = searchPush.candidateBase + dispatchThreadId.x;
++    if (slot >= parameters->candidateCount) return;
++    uint8_t* simulationActive =
++        reinterpret<uint8_t*>(parameters->simulationActive);
++    uint* statuses = reinterpret<uint*>(parameters->statuses);
++    if (simulationActive[slot] == 0u ||
++        statuses[slot] != uint(DeviceCandidateStatus::Success)) return;
++
++    uint* cancellation = reinterpret<uint*>(parameters->cancellation);
++    if (*cancellation != 0u)
++    {
++        statuses[slot] = uint(DeviceCandidateStatus::Cancelled);
++        return;
++    }
++
++    CudaCandidatePhysicsState* state = SplitCandidateState(parameters, slot);
++    SplitStepState* step = SplitStep(parameters, slot);
++    if (searchPush.tickIndex == 0u && searchPush.tickCount == 0u)
++        InitializeSplitScratchLanes(parameters, slot);
++    if (searchPush.tickCount == 0u)
++    {
++        cuda_search_detail__DeviceControlState* controlStates =
++            reinterpret<cuda_search_detail__DeviceControlState*>(
++                parameters->controlStates);
++        cuda_search_detail__DeviceControlState controlState = controlStates[slot];
++        CudaSearchInputEvent* events =
++            reinterpret<CudaSearchInputEvent*>(parameters->candidateEvents) +
++            uint64_t(slot) * parameters->eventCapacity;
++        uint* eventCounts = reinterpret<uint*>(parameters->eventCounts);
++        uint* eventCursors = reinterpret<uint*>(parameters->eventCursors);
++        uint eventCursor = eventCursors[slot];
++        int64_t publicTime = parameters->branchTimeMs +
++            int64_t(searchPush.tickIndex + 1u) * parameters->tickDurationMs;
++        int64_t suffixTime = publicTime - parameters->mutableFromTimeMs;
++        while (eventCursor < eventCounts[slot] &&
++               events[eventCursor].timeMs <= suffixTime)
++        {
++            forevervalidator::simulation::cuda_search_detail::ApplyControlEvent(
++                controlState, events[eventCursor], parameters->mutableFromTimeMs);
++            ++eventCursor;
++        }
++        eventCursors[slot] = eventCursor;
++        controlStates[slot] = controlState;
++
++        CudaControlTick* baselineTicks =
++            reinterpret<CudaControlTick*>(parameters->baselineTicks);
++        CudaControlTick tick = baselineTicks[searchPush.tickIndex];
++        tick.observe = false;
++        tick.controls = forevervalidator::simulation::cuda_search_detail::
++            ControlsFromState(controlState);
++        tick.stuntsInput = forevervalidator::simulation::cuda_search_detail::
++            StuntsFromState(controlState, parameters->prestartDurationMs);
++
++        GmVec3* previousPositions =
++            reinterpret<GmVec3*>(parameters->previousPositions);
++        previousPositions[slot] = state->body.current.position;
++        forevervalidator::simulation::ApplyControlAndTimingPrefix(
++            *state, tick, false);
++        if (state->firstStep == 0u)
++            forevervalidator::simulation::cuda::transition::PrepareSteadyStep(
++                *state, tick);
++        state->vehicle.mobil.absorbContactEnabled = 1u;
++        state->vehicle.mobil.physicsUpdatesEnabled = 1u;
++
++        const float dt = float(int(state->world.schemePeriodMs)) * 0.001f;
++        if (!state->body.dynamicActive)
++        {
++            SplitFailure(parameters, slot, 900001u);
++            return;
++        }
++        state->body.temporary = state->body.current;
++        GmVec3 linear = state->body.current.linearSpeed;
++        GmVec3 angular = state->body.current.angularSpeed;
++        const float linearLength = forevervalidator::simulation::cuda::exact::Sqrt(
++            (linear.y * linear.y + linear.x * linear.x) + linear.z * linear.z);
++        const float angularLength = forevervalidator::simulation::cuda::exact::Sqrt(
++            (angular.x * angular.x + angular.y * angular.y) + angular.z * angular.z);
++        const float scaled = forevervalidator::simulation::cuda::exact::Divide(
++            (linearLength + angularLength) * dt,
++            state->body.parameters.maxStepDistance);
++        step->remaining = min(1000u, forevervalidator::simulation::cuda::exact::
++            TruncateToUint32Modulo(scaled) + 1u);
++        step->remainingTime = dt;
++        step->splitTime = step->remaining > 1u
++            ? forevervalidator::simulation::cuda::exact::Divide(
++                dt, forevervalidator::simulation::cuda::exact::
++                    FromUnsignedInteger(step->remaining))
++            : dt;
++    }
++    if (step->remaining == 0u) return;
++    const float substepDt = step->remaining == 1u
++        ? step->remainingTime : step->splitTime;
++
++    forevervalidator::simulation::cuda::vehicle::ForceStatus forceStatus =
++        ExecuteSearchForcePass(
++            reinterpret<CudaPackedStaticConfigurationHeader*>(
++                parameters->configuration), *state, substepDt);
++    if (forceStatus !=
++        forevervalidator::simulation::cuda::vehicle::ForceStatus::Success)
++    {
++        SplitFailure(parameters, slot, 100u + uint(forceStatus));
++        return;
++    }
++    forevervalidator::simulation::cuda::dynamics::PreCollision<true>(
++        state->body, *SplitScratch(parameters, slot), substepDt);
++}
++
++[shader("compute")]
++[numthreads(16, 1, 1)]
++void ExecuteVulkanSearchDetectPhase(
++    uint3 dispatchThreadId : SV_DispatchThreadID)
++{
++    VulkanSearchParameters* parameters =
++        reinterpret<VulkanSearchParameters*>(searchPush.parameters);
++    uint lane = dispatchThreadId.x & 3u;
++    uint slot = searchPush.candidateBase + dispatchThreadId.x / 4u;
++    if (slot >= parameters->candidateCount) return;
++    uint8_t* simulationActive =
++        reinterpret<uint8_t*>(parameters->simulationActive);
++    uint* statuses = reinterpret<uint*>(parameters->statuses);
++    if (simulationActive[slot] == 0u ||
++        statuses[slot] != uint(DeviceCandidateStatus::Success)) return;
++    if (SplitStep(parameters, slot)->remaining == 0u) return;
++    CudaCandidatePhysicsState* state = SplitCandidateState(parameters, slot);
++    cuda__collision__VulkanCollisionSearchScratch* scratch =
++        SplitScratch(parameters, slot) + lane;
++    uint collisionStatus = forevervalidator::simulation::cuda::collision::
++        Detect<false, true, true, false>(
++            reinterpret<CudaPackedSceneHeader*>(parameters->scene),
++            reinterpret<CudaPackedStaticConfigurationHeader*>(
++                parameters->configuration),
++            *state, *scratch, lane * 2u, lane * 2u + 2u, false);
++    if (collisionStatus != cuda__collision__Status_Success)
++        SplitFailure(parameters, slot,
++            200u + collisionStatus + 1000u * uint(scratch->overflowReason) +
++            100000u * scratch->collisionCount);
++}
++
++[shader("compute")]
++[numthreads(16, 1, 1)]
++void ExecuteVulkanSearchRespondPhase(
++    uint3 dispatchThreadId : SV_DispatchThreadID)
++{
++    VulkanSearchParameters* parameters =
++        reinterpret<VulkanSearchParameters*>(searchPush.parameters);
++    if (searchPush.tickIndex == UINT32_MAX)
++    {
++        if (dispatchThreadId.x == 0u) FinalizeVulkanSearchBatch(parameters);
++        return;
++    }
++    uint slot = searchPush.candidateBase + dispatchThreadId.x;
++    if (slot >= parameters->candidateCount) return;
++    uint8_t* simulationActive =
++        reinterpret<uint8_t*>(parameters->simulationActive);
++    uint* statuses = reinterpret<uint*>(parameters->statuses);
++    if (simulationActive[slot] == 0u ||
++        statuses[slot] != uint(DeviceCandidateStatus::Success)) return;
++    if (SplitStep(parameters, slot)->remaining == 0u) return;
++    CudaCandidatePhysicsState* state = SplitCandidateState(parameters, slot);
++    cuda__collision__VulkanCollisionSearchScratch* scratch =
++        SplitScratch(parameters, slot);
++    for (uint lane = 1u; lane < 4u; ++lane) {
++        cuda__collision__VulkanCollisionSearchScratch* source =
++            scratch + lane;
++        for (uint index = 0u; index < source->collisionCount; ++index) {
++            forevervalidator::simulation::cuda::collision::detail::AddMain(
++                *scratch,
++                forevervalidator::simulation::cuda::collision::detail::
++                    CollisionAt(*source, index));
++        }
++    }
++    forevervalidator::simulation::cuda::collision::detail::SortForResponse(
++        *scratch);
++    uint collisionStatus = forevervalidator::simulation::cuda::collision::
++        Respond<false, true, true>(
++            reinterpret<CudaPackedSceneHeader*>(parameters->scene),
++            reinterpret<CudaPackedStaticConfigurationHeader*>(
++                parameters->configuration),
++            *state, *scratch);
++    if (collisionStatus != cuda__collision__Status_Success)
++    {
++        SplitFailure(parameters, slot,
++            300u + collisionStatus + 1000u * uint(scratch->overflowReason) +
++            100000u * scratch->collisionCount);
++        return;
++    }
++    forevervalidator::simulation::cuda::dynamics::PostCollision<true>(
++        state->body, *scratch);
++    SplitStepState* step = SplitStep(parameters, slot);
++    if (step->remaining > 1u)
++    {
++        step->remainingTime -= step->splitTime;
++        --step->remaining;
++        if (searchPush.tickCount == 1u)
++            SplitFailure(parameters, slot, 900002u);
++        return;
++    }
++    step->remaining = 0u;
++    state->body.write = state->body.temporary;
++    forevervalidator::simulation::cuda::vehicle::
++        AfterContactsWithoutSnapshots(*state);
++    state->firstStep = 0u;
++    ++state->controlCursor;
++
++    forevervalidator::simulation::VulkanTimelineResult* results =
++        reinterpret<forevervalidator::simulation::VulkanTimelineResult*>(
++            parameters->timelineResults);
++    ++results[slot].executedTickCount;
++    results[slot].status = 0u;
++    results[slot].failureTick = UINT32_MAX;
++
++    int64_t publicTime = parameters->branchTimeMs +
++        int64_t(searchPush.tickIndex + 1u) * parameters->tickDurationMs;
++    if (publicTime < parameters->evaluationStartTimeMs) return;
++    uint* evaluationIndices =
++        reinterpret<uint*>(parameters->evaluationIndices);
++    uint evaluationIndex = evaluationIndices[slot];
++    uint* eventCounts = reinterpret<uint*>(parameters->eventCounts);
++    uint64_t candidateId = parameters->firstCandidateId + slot;
++    cuda_search_detail__DeviceSample sample =
++        EvaluateVelocityState(*state, double(publicTime));
++    sample.candidateId = candidateId;
++    sample.candidateSlot = slot;
++    sample.evaluationTick = evaluationIndex;
++    sample.eventCount = eventCounts[slot];
++    sample.logicalOrder = 1u + uint64_t(slot) *
++        parameters->evaluationTickCount + evaluationIndex;
++    sample.mutation = parameters->baseline == 0u ? 1u : 0u;
++    cuda_search_detail__DeviceSample* samples =
++        reinterpret<cuda_search_detail__DeviceSample*>(
++            parameters->candidateBestSamples);
++    if (SearchStrictlyBetter(sample, samples[slot + 1u], true))
++        samples[slot + 1u] = sample;
++    evaluationIndices[slot] = evaluationIndex + 1u;
++}
++
++}

@@ -3,6 +3,12 @@
 
 #include <cstdint>
 
+#if defined(__CUDACC__)
+#define FOREVERVALIDATOR_WINNER_HD __host__ __device__
+#else
+#define FOREVERVALIDATOR_WINNER_HD
+#endif
+
 namespace forevervalidator::simulation::cuda_search_detail {
 
 constexpr std::uint32_t InvalidCandidateSlot = UINT32_MAX;
@@ -25,7 +31,7 @@ struct DeviceSample {
 struct BetterSample {
     bool maximize = false;
 
-    __host__ __device__ DeviceSample operator()(
+    FOREVERVALIDATOR_WINNER_HD DeviceSample operator()(
             const DeviceSample &left,
             const DeviceSample &right) const {
         if (left.valid != right.valid) {
@@ -47,7 +53,7 @@ struct BetterSample {
     }
 };
 
-__host__ __device__ inline bool StrictlyBetter(
+FOREVERVALIDATOR_WINNER_HD inline bool StrictlyBetter(
         const DeviceSample &candidate,
         const DeviceSample &incumbent,
         bool maximize) {
@@ -65,5 +71,7 @@ __host__ __device__ inline bool StrictlyBetter(
 }
 
 }  // namespace forevervalidator::simulation::cuda_search_detail
+
+#undef FOREVERVALIDATOR_WINNER_HD
 
 #endif

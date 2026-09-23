@@ -123,6 +123,7 @@ __device__ inline Contact MakeVehicleContact(
     contact.peerCorpusId = actor.installationOrder + 1u;
     contact.wheelIndex = WheelIndexForShape(
             shape, candidate);
+    contact.accepted = true;
     return contact;
 }
 
@@ -192,8 +193,8 @@ __device__ inline void AddPointImpulse(
     const GmVec3 worldCom = detail::TransformPoint(
             statePose,
             candidate.body.parameters.localCenterOfMass);
-    const float inverseMass =
-            1.0f / candidate.body.parameters.mass;
+    const float inverseMass = exact::Divide(
+            1.0f, candidate.body.parameters.mass);
     GmVec3 linear = {
             state.linearSpeed.x +
                     worldImpulse.x * inverseMass,
@@ -304,12 +305,11 @@ __device__ inline void ComputeAndApplyContactImpulse(
             normal.x * angularAtPoint.x +
             normal.y * angularAtPoint.y +
             normal.z * angularAtPoint.z;
-    const float denominator =
-            1.0f / candidate.body.parameters.mass +
-            angularMass;
+    const float denominator = exact::Divide(
+            1.0f, candidate.body.parameters.mass) + angularMass;
     GmVec3 impulse{};
     if (!(fabsf(denominator) < ScalarEpsilon)) {
-        const float impulseScale = numerator / denominator;
+        const float impulseScale = exact::Divide(numerator, denominator);
         impulse = {
                 normal.x * impulseScale,
                 normal.y * impulseScale,
@@ -384,7 +384,7 @@ __device__ inline GmVec3 ClampTangentSpeed(
             tangent.z * tangent.z);
     const float limit = normalLength * friction;
     if (tangentLength > limit) {
-        const float scale = limit / tangentLength;
+        const float scale = exact::Divide(limit, tangentLength);
         tangent.x = scale * tangent.x;
         tangent.y *= scale;
         tangent.z = scale * tangent.z;
@@ -401,8 +401,8 @@ __device__ inline void AddWorldImpulseAtPoint(
         const GmVec3 &impulse,
         const GmVec3 &point) {
     auto &state = candidate.body.current;
-    const float inverseMass =
-            1.0f / candidate.body.parameters.mass;
+    const float inverseMass = exact::Divide(
+            1.0f, candidate.body.parameters.mass);
     state.linearSpeed.x += impulse.x * inverseMass;
     state.linearSpeed.y += impulse.y * inverseMass;
     state.linearSpeed.z =
@@ -453,14 +453,14 @@ __device__ inline void ApplyGenericImpulse(
              negative.x * negative.x) +
             negative.z * negative.z);
     if (!(speed > ScalarEpsilon)) return;
-    const float inverseSpeed = 1.0f / speed;
+    const float inverseSpeed = exact::Divide(1.0f, speed);
     const GmVec3 direction = {
             inverseSpeed * negative.x,
             negative.y * inverseSpeed,
             inverseSpeed * negative.z,
     };
-    float denominator =
-            1.0f / candidate.body.parameters.mass;
+    float denominator = exact::Divide(
+            1.0f, candidate.body.parameters.mass);
     if (dynamics::IsFullAngular(candidate.body)) {
         const GmVec3 center = WorldCenterOfMass(candidate);
         const GmVec3 lever = {
@@ -481,8 +481,8 @@ __device__ inline void ApplyGenericImpulse(
                 denominator;
     }
     const float magnitude =
-            (speed * (restitution + 1.0f)) /
-            denominator;
+            exact::Divide(
+                    speed * (restitution + 1.0f), denominator);
     const GmVec3 impulse = {
             direction.x * magnitude,
             direction.y * magnitude,
@@ -564,8 +564,8 @@ __device__ inline void ApplyBodyContactImpulse(
         const float tangentMaximum =
                 normalLength * tangentLimit;
         if (tangentLength > tangentMaximum) {
-            const float scale =
-                    tangentMaximum / tangentLength;
+            const float scale = exact::Divide(
+                    tangentMaximum, tangentLength);
             tangentSpeed.x = scale * tangentSpeed.x;
             tangentSpeed.y *= scale;
             tangentSpeed.z = scale * tangentSpeed.z;
@@ -580,7 +580,7 @@ __device__ inline void ApplyBodyContactImpulse(
                  impulseNormal.x * impulseNormal.x) +
                 impulseNormal.z * impulseNormal.z);
         if (ScalarEpsilon < impulseLength) {
-            const float inverse = 1.0f / impulseLength;
+            const float inverse = exact::Divide(1.0f, impulseLength);
             impulseNormal.x = inverse * impulseNormal.x;
             impulseNormal.y *= inverse;
             impulseNormal.z = inverse * impulseNormal.z;
@@ -699,9 +699,8 @@ __device__ inline void AbsorbWheel(
     wheel.realTime.latestContactPoint = contact.localPoint;
     wheel.realTime.peerZAxisInCarLocal =
             contact.peerZAxis;
-    memory::CopyBytes<sizeof(contact.peerCorpusId)>(
-            &wheel.realTime.peerCorpusId,
-            &contact.peerCorpusId);
+    wheel.realTime.peerCorpusId =
+            CHmsCorpusId::FromValue(contact.peerCorpusId);
     if (::forevervalidator::simulation::cuda::facts::
                 WheelForceMode(configuration) !=
         static_cast<std::uint32_t>(

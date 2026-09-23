@@ -180,7 +180,8 @@ bool IsPipeline(const std::string &value) {
 
 bool IsEvaluator(const std::string &value) {
     return value == "velocity" || value == "point" || value == "pose" ||
-           value == "volume-entry" || value == "finish-time";
+           value == "volume-entry" || value == "stunt-points" ||
+           value == "finish-time";
 }
 
 bool IsModifier(const std::string &value) {
@@ -291,9 +292,10 @@ int main(int argc, char **argv) {
                 "input-insertion|dense-insertion|input-deletion|mixed|"
                 "cancelled] "
                 "[optimized|legacy|differential|"
-                "velocity|point|pose|volume-entry|finish-time] "
-                "[velocity|point|pose|volume-entry|finish-time] "
+                "velocity|point|pose|volume-entry|stunt-points|finish-time] "
+                "[velocity|point|pose|volume-entry|stunt-points|finish-time] "
                 "[--input-rate EVENTS_PER_SECOND] "
+                "[--first-candidate-id ID] "
                 "[--boundary-offset-ticks TICKS] "
                 "[--existing-min COUNT] [--existing-max COUNT] "
                 "[--no-winner-state]");
@@ -328,6 +330,7 @@ int main(int argc, char **argv) {
         evaluatorName = argv[9];
     }
     std::uint32_t inputRate = 0u;
+    std::uint64_t initialCandidateId = 0u;
     std::uint32_t boundaryOffsetTicks = 0u;
     std::uint32_t existingMinimumCount = 1u;
     std::uint32_t existingMaximumCount = 16u;
@@ -344,6 +347,8 @@ int main(int argc, char **argv) {
         if (option == "--input-rate") {
             inputRate = static_cast<std::uint32_t>(
                     std::stoul(argv[++argument]));
+        } else if (option == "--first-candidate-id") {
+            initialCandidateId = std::stoull(argv[++argument]);
         } else if (option == "--boundary-offset-ticks") {
             boundaryOffsetTicks = static_cast<std::uint32_t>(
                     std::stoul(argv[++argument]));
@@ -376,7 +381,11 @@ int main(int argc, char **argv) {
         return Fail("could not open pack source");
     }
     PhysicsSandboxOptions options;
+#if defined(FOREVERVALIDATOR_SEARCH_BENCHMARK_VULKAN)
+    options.backend = SimulationBackend::Vulkan;
+#else
     options.backend = SimulationBackend::Cuda;
+#endif
     auto sandbox = CreatePhysicsSandbox(
             std::move(source).Value(), options);
     if (!sandbox) {
@@ -544,6 +553,8 @@ int main(int argc, char **argv) {
                         {branchState.car.position.x + Radius,
                          branchState.car.position.y + Radius,
                          branchState.car.position.z + Radius}};
+    } else if (evaluatorName == "stunt-points") {
+        configuration.evaluator = PhysicsSandboxCudaStuntPointsEvaluator{};
     } else {
         configuration.evaluator = PhysicsSandboxCudaFinishTimeEvaluator{};
     }
@@ -592,15 +603,36 @@ int main(int argc, char **argv) {
                     "optimized and legacy CUDA capacity growth differs");
         }
         reservedBatchCapacity = optimizedCapacity.Value();
+    } else {
+        auto capacity =
+                session.Value().ReserveBatchCapacity(candidateCount);
+        if (!capacity || capacity.Value() != candidateCount) {
+            return Fail("CUDA search capacity growth failed");
+        }
+        reservedBatchCapacity = capacity.Value();
     }
     auto baseline = session.Value().EvaluateBaseline();
     if (!baseline) {
         return Fail("could not evaluate baseline: " +
                     Diagnostic(baseline.Error()));
     }
-    if (!baseline.Value().bestValid ||
-        baseline.Value().bestSnapshot.has_value() != captureBestState) {
-        return Fail("CUDA baseline winner-state capture policy was not honored");
+    const bool baselineMustBeValid =
+            evaluatorName != "volume-entry" &&
+            evaluatorName != "finish-time";
+    const bool baselineCaptureMatches =
+            baseline.Value().bestSnapshot.has_value() ==
+            (captureBestState && baseline.Value().bestValid);
+    if ((baselineMustBeValid && !baseline.Value().bestValid) ||
+        !baselineCaptureMatches) {
+        return Fail(
+                "CUDA baseline winner-state capture policy was not honored "
+                "(best=" + std::to_string(baseline.Value().bestValid) +
+                ", snapshot=" + std::to_string(
+                        baseline.Value().bestSnapshot.has_value()) +
+                ", evaluated=" + std::to_string(
+                        baseline.Value().evaluatedCandidateCount) +
+                ", calls=" + std::to_string(
+                        baseline.Value().evaluatorCalls) + ")");
     }
     if (legacySession.has_value()) {
         auto legacyBaseline = legacySession->EvaluateBaseline();
@@ -662,7 +694,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    std::uint64_t firstCandidateId = 0u;
+    std::uint64_t firstCandidateId = initialCandidateId;
     for (std::uint32_t repetition = 0u;
          repetition < repetitions; ++repetition) {
         std::uint32_t cancellationProbeCount = 0u;
@@ -693,7 +725,15 @@ int main(int argc, char **argv) {
             (modifier != "cancelled" &&
              (batch.Value().cancelled ||
               batch.Value().evaluatedCandidateCount == 0u))) {
-            return Fail("CUDA search batch was incomplete");
+            return Fail(
+                    "CUDA search batch was incomplete (cancelled=" +
+                    std::to_string(batch.Value().cancelled) +
+                    ", evaluated=" + std::to_string(
+                            batch.Value().evaluatedCandidateCount) +
+                    ", mutations=" + std::to_string(
+                            batch.Value().totalMutationCount) +
+                    ", best=" + std::to_string(
+                            batch.Value().bestValid) + ")");
         }
         const double simulatedTicks =
                 static_cast<double>(
@@ -721,9 +761,11 @@ int main(int argc, char **argv) {
                 : batch.Value().metrics
                                   .finishRefinementKernelMilliseconds *
                           timelineTicks / simulationKernelMilliseconds;
-        std::cout << std::fixed << std::setprecision(6)
+        std::cout << std::fixed << std::setprecision(17)
                   << "{"
                   << "\"repetition\":" << repetition << ","
+                  << "\"first_candidate_id\":"
+                  << firstCandidateId << ","
                   << "\"candidates\":" << candidateCount << ","
                   << "\"evaluated_candidates\":"
                   << batch.Value().evaluatedCandidateCount << ","
@@ -731,6 +773,21 @@ int main(int argc, char **argv) {
                   << reservedBatchCapacity << ","
                   << "\"baseline_input_events\":"
                   << baseline.Value().bestInputs.size() << ","
+                  << "\"baseline_best_valid\":"
+                  << (baseline.Value().bestValid ? "true" : "false")
+                  << ","
+                  << "\"baseline_score\":"
+                  << baseline.Value().bestScore << ","
+                  << "\"baseline_time_ms\":"
+                  << baseline.Value().bestTimeMs << ","
+                  << "\"baseline_evaluation_tick\":"
+                  << baseline.Value().bestEvaluationTick << ","
+                  << "\"baseline_state_fingerprint\":"
+                  << StateFingerprint(baseline.Value().bestState) << ","
+                  << "\"branch_state_fingerprint\":"
+                  << StateFingerprint(branchState) << ","
+                  << "\"baseline_input_fingerprint\":"
+                  << InputFingerprint(baseline.Value().bestInputs) << ","
                   << "\"best_input_events\":"
                   << batch.Value().bestInputs.size() << ","
                   << "\"total_mutation_count\":"
