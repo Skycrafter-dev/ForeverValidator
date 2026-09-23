@@ -20,6 +20,7 @@ int main() {
                           SimulationBackend::SpeculativeTicking) == 3u);
     static_assert(static_cast<std::uint8_t>(SimulationBackend::Cuda) == 4u);
     static_assert(static_cast<std::uint8_t>(SimulationBackend::Vulkan) == 5u);
+    static_assert(static_cast<std::uint8_t>(SimulationBackend::Hip) == 6u);
 
     if (ResolveLeafBackend(SimulationBackend::Reference) !=
         SimulationBackend::Reference) {
@@ -51,6 +52,25 @@ int main() {
         std::cerr << "Vulkan was not registered as a leaf backend\n";
         return 1;
     }
+    if (ResolveLeafBackend(SimulationBackend::Hip) !=
+            SimulationBackend::Hip ||
+        !IsSimulationBackendSupported(SimulationBackend::Hip)) {
+        std::cerr << "HIP was not registered as a leaf backend\n";
+        return 1;
+    }
+    const auto hip = forevervalidator::QueryHipBackendDiagnostics();
+#if FOREVERVALIDATOR_HAS_HIP
+    if (hip.status == forevervalidator::HipBackendStatus::NotCompiled) {
+        std::cerr << "HIP-enabled build reported NotCompiled\n";
+        return 1;
+    }
+#else
+    if (hip.status != forevervalidator::HipBackendStatus::NotCompiled ||
+        hip.diagnostic.empty()) {
+        std::cerr << "HIP unavailability diagnostics are not explicit\n";
+        return 1;
+    }
+#endif
     if (!forevervalidator::CudaBackendDiagnostics::
                     SupportsComputeCapability(5, 0) ||
         !forevervalidator::CudaBackendDiagnostics::

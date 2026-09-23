@@ -45,6 +45,7 @@ enum class SimulationBackend : std::uint8_t {
     SpeculativeTicking,
     Cuda,
     Vulkan,
+    Hip,
 };
 
 enum class VulkanBackendStatus : std::uint8_t {
@@ -123,6 +124,40 @@ struct CudaBackendDiagnostics {
 
 CudaBackendDiagnostics QueryCudaBackendDiagnostics() noexcept;
 
+enum class HipBackendStatus : std::uint8_t {
+    NotCompiled,
+    RuntimeUnavailable,
+    NoDevice,
+    UnsupportedDevice,
+    InitializationFailed,
+    Ready,
+};
+
+struct HipBackendDiagnostics {
+    HipBackendStatus status = HipBackendStatus::NotCompiled;
+    std::int32_t runtimeVersion = 0;
+    std::int32_t driverVersion = 0;
+    std::int32_t deviceCount = 0;
+    std::int32_t selectedDevice = -1;
+    std::int32_t computeCapabilityMajor = 0;
+    std::int32_t computeCapabilityMinor = 0;
+    std::uint64_t totalGlobalMemoryBytes = 0u;
+    std::string deviceName;
+    std::string diagnostic;
+
+    static bool SupportsComputeCapability(
+            std::int32_t major, std::int32_t minor) noexcept {
+        static_cast<void>(minor);
+        return major >= 5;
+    }
+
+    bool IsReady() const noexcept {
+        return status == HipBackendStatus::Ready;
+    }
+};
+
+HipBackendDiagnostics QueryHipBackendDiagnostics() noexcept;
+
 struct ValidationOptions {
     std::uint32_t requestedSamples = 0xffffffffu;
     std::uint32_t controlTickMs = 10u;
@@ -172,6 +207,9 @@ enum class ValidationErrorCode : std::uint16_t {
     CudaUnavailable = 14,
     CudaInitializationFailed = 15,
     CudaExecutionFailed = 16,
+    HipUnavailable = 17,
+    HipInitializationFailed = 18,
+    HipExecutionFailed = 19,
 };
 
 enum class ValidationFailureReason : std::uint16_t {
@@ -252,6 +290,13 @@ enum class ValidationFailureReason : std::uint16_t {
     CudaInitializationFailed = 720,
     CudaExecutionFailed = 721,
     CudaUnsupportedSimulationScope = 722,
+    HipNotCompiled = 723,
+    HipRuntimeUnavailable = 724,
+    HipDeviceUnavailable = 725,
+    HipDeviceUnsupported = 726,
+    HipInitializationFailed = 727,
+    HipExecutionFailed = 728,
+    HipUnsupportedSimulationScope = 729,
     SerializationFailed = 900,
     UnexpectedFailure = 1000,
 };

@@ -1,0 +1,297 @@
+// Generated from src/simulation/backends/cuda/cuda_state_layout.h by tools/hipify_backend.py. Do not edit.
+#ifndef FOREVERVALIDATOR_HIP_STATE_LAYOUT_H
+#define FOREVERVALIDATOR_HIP_STATE_LAYOUT_H
+
+#include <cstddef>
+#include <cstdint>
+#include <type_traits>
+
+#include <forevervalidator/finish_time.h>
+
+#include "engine/game/trackmania_race.h"
+#include "simulation/control/replay_control_timeline.h"
+#include "simulation/runtime/replay_physics_world.h"
+
+struct ReplaySimulationInstanceClone;
+
+namespace forevervalidator::simulation {
+
+enum class HipStateConversionResult : std::uint8_t {
+    Success,
+    InvalidArgument,
+    SchemaMismatch,
+    WheelOverflow,
+    CollisionReplacementOverflow,
+    CheckpointOverflow,
+    StuntEventOverflow,
+    AllocationFailed,
+};
+
+template<typename T, std::size_t Capacity>
+struct HipFixedArray {
+    std::uint32_t count = 0u;
+    T values[Capacity]{};
+};
+
+constexpr std::size_t HipCollisionReplacementInlineCapacity = 1u;
+constexpr std::size_t HipCollisionReplacementOverflowCapacity = 511u;
+constexpr std::size_t HipCollisionReplacementCapacity =
+        HipCollisionReplacementInlineCapacity +
+        HipCollisionReplacementOverflowCapacity;
+constexpr std::size_t HipCheckpointSlotCapacity = 1024u;
+
+struct HipCheckpointSlots {
+    static constexpr std::size_t WordBits = 32u;
+    static constexpr std::size_t WordCount =
+            HipCheckpointSlotCapacity / WordBits;
+
+    std::uint32_t count = 0u;
+    std::uint32_t words[WordCount]{};
+
+#if defined(__HIPCC__)
+    __host__ __device__ bool Get(std::uint32_t index) const {
+        return (words[index / WordBits] &
+                (1u << (index % WordBits))) != 0u;
+    }
+
+    __host__ __device__ void Set(std::uint32_t index) {
+        words[index / WordBits] |= 1u << (index % WordBits);
+    }
+
+    __host__ __device__ void Clear() {
+        for (std::size_t index = 0u; index < WordCount; ++index) {
+            words[index] = 0u;
+        }
+    }
+#endif
+};
+
+template<typename T>
+struct HipOptional {
+    bool present = false;
+    T value{};
+};
+
+struct HipWheelState {
+    bool killsLateralSpeedOnContact = false;
+    std::uint32_t axle = 0u;
+    float rollingRadius = 0.0f;
+    GmIso4 restPose{};
+    GmIso4 currentPose{};
+    GmVec3 forceApplicationPoint{};
+    CSceneVehicleCar::SSimulationWheel::SRealTimeState realTime{};
+    CSceneVehicleCar::SSimulationWheel::SState previousPhysics{};
+    CSceneVehicleCar::SSimulationWheel::SState currentPhysics{};
+    bool surfaceMovedByUpdate = false;
+};
+
+struct HipVehicleCarFrameState {
+    float forwardSpeed = 0.0f;
+    float sideSpeed = 0.0f;
+    float steeringControl = 0.0f;
+    float lowSpeedGateA = 0.0f;
+    float lowSpeedGateB = 0.0f;
+    std::uint32_t turboActive = 0u;
+    float turboProgressRatio = 0.0f;
+    std::uint32_t wheelSpeedOverrideActive = 0u;
+    float surfaceFeedbackAccumulator = 0.0f;
+    float feedbackSideSpringValue = 0.0f;
+    float feedbackForwardSpringValue = 0.0f;
+    float feedbackRamp1 = 0.0f;
+    float feedbackRamp0 = 0.0f;
+    GmIso4 corpusIso{};
+    std::uint32_t vehicleEvent0Value = 1u;
+    std::uint32_t waterSplashEventCounter = 1u;
+    GmVec3 localLinearSpeed{};
+    float materialFeedbackSpeed = 0.0f;
+    float materialFeedbackIntensity = 0.0f;
+    float engineInputMemory = 0.0f;
+    bool airControlRefreshMemory = false;
+    std::uint32_t engineControlState = 0u;
+    std::uint32_t shiftDirection = 0u;
+    bool hasWheelContact = false;
+    bool hasBodyContact = false;
+    float bodyContactVerticalAngle = 0.0f;
+    bool bodyContactZPositive = false;
+    float bodyContactHorizontalAngle = 0.0f;
+    bool noGroundFrictionGuard = false;
+};
+
+struct HipFrameHistory {
+    HipVehicleCarFrameState physicsPrevious{};
+    HipVehicleCarFrameState physicsCurrent{};
+};
+
+struct HipVehicleState {
+    CSceneMobil::RuntimeClone mobil{};
+    CSceneVehicle::SEventSlot vehicleEvents[2]{};
+    CSceneVehicle::SWaterState water{};
+
+    HipFixedArray<HipWheelState, 4u> wheels{};
+    CSceneVehicleCar::SControls controls{};
+    CSceneVehicleCar::SFeedback feedback{};
+    float linearSpeedCap = 0.0f;
+    CSceneVehicleCar::SIntegration integration{};
+    HipFrameHistory frameHistory{};
+    CSceneVehicleCar::SEngine engine{};
+    float reverseGearSpeedThreshold = 0.0f;
+    CSceneVehicleCar::STurbo turbo{};
+    CSceneVehicleCar::SAirControl airControl{};
+    CSceneVehicleCar::SContacts contacts{};
+    CSceneVehicleCar::SRadiusSteeringState radiusSteering{};
+    CSceneVehicleCar::SSlipMemoryState slipMemory{};
+    CSceneVehicleCar::SGearedDriveState gearedDrive{};
+    std::uint32_t lastComputeForcesTick = 0u;
+    GmSpring<float> dynaPartSprings[4]{};
+    CSceneVehicleCar::SForceAccumulators forceAccumulators{};
+};
+
+#if defined(__HIPCC__)
+namespace hip::facts {
+
+__device__ inline std::uint32_t WheelCount(
+        const HipVehicleState &vehicle) {
+#if defined(FOREVERVALIDATOR_HIP_RESEARCH_FOUR_WHEELS)
+    return 4u;
+#else
+    return vehicle.wheels.count;
+#endif
+}
+
+}  // namespace hip::facts
+#endif
+
+struct HipWheelPassthroughState {
+    CSceneVehicleCar::SSimulationWheel::SState previousAsync{};
+    CSceneVehicleCar::SSimulationWheel::SState currentAsync{};
+};
+
+struct HipVehiclePassthroughState {
+    bool updateAsync = true;
+    bool networked = false;
+    std::uint32_t predictionDelayTicks = 0u;
+    HipOptional<CSceneVehicle::SStateSampleWindow> stateSampleWindow{};
+    float asyncPeriodSeconds = 0.0f;
+    HipVehicleCarFrameState asyncCurrent{};
+    HipVehicleCarFrameState asyncPrevious{};
+    HipWheelPassthroughState wheels[4]{};
+};
+
+struct HipDynamicBodyState {
+    HipOptional<float> maxAngularSpeed{};
+    CHmsDynaParams parameters{};
+    CPlugPhysicalParameters physicalParameters{};
+    GmIso4 corpusLocalIso{};
+    CHmsDyna::CHmsStateDyna temporary{};
+    CHmsDyna::CHmsStateDyna write{};
+    CHmsDyna::CHmsStateDyna current{};
+    HipFixedArray<
+            GmVec3,
+            HipCollisionReplacementInlineCapacity>
+            collisionReplacements{};
+    bool dynamicActive = false;
+    std::uint32_t dynamicType = 0u;
+};
+
+struct HipRacePhysicsState {
+    CTrackManiaPlayer::RuntimeClone player{};
+    HipCheckpointSlots checkpointSlotsPassed{};
+    HipOptional<GmIso4> playerSpawnLocation{};
+    HipOptional<GmIso4> lastAcceptedSpawnLocation{};
+    bool currentSpawnLocationInitialized = false;
+    std::uint32_t preparedEventTimeMs = 0u;
+    std::uint32_t replayPlayMode = 0u;
+    std::uint32_t replayNbLaps = 1u;
+    ReplayRaceProgress progress{};
+};
+
+struct HipStuntState {
+    bool replayStuntsEnabled = false;
+    bool replayStuntStateAvailable = false;
+    std::uint32_t replayStuntsTimeLimitMs = 0u;
+    std::uint32_t replayStuntsRaceStartTimeMs = 0u;
+    ReplayStuntSimulationState replayStuntState{};
+    CTrackManiaRace::ReplayStuntInputSnapshot stuntInputHistory[32]{};
+    std::uint32_t stuntInputHistorySize = 0u;
+    GmIso4 stuntLocationHistory[20]{};
+    std::uint32_t stuntLocationHistorySize = 0u;
+    GmIso4 stuntPreviousLocation{};
+    GmIso4 stuntTakeoffLocation{};
+    GmVec3 stuntRotation{};
+    float stuntLandingDirection = 0.0f;
+    std::uint32_t stuntTakeoffTick = UINT32_MAX;
+    std::uint32_t stuntLandingTick = UINT32_MAX;
+    std::uint32_t stuntPreviousLandingTick = UINT32_MAX;
+    std::uint32_t stuntChain = 0u;
+    std::uint32_t stuntComboWindowMs = 0u;
+    bool stuntInProgress = false;
+    bool stuntMasterJump = false;
+    bool stuntBadLanding = false;
+    HipOptional<std::uint32_t> stuntScoreAtTimeLimit{};
+    std::uint32_t stuntFigureScores[39]{};
+    std::uint32_t stuntsScore = 0u;
+};
+
+struct HipRaceState : HipRacePhysicsState {
+    HipStuntState stunts{};
+    HipFixedArray<ReplayStuntEvent, 2048u> stuntEvents{};
+};
+
+struct HipCandidatePhysicsState {
+    static constexpr std::uint32_t SchemaVersion = 11u;
+
+    std::uint32_t schemaVersion = SchemaVersion;
+    std::uint32_t candidateId = 0u;
+    std::uint32_t validationSeed = 0u;
+    std::uint32_t randomState = 1u;
+    std::uint64_t controlCursor = 0u;
+    ReplayPhysicsWorld::RuntimeClone world{};
+    HipDynamicBodyState body{};
+    HipVehicleState vehicle{};
+    HipRacePhysicsState race{};
+    std::uint32_t incrementalRespawnCount = 0u;
+    HipOptional<forevervalidator::FinishTimeEstimate> finishTime{};
+    bool firstStep = true;
+    bool stuntsEnabled = false;
+    std::uint8_t reserved[5]{};
+};
+
+struct HipCandidateState : HipCandidatePhysicsState {
+    HipVehiclePassthroughState vehiclePassthrough{};
+    HipStuntState stunts{};
+    HipFixedArray<ReplayStuntEvent, 2048u> stuntEvents{};
+    HipFixedArray<
+            GmVec3,
+            HipCollisionReplacementOverflowCapacity>
+            collisionReplacementOverflow{};
+};
+
+static_assert(std::is_standard_layout_v<HipCandidatePhysicsState>);
+static_assert(std::is_trivially_copyable_v<HipCandidatePhysicsState>);
+static_assert(sizeof(HipCandidatePhysicsState) < 8u * 1024u);
+static_assert(std::is_trivially_copyable_v<HipCandidateState>);
+static_assert(sizeof(HipCandidateState) < 192u * 1024u);
+
+HipStateConversionResult EncodeHipCandidateState(
+        const ReplaySimulationInstanceClone &source,
+        std::uint32_t validationSeed,
+        std::uint64_t controlCursor,
+        std::uint32_t candidateId,
+        std::uint32_t randomState,
+        HipCandidateState *destination) noexcept;
+
+HipStateConversionResult EncodeHipRaceState(
+        const CTrackManiaRace::RuntimeClone &source,
+        HipRaceState *destination) noexcept;
+
+HipStateConversionResult DecodeHipRaceState(
+        const HipRaceState &source,
+        CTrackManiaRace::RuntimeClone *destination) noexcept;
+
+HipStateConversionResult DecodeHipCandidateState(
+        const HipCandidateState &source,
+        ReplaySimulationInstanceClone *destination) noexcept;
+
+}  // namespace forevervalidator::simulation
+
+#endif

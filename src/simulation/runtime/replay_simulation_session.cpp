@@ -35,6 +35,15 @@
 #include "simulation/backends/cuda/cuda_vehicle_prefix_certification.h"
 #include "simulation/backends/cuda/cuda_vehicle_force_certification.h"
 #include "simulation/backends/cuda/cuda_timeline_executor.h"
+#if FOREVERVALIDATOR_HAS_HIP
+#include "simulation/backends/hip/generated/hip_backend.h"
+#include "simulation/backends/hip/generated/hip_scene_layout.h"
+#include "simulation/backends/hip/generated/hip_scene_storage.h"
+#include "simulation/backends/hip/generated/hip_static_configuration.h"
+#include "simulation/backends/hip/generated/hip_static_configuration_storage.h"
+#include "simulation/backends/hip/generated/hip_timeline_executor.h"
+#include "simulation/backends/hip/hip_state_bridge.h"
+#endif
 #include "simulation/backends/vulkan/vulkan_compute_runtime.h"
 #include "simulation/backends/vulkan/vulkan_scene_storage.h"
 #include "simulation/backends/vulkan/vulkan_search_executor.h"
@@ -884,6 +893,12 @@ struct ReplaySimulationSession::Impl {
     sandbox::PhysicsSandboxRenderSceneHandle staticRenderScene;
     forevervalidator::simulation::CudaHostScene cudaHostScene;
     forevervalidator::simulation::CudaDeviceScene cudaDeviceScene;
+#if FOREVERVALIDATOR_HAS_HIP
+    forevervalidator::simulation::HipHostScene hipHostScene;
+    forevervalidator::simulation::HipDeviceScene hipDeviceScene;
+    std::optional<forevervalidator::simulation::HipSceneTransferMetrics>
+            hipSceneTransfer;
+#endif
     std::optional<
             forevervalidator::simulation::CudaSceneTransferMetrics>
             cudaSceneTransfer;
@@ -894,6 +909,15 @@ struct ReplaySimulationSession::Impl {
             cudaHostConfiguration;
     forevervalidator::simulation::CudaDeviceStaticConfiguration
             cudaDeviceConfiguration;
+#if FOREVERVALIDATOR_HAS_HIP
+    forevervalidator::simulation::HipHostStaticConfiguration
+            hipHostConfiguration;
+    forevervalidator::simulation::HipDeviceStaticConfiguration
+            hipDeviceConfiguration;
+    std::optional<forevervalidator::simulation::
+                          HipStaticConfigurationTransferMetrics>
+            hipConfigurationTransfer;
+#endif
     std::optional<forevervalidator::simulation::
                           CudaStaticConfigurationTransferMetrics>
             cudaConfigurationTransfer;
@@ -916,6 +940,55 @@ struct ReplaySimulationSession::Impl {
 
     ReplaySimulationRunResult PrepareCudaConfiguration(
             const ReplaySimulationDefinition &definition) {
+#if FOREVERVALIDATOR_HAS_HIP
+        if (backend == forevervalidator::SimulationBackend::Hip) {
+            const auto diagnostics = forevervalidator::simulation::
+                    QueryHipRuntimeDiagnostics();
+            if (!diagnostics.IsReady()) {
+                cudaInitializationDiagnostic = diagnostics.diagnostic;
+                return ReplaySimulationRunResult::CudaUnavailable;
+            }
+            if (!hipSceneTransfer.has_value() ||
+                !hipSceneTransfer->success || !hipDeviceScene.Ready()) {
+                cudaInitializationDiagnostic = hipSceneTransfer
+                        ? hipSceneTransfer->diagnostic
+                        : "HIP immutable scene was not uploaded";
+                return ReplaySimulationRunResult::CudaInitializationFailed;
+            }
+            forevervalidator::simulation::HipHostStaticConfiguration built;
+            const auto buildResult = forevervalidator::simulation::
+                    BuildHipHostStaticConfiguration(definition, &built);
+            if (buildResult != forevervalidator::simulation::
+                                       HipStaticConfigurationBuildResult::Success) {
+                cudaInitializationDiagnostic =
+                        "HIP vehicle/environment flattening failed";
+                return ReplaySimulationRunResult::CudaInitializationFailed;
+            }
+            if (hipDeviceConfiguration.Ready() &&
+                hipDeviceConfiguration.ConfigurationHash() ==
+                        built.deterministicHash) {
+                hipHostConfiguration = std::move(built);
+                return ReplaySimulationRunResult::Success;
+            }
+            hipConfigurationTransfer = hipDeviceConfiguration.Upload(built);
+            if (!hipConfigurationTransfer->success) {
+                cudaInitializationDiagnostic =
+                        hipConfigurationTransfer->diagnostic;
+                hipHostConfiguration.Clear();
+                return ReplaySimulationRunResult::CudaInitializationFailed;
+            }
+            hipHostConfiguration = std::move(built);
+            cudaInitializationDiagnostic =
+                    "HIP immutable scene and configuration are ready";
+            return ReplaySimulationRunResult::Success;
+        }
+#else
+        if (backend == forevervalidator::SimulationBackend::Hip) {
+            cudaInitializationDiagnostic =
+                    "HIP support is not compiled into this build";
+            return ReplaySimulationRunResult::CudaUnavailable;
+        }
+#endif
         const bool useCuda =
                 backend == forevervalidator::SimulationBackend::Cuda;
         const bool useVulkan =
@@ -1009,8 +1082,21 @@ struct ReplaySimulationSession::Impl {
         ReplaySimulationTimelineResult result;
         const bool useVulkan =
                 backend == forevervalidator::SimulationBackend::Vulkan;
+#if FOREVERVALIDATOR_HAS_HIP
+        const bool useHip =
+                backend == forevervalidator::SimulationBackend::Hip;
+#else
+        const bool useHip = false;
+#endif
         if (!instance.runtime ||
-            (useVulkan
+            (useHip
+#if FOREVERVALIDATOR_HAS_HIP
+             ? (!hipDeviceScene.Ready() ||
+                !hipDeviceConfiguration.Ready())
+#else
+             ? true
+#endif
+             : useVulkan
              ? (!vulkanDeviceScene.Ready() ||
                 !vulkanDeviceConfiguration.Ready())
              : (!cudaDeviceScene.Ready() ||
@@ -1068,7 +1154,26 @@ struct ReplaySimulationSession::Impl {
         }
 
         forevervalidator::simulation::CudaTimelineBatchResult executed;
-        if (useVulkan) {
+        if (useHip) {
+#if FOREVERVALIDATOR_HAS_HIP
+            forevervalidator::simulation::HipCandidateTimelineInput hipInput;
+            hipInput.initialState = forevervalidator::simulation::hip_bridge::
+                    BitCopy<forevervalidator::simulation::HipCandidateState>(
+                            input.initialState);
+            hipInput.ticks.reserve(input.ticks.size());
+            for (const auto &tick : input.ticks) {
+                hipInput.ticks.push_back(
+                        forevervalidator::simulation::hip_bridge::
+                                BitCopy<forevervalidator::simulation::
+                                                HipControlTick>(tick));
+            }
+            executed = forevervalidator::simulation::hip_bridge::ToCudaResult(
+                    forevervalidator::simulation::ExecuteHipTimelineBatch(
+                            hipDeviceScene.DeviceData(),
+                            hipDeviceConfiguration.DeviceData(),
+                            {std::move(hipInput)}));
+#endif
+        } else if (useVulkan) {
             executed = forevervalidator::simulation::
                     ExecuteVulkanTimelineBatch(
                             vulkanDeviceScene,
@@ -1210,6 +1315,14 @@ void ReplaySimulationSession::Reset() {
     impl->cudaSearchSpecializationDiagnostic.clear();
     impl->cudaSearchSpecializationAttempted = false;
     impl->cudaHostScene.Clear();
+#if FOREVERVALIDATOR_HAS_HIP
+    impl->hipHostScene.Clear();
+    impl->hipDeviceScene.Reset();
+    impl->hipSceneTransfer.reset();
+    impl->hipHostConfiguration.Clear();
+    impl->hipDeviceConfiguration.Reset();
+    impl->hipConfigurationTransfer.reset();
+#endif
     impl->cudaDeviceScene.Reset();
     impl->cudaSceneTransfer.reset();
     impl->vulkanDeviceScene.Reset();
@@ -1237,7 +1350,8 @@ bool ReplaySimulationSession::InstallStaticScene(
             BuildStaticRenderScene(models);
     forevervalidator::simulation::CudaHostScene cudaScene;
     if (impl->backend == forevervalidator::SimulationBackend::Cuda ||
-        impl->backend == forevervalidator::SimulationBackend::Vulkan) {
+        impl->backend == forevervalidator::SimulationBackend::Vulkan ||
+        impl->backend == forevervalidator::SimulationBackend::Hip) {
         const auto cudaBuild =
                 forevervalidator::simulation::BuildCudaHostScene(
                         models, &cudaScene);
@@ -1250,6 +1364,19 @@ bool ReplaySimulationSession::InstallStaticScene(
             return false;
         }
     }
+#if FOREVERVALIDATOR_HAS_HIP
+    forevervalidator::simulation::HipHostScene hipScene;
+    if (impl->backend == forevervalidator::SimulationBackend::Hip) {
+        const auto hipBuild = forevervalidator::simulation::
+                BuildHipHostScene(models, &hipScene);
+        if (hipBuild != forevervalidator::simulation::
+                                HipSceneBuildResult::Success) {
+            impl->cudaInitializationDiagnostic =
+                    "HIP scene flattening failed";
+            return false;
+        }
+    }
+#endif
     if (!renderScene ||
         !BuildStaticCollisionTriangles(models, triangles) ||
         impl->mapScene.InstallModels(std::move(models)) !=
@@ -1266,6 +1393,9 @@ bool ReplaySimulationSession::InstallStaticScene(
     }
     impl->staticRenderScene = std::move(renderScene);
     impl->cudaHostScene = std::move(cudaScene);
+#if FOREVERVALIDATOR_HAS_HIP
+    impl->hipHostScene = std::move(hipScene);
+#endif
     return true;
 }
 
@@ -1276,6 +1406,13 @@ void ReplaySimulationSession::ActivateStaticScene() {
                 impl->cudaDeviceScene.Upload(impl->cudaHostScene);
         impl->cudaInitializationDiagnostic =
                 impl->cudaSceneTransfer->diagnostic;
+#if FOREVERVALIDATOR_HAS_HIP
+    } else if (impl->backend == forevervalidator::SimulationBackend::Hip) {
+        impl->hipSceneTransfer =
+                impl->hipDeviceScene.Upload(impl->hipHostScene);
+        impl->cudaInitializationDiagnostic =
+                impl->hipSceneTransfer->diagnostic;
+#endif
     } else if (impl->backend ==
                forevervalidator::SimulationBackend::Vulkan) {
         impl->vulkanSceneTransfer =
@@ -1369,7 +1506,8 @@ ReplaySimulationTimelineResult ReplaySimulationSession::SimulateTimeline(
     }
 
     if (impl->backend == forevervalidator::SimulationBackend::Cuda ||
-        impl->backend == forevervalidator::SimulationBackend::Vulkan) {
+        impl->backend == forevervalidator::SimulationBackend::Vulkan ||
+        impl->backend == forevervalidator::SimulationBackend::Hip) {
         return impl->ExecuteCudaTimeline(
                 controlTicks, validationSeed, 0u);
     } else if (impl->backend ==
@@ -1572,6 +1710,7 @@ ReplaySimulationTimelineResult ReplaySimulationSession::AdvanceIncremental(
             }
         }
     } else if (impl->backend == forevervalidator::SimulationBackend::Cuda ||
+               impl->backend == forevervalidator::SimulationBackend::Hip ||
                impl->backend == forevervalidator::SimulationBackend::Vulkan) {
         std::vector<ReplayControlTick> cudaTicks;
         try {
@@ -1894,6 +2033,44 @@ ReplaySimulationSession::CreateCudaSearchExecutor(
             configuration, diagnostic);
 #endif
 }
+
+#if FOREVERVALIDATOR_HAS_HIP
+std::unique_ptr<forevervalidator::simulation::HipSearchExecutor>
+ReplaySimulationSession::CreateHipSearchExecutor(
+        forevervalidator::simulation::CudaSearchExecutorConfiguration
+                configuration,
+        std::uint64_t initialControlCursor,
+        std::string *diagnostic) const {
+    if (impl->backend != forevervalidator::SimulationBackend::Hip ||
+        !impl->instance.runtime || !impl->hipDeviceScene.Ready() ||
+        !impl->hipDeviceConfiguration.Ready()) {
+        if (diagnostic != nullptr) {
+            *diagnostic = "HIP search prerequisites are not ready";
+        }
+        return {};
+    }
+    const auto initial = CaptureRuntimeClone();
+    if (!initial || forevervalidator::simulation::EncodeCudaCandidateState(
+                            *initial, impl->incrementalValidationSeed,
+                            initialControlCursor, 0u, initial->randomState,
+                            &configuration.branchState) !=
+                            forevervalidator::simulation::
+                                    CudaStateConversionResult::Success) {
+        if (diagnostic != nullptr) {
+            *diagnostic = "HIP search branch state capture failed";
+        }
+        return {};
+    }
+    auto hipConfiguration =
+            forevervalidator::simulation::hip_bridge::ToHipConfiguration(
+                    configuration);
+    hipConfiguration.deviceScene = impl->hipDeviceScene.DeviceData();
+    hipConfiguration.deviceStaticConfiguration =
+            impl->hipDeviceConfiguration.DeviceData();
+    return forevervalidator::simulation::HipSearchExecutor::Create(
+            hipConfiguration, diagnostic);
+}
+#endif
 
 std::unique_ptr<forevervalidator::simulation::VulkanSearchExecutor>
 ReplaySimulationSession::CreateVulkanSearchExecutor(

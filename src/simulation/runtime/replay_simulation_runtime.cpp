@@ -333,6 +333,7 @@ struct ReplaySimulationRuntime::State : CHmsCollisionSubstepObserver {
                 backend == forevervalidator::SimulationBackend::Reference ||
                 backend == forevervalidator::SimulationBackend::OptimizedCpu ||
                 backend == forevervalidator::SimulationBackend::Cuda ||
+                backend == forevervalidator::SimulationBackend::Hip ||
                 backend == forevervalidator::SimulationBackend::Vulkan);
     }
 
@@ -493,6 +494,7 @@ ReplaySimulationStepExecution ReplaySimulationRuntime::Step(
     State &state = *state_;
     ReplaySimulationStepExecution execution;
     if (state.backend == forevervalidator::SimulationBackend::Cuda ||
+        state.backend == forevervalidator::SimulationBackend::Hip ||
         state.backend == forevervalidator::SimulationBackend::Vulkan) {
         execution.result =
                 ReplaySimulationRunResult::CudaExecutionFailed;

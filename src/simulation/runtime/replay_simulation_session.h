@@ -20,6 +20,9 @@
 #include "simulation/backends/cuda/cuda_static_configuration_storage.h"
 #include "simulation/backends/cuda/cuda_timeline_executor.h"
 #include "simulation/backends/cuda/cuda_search_executor.h"
+#if FOREVERVALIDATOR_HAS_HIP
+#include "simulation/backends/hip/generated/hip_search_executor.h"
+#endif
 #include "simulation/backends/vulkan/vulkan_search_executor.h"
 #include "engine/scene/static_scene_model.h"
 #include "engine/game/trackmania_race.h"
@@ -192,6 +195,14 @@ public:
                             CudaSearchExecutorConfiguration configuration,
                     std::uint64_t initialControlCursor,
                     std::string *diagnostic) const;
+#if FOREVERVALIDATOR_HAS_HIP
+    std::unique_ptr<forevervalidator::simulation::HipSearchExecutor>
+            CreateHipSearchExecutor(
+                    forevervalidator::simulation::
+                            CudaSearchExecutorConfiguration configuration,
+                    std::uint64_t initialControlCursor,
+                    std::string *diagnostic) const;
+#endif
     std::unique_ptr<forevervalidator::simulation::VulkanSearchExecutor>
             CreateVulkanSearchExecutor(
                     forevervalidator::simulation::

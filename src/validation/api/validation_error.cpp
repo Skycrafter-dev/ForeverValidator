@@ -44,6 +44,11 @@ const char *ValidationErrorCodeName(ValidationErrorCode code) noexcept {
         return "cuda_initialization_failed";
     case ValidationErrorCode::CudaExecutionFailed:
         return "cuda_execution_failed";
+    case ValidationErrorCode::HipUnavailable: return "hip_unavailable";
+    case ValidationErrorCode::HipInitializationFailed:
+        return "hip_initialization_failed";
+    case ValidationErrorCode::HipExecutionFailed:
+        return "hip_execution_failed";
     }
     return "unexpected_failure";
 }
@@ -178,6 +183,14 @@ const char *ValidationFailureReasonName(
     REASON_NAME(CudaExecutionFailed, "cuda_execution_failed");
     REASON_NAME(CudaUnsupportedSimulationScope,
                 "cuda_unsupported_simulation_scope");
+    REASON_NAME(HipNotCompiled, "hip_not_compiled");
+    REASON_NAME(HipRuntimeUnavailable, "hip_runtime_unavailable");
+    REASON_NAME(HipDeviceUnavailable, "hip_device_unavailable");
+    REASON_NAME(HipDeviceUnsupported, "hip_device_unsupported");
+    REASON_NAME(HipInitializationFailed, "hip_initialization_failed");
+    REASON_NAME(HipExecutionFailed, "hip_execution_failed");
+    REASON_NAME(HipUnsupportedSimulationScope,
+                "hip_unsupported_simulation_scope");
     REASON_NAME(SerializationFailed, "serialization_failed");
     REASON_NAME(UnexpectedFailure, "unexpected_failure");
     }
@@ -330,6 +343,9 @@ int ValidationErrorExitCode(const ValidationError &error) noexcept {
     case ValidationErrorCode::CudaUnavailable: return 69;
     case ValidationErrorCode::CudaInitializationFailed: return 70;
     case ValidationErrorCode::CudaExecutionFailed: return 71;
+    case ValidationErrorCode::HipUnavailable: return 69;
+    case ValidationErrorCode::HipInitializationFailed: return 70;
+    case ValidationErrorCode::HipExecutionFailed: return 71;
     case ValidationErrorCode::SerializationFailed: return 22;
     case ValidationErrorCode::AllocationFailed:
         return error.stage == ValidationStage::Serialization ? 22 : 5;

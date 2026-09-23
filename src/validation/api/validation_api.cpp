@@ -23,6 +23,9 @@
 #include "simulation/runtime/replay_simulation_definition.h"
 #include "simulation/runtime/replay_simulation_session.h"
 #include "simulation/backends/simulation_backend.h"
+#if FOREVERVALIDATOR_HAS_HIP
+#include "simulation/backends/hip/hip_state_bridge.h"
+#endif
 #include "simulation/control/replay_control_plan.h"
 #include "validation/evaluation/replay_validation_session.h"
 #include "validation/api/physics_sandbox_static_scene_test_access.h"
@@ -141,14 +144,19 @@ bool IsCudaSupportedRoute(const ReplayAssetRoute &route) noexcept {
 
 ValidationError CudaScopeError(
         const ReplayAssetRoute &route,
-        const ReplayIdentity &identity) {
+        const ReplayIdentity &identity,
+        SimulationBackend backend) {
+    const bool hip = backend == SimulationBackend::Hip;
     ValidationError error = MakeError(
             ValidationErrorCategory::Simulation,
-            ValidationErrorCode::CudaUnavailable,
+            hip ? ValidationErrorCode::HipUnavailable
+                : ValidationErrorCode::CudaUnavailable,
             ValidationStage::SimulationStartup,
-            ValidationFailureReason::CudaUnsupportedSimulationScope,
+            hip ? ValidationFailureReason::HipUnsupportedSimulationScope
+                : ValidationFailureReason::CudaUnsupportedSimulationScope,
             identity,
-            "CUDA supports only certified map and vehicle combinations");
+            hip ? "HIP supports only certified map and vehicle combinations"
+                : "CUDA supports only certified map and vehicle combinations");
     error.relatedAsset =
             std::string(ReplayMapEnvironmentName(route.mapEnvironment)) +
             "/" + ReplayVehicleModelName(route.vehicleModel);
@@ -545,7 +553,8 @@ ValidationError DefinitionError(
 }
 
 ValidationFailureReason ExecutionReason(
-        ReplayValidationExecutionResult result) {
+        ReplayValidationExecutionResult result,
+        SimulationBackend backend) {
     switch (result) {
     case ReplayValidationExecutionResult::Success:
         return ValidationFailureReason::None;
@@ -580,6 +589,22 @@ ValidationFailureReason ExecutionReason(
     case ReplayValidationExecutionResult::DeterministicExecutionUnavailable:
         return ValidationFailureReason::DeterministicExecutionUnavailable;
     case ReplayValidationExecutionResult::CudaUnavailable: {
+        if (backend == SimulationBackend::Hip) {
+            const auto diagnostics = QueryHipBackendDiagnostics();
+            switch (diagnostics.status) {
+            case HipBackendStatus::NotCompiled:
+                return ValidationFailureReason::HipNotCompiled;
+            case HipBackendStatus::RuntimeUnavailable:
+                return ValidationFailureReason::HipRuntimeUnavailable;
+            case HipBackendStatus::NoDevice:
+                return ValidationFailureReason::HipDeviceUnavailable;
+            case HipBackendStatus::UnsupportedDevice:
+                return ValidationFailureReason::HipDeviceUnsupported;
+            case HipBackendStatus::InitializationFailed:
+            case HipBackendStatus::Ready:
+                return ValidationFailureReason::HipInitializationFailed;
+            }
+        }
         const CudaBackendDiagnostics diagnostics =
                 QueryCudaBackendDiagnostics();
         switch (diagnostics.status) {
@@ -598,16 +623,22 @@ ValidationFailureReason ExecutionReason(
         return ValidationFailureReason::CudaInitializationFailed;
     }
     case ReplayValidationExecutionResult::CudaInitializationFailed:
-        return ValidationFailureReason::CudaInitializationFailed;
+        return backend == SimulationBackend::Hip
+                ? ValidationFailureReason::HipInitializationFailed
+                : ValidationFailureReason::CudaInitializationFailed;
     case ReplayValidationExecutionResult::CudaExecutionFailed:
-        return ValidationFailureReason::CudaExecutionFailed;
+        return backend == SimulationBackend::Hip
+                ? ValidationFailureReason::HipExecutionFailed
+                : ValidationFailureReason::CudaExecutionFailed;
     }
     return ValidationFailureReason::UnexpectedFailure;
 }
 
 ValidationError ExecutionError(
         ReplayValidationExecutionResult result,
-        const ReplayIdentity &identity) {
+        const ReplayIdentity &identity,
+        SimulationBackend backend) {
+    const bool hip = backend == SimulationBackend::Hip;
     ValidationErrorCategory category = ValidationErrorCategory::Simulation;
     ValidationErrorCode code = ValidationErrorCode::SimulationFailed;
     ValidationStage stage = ValidationStage::SimulationStep;
@@ -633,19 +664,26 @@ ValidationError ExecutionError(
         diagnostic = "deterministic execution mode unavailable";
         break;
     case ReplayValidationExecutionResult::CudaUnavailable:
-        code = ValidationErrorCode::CudaUnavailable;
+        code = hip ? ValidationErrorCode::HipUnavailable
+                   : ValidationErrorCode::CudaUnavailable;
         stage = ValidationStage::SimulationStartup;
-        diagnostic = "CUDA backend unavailable";
+        diagnostic = hip ? "HIP backend unavailable"
+                         : "CUDA backend unavailable";
         break;
     case ReplayValidationExecutionResult::CudaInitializationFailed:
-        code = ValidationErrorCode::CudaInitializationFailed;
+        code = hip ? ValidationErrorCode::HipInitializationFailed
+                   : ValidationErrorCode::CudaInitializationFailed;
         stage = ValidationStage::SimulationStartup;
-        diagnostic = "CUDA backend initialization or certification failed";
+        diagnostic = hip
+                ? "HIP backend initialization or certification failed"
+                : "CUDA backend initialization or certification failed";
         break;
     case ReplayValidationExecutionResult::CudaExecutionFailed:
-        code = ValidationErrorCode::CudaExecutionFailed;
+        code = hip ? ValidationErrorCode::HipExecutionFailed
+                   : ValidationErrorCode::CudaExecutionFailed;
         stage = ValidationStage::SimulationStep;
-        diagnostic = "CUDA backend execution failed";
+        diagnostic = hip ? "HIP backend execution failed"
+                         : "CUDA backend execution failed";
         break;
     case ReplayValidationExecutionResult::Success:
     case ReplayValidationExecutionResult::MissingInput:
@@ -660,13 +698,16 @@ ValidationError ExecutionError(
         break;
     }
     ValidationError error = MakeError(
-            category, code, stage, ExecutionReason(result), identity, diagnostic);
+            category, code, stage, ExecutionReason(result, backend),
+            identity, diagnostic);
     if (result == ReplayValidationExecutionResult::CudaUnavailable ||
         result == ReplayValidationExecutionResult::CudaInitializationFailed ||
         result == ReplayValidationExecutionResult::CudaExecutionFailed) {
-        const CudaBackendDiagnostics cuda = QueryCudaBackendDiagnostics();
-        if (!cuda.diagnostic.empty()) {
-            error.diagnostic = cuda.diagnostic;
+        const std::string runtimeDiagnostic = hip
+                ? QueryHipBackendDiagnostics().diagnostic
+                : QueryCudaBackendDiagnostics().diagnostic;
+        if (!runtimeDiagnostic.empty()) {
+            error.diagnostic = runtimeDiagnostic;
         }
     }
     return error;
@@ -1029,10 +1070,11 @@ Result<ValidationReport> RunReplayValidation(
         return Result<ValidationReport>::Failure(
                 ReplayRouteError(routeResult, identity, replayFile));
     }
-    if (options.backend == SimulationBackend::Cuda &&
+    if ((options.backend == SimulationBackend::Cuda ||
+         options.backend == SimulationBackend::Hip) &&
         !IsCudaSupportedRoute(route)) {
         return Result<ValidationReport>::Failure(
-                CudaScopeError(route, identity));
+                CudaScopeError(route, identity, options.backend));
     }
 
     const ReplayValidationConfiguration configuration{
@@ -1073,6 +1115,7 @@ Result<ValidationReport> RunReplayValidation(
     if (preloadResult != ReplayChallengePreloadResult::Success) {
         ValidationError error = PreloadError(preloadResult, identity);
         if ((options.backend == SimulationBackend::Cuda ||
+             options.backend == SimulationBackend::Hip ||
              options.backend == SimulationBackend::Vulkan) &&
             !simulationSession.CudaInitializationDiagnostic().empty()) {
             error.diagnostic =
@@ -1101,8 +1144,10 @@ Result<ValidationReport> RunReplayValidation(
             configuration);
     if (!validation) {
         ValidationError error =
-                ExecutionError(validation.Error(), identity);
+                ExecutionError(validation.Error(), identity,
+                               options.backend);
         if ((options.backend == SimulationBackend::Cuda ||
+             options.backend == SimulationBackend::Hip ||
              options.backend == SimulationBackend::Vulkan) &&
             !simulationSession.CudaInitializationDiagnostic().empty()) {
             error.diagnostic =
@@ -1755,6 +1800,9 @@ struct PhysicsSandbox::Impl {
 struct PhysicsSandboxCudaSearchSession::Impl {
     std::unique_ptr<simulation::CudaSearchExecutor> executor;
     std::unique_ptr<simulation::VulkanSearchExecutor> vulkanExecutor;
+#if FOREVERVALIDATOR_HAS_HIP
+    std::unique_ptr<simulation::HipSearchExecutor> hipExecutor;
+#endif
     std::shared_ptr<const SandboxInputStorage> inputs;
     std::vector<PhysicsSandboxInputEvent> lateInputs;
     std::shared_ptr<const SandboxControlPlanStorage> controlPlan;
@@ -1772,11 +1820,21 @@ struct PhysicsSandboxCudaSearchSession::Impl {
     SimulationBackend backend = SimulationBackend::Cuda;
 
     bool HasExecutor() const noexcept {
-        return executor != nullptr || vulkanExecutor != nullptr;
+        return executor != nullptr || vulkanExecutor != nullptr
+#if FOREVERVALIDATOR_HAS_HIP
+                || hipExecutor != nullptr
+#endif
+                ;
     }
 
     simulation::CudaSearchBatchExecution EvaluateBaseline(
             const std::function<bool()> &cancellationRequested) {
+#if FOREVERVALIDATOR_HAS_HIP
+        if (hipExecutor) {
+            return simulation::hip_bridge::ToCudaResult(
+                    hipExecutor->EvaluateBaseline(cancellationRequested));
+        }
+#endif
         return vulkanExecutor
                 ? vulkanExecutor->EvaluateBaseline(cancellationRequested)
                 : executor->EvaluateBaseline(cancellationRequested);
@@ -1786,6 +1844,14 @@ struct PhysicsSandboxCudaSearchSession::Impl {
             std::uint64_t firstCandidateId,
             std::uint32_t candidateCount,
             const std::function<bool()> &cancellationRequested) {
+#if FOREVERVALIDATOR_HAS_HIP
+        if (hipExecutor) {
+            return simulation::hip_bridge::ToCudaResult(
+                    hipExecutor->RunBatch(
+                            firstCandidateId, candidateCount,
+                            cancellationRequested));
+        }
+#endif
         return vulkanExecutor
                 ? vulkanExecutor->RunBatch(
                           firstCandidateId, candidateCount,
@@ -1798,6 +1864,12 @@ struct PhysicsSandboxCudaSearchSession::Impl {
     bool ReserveBatchCapacity(
             std::uint32_t candidateCount,
             std::string *diagnostic) {
+#if FOREVERVALIDATOR_HAS_HIP
+        if (hipExecutor) {
+            return hipExecutor->ReserveBatchCapacity(
+                    candidateCount, diagnostic);
+        }
+#endif
         return vulkanExecutor
                 ? vulkanExecutor->ReserveBatchCapacity(
                           candidateCount, diagnostic)
@@ -1806,6 +1878,11 @@ struct PhysicsSandboxCudaSearchSession::Impl {
     }
 
     std::uint32_t BatchCapacity() const noexcept {
+#if FOREVERVALIDATOR_HAS_HIP
+        if (hipExecutor) {
+            return hipExecutor->BatchCapacity();
+        }
+#endif
         return vulkanExecutor
                 ? vulkanExecutor->BatchCapacity()
                 : executor->BatchCapacity();
@@ -1814,6 +1891,13 @@ struct PhysicsSandboxCudaSearchSession::Impl {
     bool UpdateConditionTimes(
             double lastImprovementTimeSeconds,
             double lastRestartTimeSeconds) noexcept {
+#if FOREVERVALIDATOR_HAS_HIP
+        if (hipExecutor) {
+            return hipExecutor->UpdateConditionTimes(
+                    lastImprovementTimeSeconds,
+                    lastRestartTimeSeconds);
+        }
+#endif
         return vulkanExecutor
                 ? vulkanExecutor->UpdateConditionTimes(
                           lastImprovementTimeSeconds,
@@ -2204,13 +2288,15 @@ PhysicsSandboxResult<PhysicsSandboxStateView> PhysicsSandbox::LoadScenarioFile(
                             "sandbox scenario route is unsupported",
                             ReplayRouteError(routeResult, identity, replay)));
         }
-        if (impl_->options.backend == SimulationBackend::Cuda &&
+        if ((impl_->options.backend == SimulationBackend::Cuda ||
+             impl_->options.backend == SimulationBackend::Hip) &&
             !IsCudaSupportedRoute(route)) {
             return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
                     SandboxError(
                             PhysicsSandboxErrorCode::SimulationFailed,
                             "CUDA simulation scope is unsupported",
-                            CudaScopeError(route, identity)));
+                            CudaScopeError(route, identity,
+                                           impl_->options.backend)));
         }
         Result<PreparedAssets> prepared = PrepareAssets(
                 impl_->validationState, route, identity);
@@ -2233,6 +2319,7 @@ PhysicsSandboxResult<PhysicsSandboxStateView> PhysicsSandbox::LoadScenarioFile(
         if (preloadResult != ReplayChallengePreloadResult::Success) {
             ValidationError error = PreloadError(preloadResult, identity);
             if ((impl_->options.backend == SimulationBackend::Cuda ||
+                 impl_->options.backend == SimulationBackend::Hip ||
                  impl_->options.backend == SimulationBackend::Vulkan) &&
                 !session->CudaInitializationDiagnostic().empty()) {
                 error.diagnostic =
@@ -3399,6 +3486,7 @@ CreatePhysicsSandboxCudaSearchSession(
         if (!sandbox.impl_ || !sandbox.impl_->loaded ||
             !sandbox.impl_->session ||
             (sandbox.impl_->options.backend != SimulationBackend::Cuda &&
+             sandbox.impl_->options.backend != SimulationBackend::Hip &&
              sandbox.impl_->options.backend != SimulationBackend::Vulkan) ||
             configuration.maximumBatchSize == 0u ||
             configuration.modifiers.empty()) {
@@ -3411,6 +3499,8 @@ CreatePhysicsSandboxCudaSearchSession(
         const PhysicsSandbox::Impl &source = *sandbox.impl_;
         const bool useVulkan =
                 source.options.backend == SimulationBackend::Vulkan;
+        const bool useHip =
+                source.options.backend == SimulationBackend::Hip;
         const std::uint32_t tickDurationMs =
                 source.options.tickDurationMs;
         const PhysicsSandboxResult<PhysicsSandboxStateView> current =
@@ -3533,7 +3623,8 @@ CreatePhysicsSandboxCudaSearchSession(
                     configuration.incumbent->preciseFinish;
             internal.incumbent = incumbent;
         }
-        if (configuration.useSessionSpecialization && !useVulkan) {
+        if (configuration.useSessionSpecialization &&
+            !useVulkan && !useHip) {
             internal.sessionSpecialization =
                     source.session->CudaSearchSpecialization();
             if (!internal.sessionSpecialization) {
@@ -3643,14 +3734,28 @@ CreatePhysicsSandboxCudaSearchSession(
         std::string diagnostic;
         std::unique_ptr<simulation::CudaSearchExecutor> executor;
         std::unique_ptr<simulation::VulkanSearchExecutor> vulkanExecutor;
+#if FOREVERVALIDATOR_HAS_HIP
+        std::unique_ptr<simulation::HipSearchExecutor> hipExecutor;
+#endif
         if (useVulkan) {
             vulkanExecutor = source.session->CreateVulkanSearchExecutor(
                     std::move(internal), source.cursor, &diagnostic);
+        } else if (useHip) {
+#if FOREVERVALIDATOR_HAS_HIP
+            hipExecutor = source.session->CreateHipSearchExecutor(
+                    std::move(internal), source.cursor, &diagnostic);
+#else
+            diagnostic = "HIP support is not compiled into this build";
+#endif
         } else {
             executor = source.session->CreateCudaSearchExecutor(
                     std::move(internal), source.cursor, &diagnostic);
         }
-        if (!executor && !vulkanExecutor) {
+        if (!executor && !vulkanExecutor
+#if FOREVERVALIDATOR_HAS_HIP
+            && !hipExecutor
+#endif
+        ) {
             return PhysicsSandboxResult<
                     PhysicsSandboxCudaSearchSession>::Failure(
                     SearchError(
@@ -3663,6 +3768,9 @@ CreatePhysicsSandboxCudaSearchSession(
                 std::make_unique<PhysicsSandboxCudaSearchSession::Impl>();
         impl->executor = std::move(executor);
         impl->vulkanExecutor = std::move(vulkanExecutor);
+#if FOREVERVALIDATOR_HAS_HIP
+        impl->hipExecutor = std::move(hipExecutor);
+#endif
         impl->backend = source.options.backend;
         impl->inputs = source.inputs;
         impl->lateInputs.assign(lateBegin, allSourceInputs.end());

@@ -12,6 +12,8 @@ option(FOREVERVALIDATOR_ENABLE_RELEASE_IPO
        ON)
 option(FOREVERVALIDATOR_ENABLE_CUDA
        "Build the optional NVIDIA CUDA simulation backend" OFF)
+option(FOREVERVALIDATOR_ENABLE_HIP
+       "Build the optional HIP simulation backend" OFF)
 option(FOREVERVALIDATOR_ENABLE_VULKAN
        "Build the portable Vulkan Compute simulation backend" ON)
 set(FOREVERVALIDATOR_CUDA_SPLIT_COMPILE_JOBS "1" CACHE STRING
@@ -41,6 +43,19 @@ if(FOREVERVALIDATOR_ENABLE_CUDA)
             CUDA
             "--split-compile=${FOREVERVALIDATOR_CUDA_SPLIT_COMPILE_JOBS}"
             FOREVERVALIDATOR_CUDA_SPLIT_COMPILE_SUPPORTED)
+    endif()
+endif()
+
+if(FOREVERVALIDATOR_ENABLE_HIP)
+    if(CMAKE_VERSION VERSION_LESS 3.30)
+        message(FATAL_ERROR "HIP requires CMake 3.30 or newer")
+    endif()
+    enable_language(HIP)
+    find_path(FOREVERVALIDATOR_HIP_INCLUDE_DIR hip/hip_runtime.h
+        HINTS "$ENV{HIP_PATH}/include" "$ENV{ROCM_PATH}/include"
+        REQUIRED)
+    if(CMAKE_HIP_PLATFORM STREQUAL "nvidia")
+        find_package(CUDAToolkit REQUIRED)
     endif()
 endif()
 
@@ -83,6 +98,8 @@ file(GLOB_RECURSE FOREVERVALIDATOR_CORE_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/validation/planning/*.cpp")
 list(FILTER FOREVERVALIDATOR_CORE_SOURCES EXCLUDE REGEX
     "/simulation/backends/cuda/(cuda_driver_shim|cuda_session_specialization)\.cpp$")
+list(FILTER FOREVERVALIDATOR_CORE_SOURCES EXCLUDE REGEX
+    "/simulation/backends/hip/.*\.cpp$")
 file(GLOB_RECURSE FOREVERVALIDATOR_JSON_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/validation/serialization/*.cpp")
 file(GLOB_RECURSE FOREVERVALIDATOR_NATIVE_SOURCES CONFIGURE_DEPENDS
@@ -119,6 +136,51 @@ target_include_directories(forevervalidator_core
 target_link_libraries(forevervalidator_core
     PUBLIC OpenSSL::Crypto ZLIB::ZLIB)
 forevervalidator_configure_target(forevervalidator_core)
+target_sources(forevervalidator_core PRIVATE
+    src/simulation/backends/hip/generated/hip_backend.cpp)
+if(FOREVERVALIDATOR_ENABLE_HIP)
+    file(GLOB FOREVERVALIDATOR_HIP_DEVICE_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulation/backends/hip/generated/*.cu")
+    file(GLOB FOREVERVALIDATOR_HIP_HOST_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulation/backends/hip/generated/*.cpp")
+    list(REMOVE_ITEM FOREVERVALIDATOR_HIP_HOST_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulation/backends/hip/generated/hip_backend.cpp")
+    set_source_files_properties(${FOREVERVALIDATOR_HIP_DEVICE_SOURCES}
+        PROPERTIES LANGUAGE HIP)
+    target_sources(forevervalidator_core PRIVATE
+        ${FOREVERVALIDATOR_HIP_DEVICE_SOURCES}
+        ${FOREVERVALIDATOR_HIP_HOST_SOURCES}
+        src/simulation/backends/hip/hip_state_bridge.cpp
+        src/simulation/backends/hip/hip_session_specialization_adapter.cpp)
+    target_include_directories(forevervalidator_core PRIVATE
+        "${FOREVERVALIDATOR_HIP_INCLUDE_DIR}")
+    target_compile_definitions(forevervalidator_core PUBLIC
+        FOREVERVALIDATOR_HAS_HIP=1)
+    if(CMAKE_HIP_PLATFORM STREQUAL "nvidia")
+        target_compile_options(forevervalidator_core PRIVATE
+            "$<$<COMPILE_LANGUAGE:HIP>:--expt-relaxed-constexpr>"
+            "$<$<COMPILE_LANGUAGE:HIP>:--fmad=false>"
+            "$<$<COMPILE_LANGUAGE:HIP>:--prec-div=true>"
+            "$<$<COMPILE_LANGUAGE:HIP>:--prec-sqrt=true>"
+            "$<$<COMPILE_LANGUAGE:HIP>:--ftz=false>")
+        target_compile_definitions(forevervalidator_core PRIVATE
+            "$<$<COMPILE_LANGUAGE:CXX>:__HIP_PLATFORM_NVIDIA__=1>")
+        target_link_libraries(forevervalidator_core PUBLIC CUDA::cudart)
+        if(NOT FOREVERVALIDATOR_ENABLE_CUDA)
+            target_sources(forevervalidator_core PRIVATE
+                src/simulation/backends/cuda/cuda_driver_shim.cpp)
+        endif()
+    else()
+        target_compile_definitions(forevervalidator_core PRIVATE
+            "$<$<COMPILE_LANGUAGE:CXX>:__HIP_PLATFORM_AMD__=1>")
+        target_compile_options(forevervalidator_core PRIVATE
+            "$<$<COMPILE_LANGUAGE:HIP>:-ffp-contract=off>"
+            "$<$<COMPILE_LANGUAGE:HIP>:-fno-fast-math>")
+    endif()
+else()
+    target_compile_definitions(forevervalidator_core PUBLIC
+        FOREVERVALIDATOR_HAS_HIP=0)
+endif()
 if(FOREVERVALIDATOR_ENABLE_VULKAN)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(FOREVERVALIDATOR_VULKAN_TIMELINE_SPIRV
@@ -863,6 +925,143 @@ if(FOREVERVALIDATOR_BUILD_TESTS)
             forevervalidator-vulkan-timeline-tests)
         add_test(NAME forevervalidator-vulkan-timeline
                  COMMAND forevervalidator-vulkan-timeline-tests)
+    endif()
+
+    if(FOREVERVALIDATOR_ENABLE_HIP)
+        add_executable(forevervalidator-hip-arithmetic-tests
+            tests/hip_arithmetic_tests.cpp)
+        target_include_directories(
+            forevervalidator-hip-arithmetic-tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_link_libraries(
+            forevervalidator-hip-arithmetic-tests PRIVATE
+            forevervalidator_core)
+        forevervalidator_configure_target(
+            forevervalidator-hip-arithmetic-tests)
+        add_test(NAME forevervalidator-hip-arithmetic
+            COMMAND forevervalidator-hip-arithmetic-tests)
+        if(CMAKE_HIP_PLATFORM STREQUAL "nvidia")
+            add_test(NAME forevervalidator-hip-unavailable
+                COMMAND forevervalidator-hip-arithmetic-tests --unavailable)
+            set_tests_properties(forevervalidator-hip-unavailable PROPERTIES
+                ENVIRONMENT "CUDA_VISIBLE_DEVICES=-1")
+        endif()
+
+        add_executable(forevervalidator-hip-timeline-tests
+            tests/generated/hip_timeline_executor_tests.cpp)
+        target_include_directories(
+            forevervalidator-hip-timeline-tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
+            "${FOREVERVALIDATOR_HIP_INCLUDE_DIR}")
+        if(CMAKE_HIP_PLATFORM STREQUAL "nvidia")
+            target_compile_definitions(
+                forevervalidator-hip-timeline-tests PRIVATE
+                __HIP_PLATFORM_NVIDIA__=1)
+        else()
+            target_compile_definitions(
+                forevervalidator-hip-timeline-tests PRIVATE
+                __HIP_PLATFORM_AMD__=1)
+        endif()
+        target_link_libraries(
+            forevervalidator-hip-timeline-tests PRIVATE
+            forevervalidator_core)
+        forevervalidator_configure_target(
+            forevervalidator-hip-timeline-tests)
+        add_test(NAME forevervalidator-hip-timeline
+            COMMAND forevervalidator-hip-timeline-tests)
+
+        foreach(hip_test IN ITEMS
+                search_branch_state
+                search_winner_reduction
+                modifier_event_ops
+                candidate_events
+                state_layout
+                static_configuration
+                dynamics
+                stunt
+                collision
+                race
+                finish_time_origin)
+            set(hip_test_source
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/generated/hip_${hip_test}_tests.cpp")
+            if(hip_test STREQUAL "search_branch_state" OR
+               hip_test STREQUAL "search_winner_reduction" OR
+               hip_test STREQUAL "finish_time_origin")
+                set(hip_test_source
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/generated/hip_${hip_test}_tests.cu")
+                set_source_files_properties("${hip_test_source}"
+                    PROPERTIES LANGUAGE HIP)
+            endif()
+            add_executable(forevervalidator-hip-${hip_test}-tests
+                "${hip_test_source}")
+            target_include_directories(
+                forevervalidator-hip-${hip_test}-tests PRIVATE
+                "${CMAKE_CURRENT_SOURCE_DIR}/src"
+                "${FOREVERVALIDATOR_HIP_INCLUDE_DIR}")
+            if(CMAKE_HIP_PLATFORM STREQUAL "nvidia")
+                target_compile_definitions(
+                    forevervalidator-hip-${hip_test}-tests PRIVATE
+                    "$<$<COMPILE_LANGUAGE:CXX>:__HIP_PLATFORM_NVIDIA__=1>")
+                target_compile_options(
+                    forevervalidator-hip-${hip_test}-tests PRIVATE
+                    "$<$<COMPILE_LANGUAGE:HIP>:--fmad=false>"
+                    "$<$<COMPILE_LANGUAGE:HIP>:--prec-div=true>"
+                    "$<$<COMPILE_LANGUAGE:HIP>:--prec-sqrt=true>"
+                    "$<$<COMPILE_LANGUAGE:HIP>:--ftz=false>")
+            else()
+                target_compile_definitions(
+                    forevervalidator-hip-${hip_test}-tests PRIVATE
+                    "$<$<COMPILE_LANGUAGE:CXX>:__HIP_PLATFORM_AMD__=1>")
+                target_compile_options(
+                    forevervalidator-hip-${hip_test}-tests PRIVATE
+                    "$<$<COMPILE_LANGUAGE:HIP>:-ffp-contract=off>"
+                    "$<$<COMPILE_LANGUAGE:HIP>:-fno-fast-math>")
+            endif()
+            target_link_libraries(
+                forevervalidator-hip-${hip_test}-tests PRIVATE
+                forevervalidator_core)
+            forevervalidator_configure_target(
+                forevervalidator-hip-${hip_test}-tests)
+            add_test(NAME forevervalidator-hip-${hip_test}
+                COMMAND forevervalidator-hip-${hip_test}-tests)
+        endforeach()
+    endif()
+
+    if(FOREVERVALIDATOR_ENABLE_HIP AND FOREVERVALIDATOR_ENABLE_CUDA AND
+       CMAKE_HIP_PLATFORM STREQUAL "nvidia")
+        add_executable(forevervalidator-hip-cuda-timeline-parity-tests
+            tests/hip_cuda_timeline_parity_tests.cpp)
+        target_include_directories(
+            forevervalidator-hip-cuda-timeline-parity-tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
+            "${FOREVERVALIDATOR_HIP_INCLUDE_DIR}")
+        target_compile_definitions(
+            forevervalidator-hip-cuda-timeline-parity-tests PRIVATE
+            __HIP_PLATFORM_NVIDIA__=1)
+        target_link_libraries(
+            forevervalidator-hip-cuda-timeline-parity-tests PRIVATE
+            forevervalidator_core)
+        forevervalidator_configure_target(
+            forevervalidator-hip-cuda-timeline-parity-tests)
+        add_test(NAME forevervalidator-hip-cuda-timeline-parity
+            COMMAND forevervalidator-hip-cuda-timeline-parity-tests)
+
+        add_executable(forevervalidator-hip-cuda-search-parity-tests
+            tests/hip_cuda_search_parity_tests.cpp)
+        target_include_directories(
+            forevervalidator-hip-cuda-search-parity-tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
+            "${FOREVERVALIDATOR_HIP_INCLUDE_DIR}")
+        target_compile_definitions(
+            forevervalidator-hip-cuda-search-parity-tests PRIVATE
+            __HIP_PLATFORM_NVIDIA__=1)
+        target_link_libraries(
+            forevervalidator-hip-cuda-search-parity-tests PRIVATE
+            forevervalidator_core)
+        forevervalidator_configure_target(
+            forevervalidator-hip-cuda-search-parity-tests)
+        add_test(NAME forevervalidator-hip-cuda-search-parity
+            COMMAND forevervalidator-hip-cuda-search-parity-tests)
     endif()
 
     if(FOREVERVALIDATOR_ENABLE_CUDA)

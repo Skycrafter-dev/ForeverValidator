@@ -116,7 +116,7 @@ void PrintUsage(const char *program) {
                  "usage:\n"
                  "  %s --pak-dir DIR [--backend BACKEND] [--batch-size N] [--requested-samples N] REPLAY [--out PATH]\n"
                  "  %s --pak-dir DIR [--backend BACKEND] [--batch-size N] [--requested-samples N] --out-dir DIR REPLAY_OR_DIRECTORY [REPLAY_OR_DIRECTORY ...]\n"
-                 "  BACKEND: reference, optimized-cpu, speculative-ticking, vulkan, cuda, batched; batch size defaults to 10\n",
+                 "  BACKEND: reference, optimized-cpu, speculative-ticking, vulkan, cuda, hip, batched; batch size defaults to 10\n",
                  program,
                  program);
 }
@@ -232,6 +232,9 @@ std::optional<forevervalidator::SimulationBackend> ParseBackend(
     }
     if (std::strcmp(value, "cuda") == 0) {
         return forevervalidator::SimulationBackend::Cuda;
+    }
+    if (std::strcmp(value, "hip") == 0) {
+        return forevervalidator::SimulationBackend::Hip;
     }
     if (std::strcmp(value, "vulkan") == 0) {
         return forevervalidator::SimulationBackend::Vulkan;
