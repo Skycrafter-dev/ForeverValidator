@@ -26,7 +26,30 @@ struct DeviceSample {
     bool valid = false;
     bool mutation = false;
     bool preciseFinish = false;
+    std::uint32_t scriptedObjectiveCount = 0u;
+    double objectiveScores[16]{};
+    double metricValues[16]{};
 };
+
+FOREVERVALIDATOR_WINNER_HD inline bool StrictlyDominates(
+        const DeviceSample &candidate,
+        const DeviceSample &incumbent) {
+    if (!candidate.valid) return false;
+    if (!incumbent.valid) return true;
+    if (candidate.scriptedObjectiveCount == 0u ||
+        candidate.scriptedObjectiveCount !=
+                incumbent.scriptedObjectiveCount) return false;
+    bool better = false;
+    for (std::uint32_t i = 0u;
+         i < candidate.scriptedObjectiveCount; ++i) {
+        if (candidate.objectiveScores[i] < incumbent.objectiveScores[i]) {
+            return false;
+        }
+        better = better ||
+                candidate.objectiveScores[i] > incumbent.objectiveScores[i];
+    }
+    return better;
+}
 
 struct BetterSample {
     bool maximize = false;

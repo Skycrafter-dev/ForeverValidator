@@ -71,6 +71,12 @@ def inject_exact_float_controls(assembly: str) -> str:
         if local_size_index < 0:
             raise RuntimeError("SPIR-V assembly has no LocalSize execution mode")
         lines.insert(local_size_index + 1, mode)
+    if not any(re.search(r"%float\s*=\s*OpTypeFloat\s+32\b", line)
+               for line in lines):
+        first_type = next(
+            index for index, line in enumerate(lines)
+            if re.search(r"\bOpType\w+\b", line))
+        lines.insert(first_type, "     %float = OpTypeFloat 32\n")
     return "".join(lines)
 
 

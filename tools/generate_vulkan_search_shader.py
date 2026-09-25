@@ -324,15 +324,10 @@ def apply_unified_patch(text: str, patch_path: Path) -> str:
         if match is None:
             patch_index += 1
             continue
-        hunk_source_index = int(match.group(1)) - 1
-        if hunk_source_index < source_index:
-            raise RuntimeError(
-                f"overlapping hunk in {patch_path.name} at line "
-                f"{hunk_source_index + 1}")
-        output.extend(source[source_index:hunk_source_index])
-        source_index = hunk_source_index
+        expected_index = int(match.group(1)) - 1
         patch_index += 1
-
+        old_lines: list[str] = []
+        new_lines: list[str] = []
         while patch_index < len(patch) and not patch[patch_index].startswith("@@ "):
             line = patch[patch_index]
             patch_index += 1
@@ -342,15 +337,22 @@ def apply_unified_patch(text: str, patch_path: Path) -> str:
                 continue
             payload = line[1:]
             if line[0] in " -":
-                if source_index >= len(source) or source[source_index] != payload:
-                    actual = (source[source_index]
-                              if source_index < len(source) else "<end of file>")
-                    raise RuntimeError(
-                        f"{patch_path.name} context mismatch at source line "
-                        f"{source_index + 1}: expected {payload!r}, got {actual!r}")
-                source_index += 1
+                old_lines.append(payload)
             if line[0] in " +":
-                output.append(payload)
+                new_lines.append(payload)
+
+        matches = [index for index in range(source_index,
+                                            len(source) - len(old_lines) + 1)
+                   if source[index:index + len(old_lines)] == old_lines]
+        if not matches:
+            raise RuntimeError(
+                f"{patch_path.name} context not found near source line "
+                f"{expected_index + 1}")
+        hunk_source_index = min(matches,
+                                key=lambda index: abs(index - expected_index))
+        output.extend(source[source_index:hunk_source_index])
+        output.extend(new_lines)
+        source_index = hunk_source_index + len(old_lines)
 
     output.extend(source[source_index:])
     return "".join(output)
@@ -925,6 +927,26 @@ bool SearchStrictlyBetter(
     return candidate.eventCount < incumbent.eventCount;
 }
 
+bool SearchScriptedBetter(
+    __constref cuda_search_detail__DeviceSample candidate,
+    __constref cuda_search_detail__DeviceSample incumbent)
+{
+    if (candidate.valid == 0u) return false;
+    if (incumbent.valid == 0u) return true;
+    if (candidate.scriptedObjectiveCount == 0u ||
+        candidate.scriptedObjectiveCount != incumbent.scriptedObjectiveCount)
+        return false;
+    bool better = false;
+    for (uint i = 0u; i < candidate.scriptedObjectiveCount; ++i)
+    {
+        if (candidate.objectiveScores[i] < incumbent.objectiveScores[i])
+            return false;
+        better = better ||
+            candidate.objectiveScores[i] > incumbent.objectiveScores[i];
+    }
+    return better;
+}
+
 [shader("compute")]
 [numthreads(32, 1, 1)]
 void SimulateVulkanSearchCandidates(
@@ -1075,6 +1097,29 @@ void SimulateVulkanSearchCandidates(
                 parameters->lastRestartTimeSeconds,
                 parameters->currentTimeSeconds))
         {
+            ++evaluationIndex;
+            if (states[slot].race.progress.raceCompleted != 0u) break;
+            continue;
+        }
+        if (evaluator->kind == CudaSearchEvaluatorKind_Scripted)
+        {
+            if (UpdateScriptedSample(
+                    *evaluator, states[slot],
+                    parameters->baseline != 0u ? 0u : candidateId + 1u,
+                    parameters->lastImprovementTimeSeconds,
+                    parameters->lastRestartTimeSeconds,
+                    parameters->currentTimeSeconds,
+                    double(publicTime), localBest))
+            {
+                localBest.candidateId = candidateId;
+                localBest.candidateSlot = slot;
+                localBest.evaluationTick = evaluationIndex;
+                localBest.eventCount = eventCount;
+                localBest.logicalOrder = 1u + uint64_t(slot) *
+                    parameters->evaluationTickCount + evaluationIndex;
+                localBest.mutation = parameters->baseline == 0u ? 1u : 0u;
+                bestStates[slot] = states[slot];
+            }
             ++evaluationIndex;
             if (states[slot].race.progress.raceCompleted != 0u) break;
             continue;
@@ -1356,6 +1401,32 @@ void EvaluateVulkanSearchTick(
         reinterpret<uint8_t*>(parameters->evaluatorReported);
     bool evaluatorReported = reported[slot] != 0u;
     uint* eventCounts = reinterpret<uint*>(parameters->eventCounts);
+    cuda_search_detail__DeviceSample* samples =
+        reinterpret<cuda_search_detail__DeviceSample*>(
+            parameters->candidateBestSamples);
+    if (evaluator->kind == CudaSearchEvaluatorKind_Scripted)
+    {
+        cuda_search_detail__DeviceSample sample = samples[slot + 1u];
+        if (UpdateScriptedSample(
+                *evaluator, *state,
+                parameters->baseline != 0u ? 0u : candidateId + 1u,
+                parameters->lastImprovementTimeSeconds,
+                parameters->lastRestartTimeSeconds,
+                parameters->currentTimeSeconds,
+                double(publicTime), sample))
+        {
+            sample.candidateId = candidateId;
+            sample.candidateSlot = slot;
+            sample.evaluationTick = evaluationIndex;
+            sample.eventCount = eventCounts[slot];
+            sample.logicalOrder = 1u + uint64_t(slot) *
+                parameters->evaluationTickCount + evaluationIndex;
+            sample.mutation = parameters->baseline == 0u ? 1u : 0u;
+            samples[slot + 1u] = sample;
+        }
+        evaluationIndices[slot] = evaluationIndex + 1u;
+        return;
+    }
     uint stuntsScore = 0u;
     if (parameters->simulateStunts != 0u)
     {
@@ -1376,9 +1447,6 @@ void EvaluateVulkanSearchTick(
     sample.logicalOrder = 1u + uint64_t(slot) *
         parameters->evaluationTickCount + evaluationIndex;
     sample.mutation = parameters->baseline == 0u ? 1u : 0u;
-    cuda_search_detail__DeviceSample* samples =
-        reinterpret<cuda_search_detail__DeviceSample*>(
-            parameters->candidateBestSamples);
     if (SearchStrictlyBetter(
             sample, samples[slot + 1u], MaximizesScore(evaluator->kind)))
         samples[slot + 1u] = sample;
@@ -1727,6 +1795,26 @@ SEARCH_COMBINED_ENTRY = r"""
 
 namespace forevervalidator::simulation::vulkan_search {
 
+bool SearchScriptedBetter(
+    __constref cuda_search_detail__DeviceSample candidate,
+    __constref cuda_search_detail__DeviceSample incumbent)
+{
+    if (candidate.valid == 0u) return false;
+    if (incumbent.valid == 0u) return true;
+    if (candidate.scriptedObjectiveCount == 0u ||
+        candidate.scriptedObjectiveCount != incumbent.scriptedObjectiveCount)
+        return false;
+    bool better = false;
+    for (uint i = 0u; i < candidate.scriptedObjectiveCount; ++i)
+    {
+        if (candidate.objectiveScores[i] < incumbent.objectiveScores[i])
+            return false;
+        better = better ||
+            candidate.objectiveScores[i] > incumbent.objectiveScores[i];
+    }
+    return better;
+}
+
 [noinline]
 void FinalizeVulkanSearchBatch(VulkanSearchParameters* parameters)
 {
@@ -1762,7 +1850,9 @@ void FinalizeVulkanSearchBatch(VulkanSearchParameters* parameters)
     cuda_search_detail__DeviceSample incumbent = samples[0];
     if (parameters->baseline != 0u)
     {
-        if (samples[1].valid != 0u)
+        if (evaluator->kind == CudaSearchEvaluatorKind_Scripted
+                ? SearchScriptedBetter(samples[1], incumbent)
+                : samples[1].valid != 0u)
         {
             incumbent = samples[1];
             result.winnerSlot = 0u;
@@ -1773,7 +1863,9 @@ void FinalizeVulkanSearchBatch(VulkanSearchParameters* parameters)
         for (uint slot = 0u; slot < parameters->candidateCount; ++slot)
         {
             cuda_search_detail__DeviceSample sample = samples[slot + 1u];
-            if (SearchStrictlyBetter(sample, incumbent, maximize))
+            if (evaluator->kind == CudaSearchEvaluatorKind_Scripted
+                    ? SearchScriptedBetter(sample, incumbent)
+                    : SearchStrictlyBetter(sample, incumbent, maximize))
             {
                 ++result.mutationImprovementCount;
                 incumbent = sample;
@@ -1784,7 +1876,8 @@ void FinalizeVulkanSearchBatch(VulkanSearchParameters* parameters)
     result.winner = incumbent;
 
     if (result.winnerSlot != UINT32_MAX && incumbent.valid != 0u &&
-        (parameters->baseline != 0u ||
+        (evaluator->kind == CudaSearchEvaluatorKind_Scripted ||
+         parameters->baseline != 0u ||
          SearchStrictlyBetter(incumbent, samples[0], maximize)))
     {
         uint slot = result.winnerSlot;
@@ -2003,6 +2096,33 @@ void ExecuteVulkanSearchCandidates(
                 parameters->lastRestartTimeSeconds,
                 parameters->currentTimeSeconds))
         {
+            ++evaluationIndex;
+            if (localState.race.progress.raceCompleted != 0u)
+            {
+                completed = true;
+                break;
+            }
+            continue;
+        }
+
+        if (evaluator->kind == CudaSearchEvaluatorKind_Scripted)
+        {
+            if (UpdateScriptedSample(
+                    *evaluator, localState,
+                    parameters->baseline != 0u ? 0u : candidateId + 1u,
+                    parameters->lastImprovementTimeSeconds,
+                    parameters->lastRestartTimeSeconds,
+                    parameters->currentTimeSeconds,
+                    double(publicTime), localBest))
+            {
+                localBest.candidateId = candidateId;
+                localBest.candidateSlot = slot;
+                localBest.evaluationTick = evaluationIndex;
+                localBest.eventCount = eventCount;
+                localBest.logicalOrder = 1u + uint64_t(slot) *
+                    parameters->evaluationTickCount + evaluationIndex;
+                localBest.mutation = parameters->baseline == 0u ? 1u : 0u;
+            }
             ++evaluationIndex;
             if (localState.race.progress.raceCompleted != 0u)
             {
@@ -2290,6 +2410,15 @@ def rewrite_evaluation_slang(text: str) -> str:
     vector_end = text.index("    switch (source)", vector_begin)
     text = text[:vector_begin] + text[vector_end:]
     text = text.replace("vector(", "ConditionVector(")
+    scripted_begin = text.index(" bool UpdateScriptedSample(")
+    scripted_end = text.rfind(
+        "\n", scripted_begin, text.index(" EvaluateState(", scripted_begin))
+    scripted = text[scripted_begin:scripted_end]
+    scripted = scripted.replace(
+        "DeviceSample *sample",
+        "inout DeviceSample sample")
+    scripted = scripted.replace("sample->", "sample.")
+    text = text[:scripted_begin] + scripted + text[scripted_end:]
     text = text.replace(
         "struct DeviceConditionValue {",
         "struct DeviceConditionValue {",
@@ -2585,6 +2714,20 @@ def main() -> None:
                 "vulkan_steady_velocity_split_phases.patch"
             ),
         )
+    # Slang does not honor C++ default member initializers for this translated
+    # local. A non-scripted sample must never publish an undefined count.
+    initializer = (
+        "    result.preciseFinish = false;\n"
+        "    result.timeMs = currentTimeMs;"
+    )
+    if initializer not in output:
+        raise RuntimeError("sample initializer translation was not found")
+    output = output.replace(
+        initializer,
+        "    result.preciseFinish = false;\n"
+        "    result.scriptedObjectiveCount = 0u;\n"
+        "    result.timeMs = currentTimeMs;",
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(output, encoding="utf-8")
 

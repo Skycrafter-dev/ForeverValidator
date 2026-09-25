@@ -2060,6 +2060,32 @@ simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
                                              PhysicsSandboxCudaStuntPointsEvaluator>) {
                     result.kind =
                             simulation::CudaSearchEvaluatorKind::StuntPoints;
+                } else if constexpr (std::is_same_v<
+                                             T,
+                                             PhysicsSandboxCudaScriptedEvaluator>) {
+                    result.kind =
+                            simulation::CudaSearchEvaluatorKind::Scripted;
+                    result.scriptedObjectiveCount = static_cast<std::uint32_t>(
+                            evaluator.objectives.size());
+                    std::uint32_t cursor = 0u;
+                    for (std::uint32_t i = 0u;
+                         i < result.scriptedObjectiveCount; ++i) {
+                        const auto &source = evaluator.objectives[i];
+                        auto &objective = result.scriptedObjectives[i];
+                        objective.kind = static_cast<std::uint32_t>(source.kind);
+                        objective.target = source.target;
+                        objective.firstInstruction = cursor;
+                        objective.instructionCount = static_cast<std::uint32_t>(
+                                source.instructions.size());
+                        for (const auto &instruction : source.instructions) {
+                            result.scriptedInstructions[cursor++] = {
+                                    static_cast<simulation::CudaSearchConditionOpcode>(
+                                            instruction.opcode),
+                                    static_cast<simulation::CudaSearchConditionValue>(
+                                            instruction.value),
+                                    instruction.x, instruction.y, instruction.z};
+                        }
+                    }
                 } else {
                     result.kind =
                             simulation::CudaSearchEvaluatorKind::FinishTime;
@@ -3170,6 +3196,8 @@ PhysicsSandboxCudaSearchSession::Impl::Convert(
 
     PhysicsSandboxCudaSearchBatch result;
     result.firstCandidateId = execution.firstCandidateId;
+    result.evaluationCurrentTimeSeconds =
+            execution.evaluationCurrentTimeSeconds;
     result.candidateCount = execution.candidateCount;
     result.evaluatedCandidateCount =
             execution.evaluatedCandidateCount;
@@ -3237,6 +3265,12 @@ PhysicsSandboxCudaSearchSession::Impl::Convert(
     result.bestTimeMs = best.timeMs;
     result.bestDetail0 = best.detail0;
     result.bestDetail1 = best.detail1;
+    result.bestObjectiveScores.assign(
+            best.objectiveScores,
+            best.objectiveScores + best.scriptedObjectiveCount);
+    result.bestMetricValues.assign(
+            best.metricValues,
+            best.metricValues + best.scriptedObjectiveCount);
     result.bestInputs.reserve(best.inputs.size());
     for (const simulation::CudaSearchInputEvent &input : best.inputs) {
         result.bestInputs.push_back(PublicInput(input));
@@ -3600,7 +3634,11 @@ CreatePhysicsSandboxCudaSearchSession(
             if (configuration.incumbent->mutationCount >
                         std::numeric_limits<std::uint32_t>::max() ||
                 (configuration.incumbent->mutation &&
-                 !configuration.incumbent->candidateId)) {
+                 !configuration.incumbent->candidateId) ||
+                configuration.incumbent->objectiveScores.size() >
+                        simulation::CudaSearchMaximumScriptedObjectives ||
+                configuration.incumbent->objectiveScores.size() !=
+                        configuration.incumbent->metricValues.size()) {
                 return PhysicsSandboxResult<
                         PhysicsSandboxCudaSearchSession>::Failure(
                         SearchError(
@@ -3621,6 +3659,15 @@ CreatePhysicsSandboxCudaSearchSession(
             incumbent.detail1 = configuration.incumbent->detail1;
             incumbent.preciseFinish =
                     configuration.incumbent->preciseFinish;
+            incumbent.scriptedObjectiveCount = static_cast<std::uint32_t>(
+                    configuration.incumbent->objectiveScores.size());
+            for (std::uint32_t i = 0u;
+                 i < incumbent.scriptedObjectiveCount; ++i) {
+                incumbent.objectiveScores[i] =
+                        configuration.incumbent->objectiveScores[i];
+                incumbent.metricValues[i] =
+                        configuration.incumbent->metricValues[i];
+            }
             internal.incumbent = incumbent;
         }
         if (configuration.useSessionSpecialization &&
@@ -3699,6 +3746,42 @@ CreatePhysicsSandboxCudaSearchSession(
                 }
             }
             internal.modifiers.push_back(converted);
+        }
+        if (const auto *scripted = std::get_if<
+                    PhysicsSandboxCudaScriptedEvaluator>(
+                            &configuration.evaluator)) {
+            std::size_t instructionCount = 0u;
+            if (scripted->objectives.empty() ||
+                scripted->objectives.size() >
+                        simulation::CudaSearchMaximumScriptedObjectives) {
+                return PhysicsSandboxResult<
+                        PhysicsSandboxCudaSearchSession>::Failure(
+                        SearchError(PhysicsSandboxErrorCode::InvalidRequest,
+                                    "scripted GPU target needs 1 to 16 objectives"));
+            }
+            for (const auto &objective : scripted->objectives) {
+                instructionCount += objective.instructions.size();
+                if (objective.instructions.empty() ||
+                    instructionCount >
+                            simulation::CudaSearchMaximumScriptedInstructions ||
+                    !std::isfinite(objective.target) ||
+                    static_cast<std::uint32_t>(objective.kind) > 2u) {
+                    return PhysicsSandboxResult<
+                            PhysicsSandboxCudaSearchSession>::Failure(
+                            SearchError(PhysicsSandboxErrorCode::InvalidRequest,
+                                        "scripted GPU target needs valid objectives and at most 256 total instructions"));
+                }
+            }
+            if (configuration.incumbent &&
+                (configuration.incumbent->objectiveScores.size() !=
+                         scripted->objectives.size() ||
+                 configuration.incumbent->metricValues.size() !=
+                         scripted->objectives.size())) {
+                return PhysicsSandboxResult<
+                        PhysicsSandboxCudaSearchSession>::Failure(
+                        SearchError(PhysicsSandboxErrorCode::InvalidRequest,
+                                    "scripted GPU incumbent objective count differs"));
+            }
         }
         internal.evaluator = CudaEvaluator(configuration.evaluator);
         if (configuration.condition) {

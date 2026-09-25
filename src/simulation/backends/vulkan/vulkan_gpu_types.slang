@@ -128,6 +128,7 @@ static const uint CudaSearchEvaluatorKind_Pose = 2u;
 static const uint CudaSearchEvaluatorKind_VolumeEntry = 3u;
 static const uint CudaSearchEvaluatorKind_StuntPoints = 4u;
 static const uint CudaSearchEvaluatorKind_FinishTime = 5u;
+static const uint CudaSearchEvaluatorKind_Scripted = 6u;
 static const uint CudaSearchConditionOpcode_Constant = 0u;
 static const uint CudaSearchConditionOpcode_ConstantVector = 1u;
 static const uint CudaSearchConditionOpcode_Scalar = 2u;
@@ -1683,14 +1684,6 @@ struct CudaSearchModifierConfiguration
     CudaSearchChannel brake;
 };
 
-// C++ ABI: sizeof=88, align=8
-struct CudaSearchEvaluatorConfiguration
-{
-    uint kind;
-    uint optionFlags;
-    double values[10];
-};
-
 // C++ ABI: sizeof=32, align=8
 struct CudaSearchConditionInstruction
 {
@@ -1699,6 +1692,28 @@ struct CudaSearchConditionInstruction
     double x;
     double y;
     double z;
+};
+
+// C++ ABI: sizeof=24, align=8
+struct CudaSearchScriptedObjective
+{
+    uint kind;
+    uint firstInstruction;
+    uint instructionCount;
+    uint8_t _abiPad0[4];
+    double target;
+};
+
+// C++ ABI: sizeof=8672, align=8
+struct CudaSearchEvaluatorConfiguration
+{
+    uint kind;
+    uint optionFlags;
+    double values[10];
+    uint scriptedObjectiveCount;
+    uint8_t _abiPad0[4];
+    CudaSearchScriptedObjective scriptedObjectives[16];
+    CudaSearchConditionInstruction scriptedInstructions[256];
 };
 
 // C++ ABI: sizeof=16, align=4
@@ -1710,7 +1725,7 @@ struct CudaSearchInputEvent
     int value;
 };
 
-// C++ ABI: sizeof=64, align=8
+// C++ ABI: sizeof=320, align=8
 struct CudaSearchIncumbent
 {
     uint8_t mutation;
@@ -1723,7 +1738,10 @@ struct CudaSearchIncumbent
     double detail0;
     double detail1;
     uint8_t preciseFinish;
-    uint8_t _abiPad1[7];
+    uint8_t _abiPad1[3];
+    uint scriptedObjectiveCount;
+    double objectiveScores[16];
+    double metricValues[16];
 };
 
 // C++ ABI: sizeof=88, align=8
@@ -1745,7 +1763,7 @@ struct cuda_search_detail__DeviceControlState
     int64_t stuntLastChangeTime[6];
 };
 
-// C++ ABI: sizeof=64, align=8
+// C++ ABI: sizeof=328, align=8
 struct cuda_search_detail__DeviceSample
 {
     double score;
@@ -1761,6 +1779,10 @@ struct cuda_search_detail__DeviceSample
     uint8_t mutation;
     uint8_t preciseFinish;
     uint8_t _abiPad0[1];
+    uint scriptedObjectiveCount;
+    uint8_t _abiPad1[4];
+    double objectiveScores[16];
+    double metricValues[16];
 };
 
 static const uint CudaCandidateState_SchemaVersion = 11u;

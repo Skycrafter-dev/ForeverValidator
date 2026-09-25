@@ -128,6 +128,7 @@ static const uint CudaSearchEvaluatorKind_Pose = 2u;
 static const uint CudaSearchEvaluatorKind_VolumeEntry = 3u;
 static const uint CudaSearchEvaluatorKind_StuntPoints = 4u;
 static const uint CudaSearchEvaluatorKind_FinishTime = 5u;
+static const uint CudaSearchEvaluatorKind_Scripted = 6u;
 static const uint CudaSearchConditionOpcode_Constant = 0u;
 static const uint CudaSearchConditionOpcode_ConstantVector = 1u;
 static const uint CudaSearchConditionOpcode_Scalar = 2u;
@@ -1683,14 +1684,6 @@ struct CudaSearchModifierConfiguration
     CudaSearchChannel brake;
 };
 
-// C++ ABI: sizeof=88, align=8
-struct CudaSearchEvaluatorConfiguration
-{
-    uint kind;
-    uint optionFlags;
-    double values[10];
-};
-
 // C++ ABI: sizeof=32, align=8
 struct CudaSearchConditionInstruction
 {
@@ -1699,6 +1692,28 @@ struct CudaSearchConditionInstruction
     double x;
     double y;
     double z;
+};
+
+// C++ ABI: sizeof=24, align=8
+struct CudaSearchScriptedObjective
+{
+    uint kind;
+    uint firstInstruction;
+    uint instructionCount;
+    uint8_t _abiPad0[4];
+    double target;
+};
+
+// C++ ABI: sizeof=8672, align=8
+struct CudaSearchEvaluatorConfiguration
+{
+    uint kind;
+    uint optionFlags;
+    double values[10];
+    uint scriptedObjectiveCount;
+    uint8_t _abiPad0[4];
+    CudaSearchScriptedObjective scriptedObjectives[16];
+    CudaSearchConditionInstruction scriptedInstructions[256];
 };
 
 // C++ ABI: sizeof=16, align=4
@@ -1710,7 +1725,7 @@ struct CudaSearchInputEvent
     int value;
 };
 
-// C++ ABI: sizeof=64, align=8
+// C++ ABI: sizeof=320, align=8
 struct CudaSearchIncumbent
 {
     uint8_t mutation;
@@ -1723,7 +1738,10 @@ struct CudaSearchIncumbent
     double detail0;
     double detail1;
     uint8_t preciseFinish;
-    uint8_t _abiPad1[7];
+    uint8_t _abiPad1[3];
+    uint scriptedObjectiveCount;
+    double objectiveScores[16];
+    double metricValues[16];
 };
 
 // C++ ABI: sizeof=88, align=8
@@ -1745,7 +1763,7 @@ struct cuda_search_detail__DeviceControlState
     int64_t stuntLastChangeTime[6];
 };
 
-// C++ ABI: sizeof=64, align=8
+// C++ ABI: sizeof=328, align=8
 struct cuda_search_detail__DeviceSample
 {
     double score;
@@ -1761,6 +1779,10 @@ struct cuda_search_detail__DeviceSample
     uint8_t mutation;
     uint8_t preciseFinish;
     uint8_t _abiPad0[1];
+    uint scriptedObjectiveCount;
+    uint8_t _abiPad1[4];
+    double objectiveScores[16];
+    double metricValues[16];
 };
 
 static const uint CudaCandidateState_SchemaVersion = 11u;
@@ -4121,8 +4143,8 @@ inline void MergeShapeContacts(
  inline GmIso4 RootShapeWorldPose(
         uint shapeIndex,
         CudaVehicleCollisionShape *shapes,
-        const CudaCandidatePhysicsState &candidate,
-        const GmIso4 &bodyPose) {
+        __constref CudaCandidatePhysicsState candidate,
+        __constref GmIso4 bodyPose) {
     GmIso4 shapeBodyPose;
     if (shapeIndex < 4u) {
         shapeBodyPose = shapes[shapeIndex].bodyPose;
@@ -5606,36 +5628,36 @@ namespace detail {
         uint checkpointSlot,
         __constref GmIso4 spawn,
         bool hasSpawn) {
-    CudaRacePhysicsState *race = &candidate.race;
-    if (checkpointIndex >= (*race).checkpointSlotsPassed.count ||
-        checkpointSlot >= (*race).checkpointSlotsPassed.count ||
-        CheckpointSlotsGet((*race).checkpointSlotsPassed, checkpointSlot)) {
+
+    if (checkpointIndex >= (candidate.race).checkpointSlotsPassed.count ||
+        checkpointSlot >= (candidate.race).checkpointSlotsPassed.count ||
+        CheckpointSlotsGet((candidate.race).checkpointSlotsPassed, checkpointSlot)) {
         return false;
     }
-    CheckpointSlotsSet((*race).checkpointSlotsPassed, checkpointSlot);
+    CheckpointSlotsSet((candidate.race).checkpointSlotsPassed, checkpointSlot);
     if (checkpointIndex !=
-        (*race).progress.requiredCheckpointCount) {
-        ++(*race).progress.currentLapCheckpointCount;
-        ++(*race).progress.checkpointCount;
+        (candidate.race).progress.requiredCheckpointCount) {
+        ++(candidate.race).progress.currentLapCheckpointCount;
+        ++(candidate.race).progress.checkpointCount;
     }
-    ++(*race).progress.totalCheckpointEventCount;
+    ++(candidate.race).progress.totalCheckpointEventCount;
     if (hasSpawn) {
-        if (!(*race).currentSpawnLocationInitialized) {
-            (*race).player.previousSpawnLocation = spawn;
-            (*race).currentSpawnLocationInitialized = true;
+        if (!(candidate.race).currentSpawnLocationInitialized) {
+            (candidate.race).player.previousSpawnLocation = spawn;
+            (candidate.race).currentSpawnLocationInitialized = true;
         }
-        (*race).lastAcceptedSpawnLocation.present = true;
-        (*race).lastAcceptedSpawnLocation.value = spawn;
-        (*race).playerSpawnLocation.present = true;
-        (*race).playerSpawnLocation.value = spawn;
-        SetSpawn((*race), spawn, false);
+        (candidate.race).lastAcceptedSpawnLocation.present = true;
+        (candidate.race).lastAcceptedSpawnLocation.value = spawn;
+        (candidate.race).playerSpawnLocation.present = true;
+        (candidate.race).playerSpawnLocation.value = spawn;
+        SetSpawn((candidate.race), spawn, false);
     } else {
         SetSpawn(
-                (*race), (*race).player.previousSpawnLocation, false);
-        if ((*race).currentSpawnLocationInitialized) {
-            (*race).playerSpawnLocation.present = true;
-            (*race).playerSpawnLocation.value =
-                    (*race).player.previousSpawnLocation;
+                (candidate.race), (candidate.race).player.previousSpawnLocation, false);
+        if ((candidate.race).currentSpawnLocationInitialized) {
+            (candidate.race).playerSpawnLocation.present = true;
+            (candidate.race).playerSpawnLocation.value =
+                    (candidate.race).player.previousSpawnLocation;
         }
     }
     ClearFreewheel(candidate);
@@ -5645,9 +5667,9 @@ namespace detail {
  inline void Checkpoint(
         inout CudaCandidatePhysicsState candidate,
         __constref CudaSceneActor actor) {
-    CudaRacePhysicsState *race = &candidate.race;
-    (*race).progress.lastBlockRole = actor.checkpointRole;
-    (*race).progress.lastContactBlockId = actor.raceBlockId;
+
+    (candidate.race).progress.lastBlockRole = actor.checkpointRole;
+    (candidate.race).progress.lastContactBlockId = actor.raceBlockId;
     if (actor.respawnUsesCurrentTransform) {
         ClearFreewheel(candidate);
     }
@@ -5655,7 +5677,7 @@ namespace detail {
     GmIso4 spawn = GmIso4();
     bool hasSpawn = false;
     if (actor.respawnUsesCurrentTransform) {
-        spawn = (*race).player.currentSpawnLocation;
+        spawn = (candidate.race).player.currentSpawnLocation;
         hasSpawn = true;
     } else if (actor.hasCheckpointSpawn) {
         spawn = actor.checkpointSpawn;
@@ -5663,50 +5685,50 @@ namespace detail {
     }
     if (AcceptCheckpointSlot(
                 candidate,
-                (*race).progress.currentLapCheckpointCount,
+                (candidate.race).progress.currentLapCheckpointCount,
                 actor.checkpointSlot, spawn, hasSpawn)) {
-        (*race).progress.lastAcceptedBlockId =
-                (*race).progress.lastContactBlockId;
+        (candidate.race).progress.lastAcceptedBlockId =
+                (candidate.race).progress.lastContactBlockId;
     }
 }
 
  inline void Finish(
         inout CudaCandidatePhysicsState candidate,
         __constref CudaSceneActor actor) {
-    CudaRacePhysicsState *race = &candidate.race;
-    ReplayRaceProgress *progress = &(*race).progress;
-    (*progress).lastBlockRole = actor.checkpointRole;
-    if ((*progress).raceCompleted ||
-        (*progress).currentLapCheckpointCount <
-                (*progress).requiredCheckpointCount) {
+
+
+    ((candidate.race).progress).lastBlockRole = actor.checkpointRole;
+    if (((candidate.race).progress).raceCompleted ||
+        ((candidate.race).progress).currentLapCheckpointCount <
+                ((candidate.race).progress).requiredCheckpointCount) {
         return;
     }
-    if ((*race).replayPlayMode ==
+    if ((candidate.race).replayPlayMode ==
         uint(
                 EChallengePlayMode_Shortcut)) {
-        ++(*progress).finishCount;
-        (*progress).completedLapCount = 1u;
-        (*progress).raceCompleted = true;
+        ++((candidate.race).progress).finishCount;
+        ((candidate.race).progress).completedLapCount = 1u;
+        ((candidate.race).progress).raceCompleted = true;
         return;
     }
     const uint finishSlot =
-            (*progress).requiredCheckpointCount;
+            ((candidate.race).progress).requiredCheckpointCount;
     const GmIso4 unusedSpawn = GmIso4();
     if (!AcceptCheckpointSlot(
                 candidate, finishSlot, finishSlot,
                 unusedSpawn, false)) {
         return;
     }
-    ++(*progress).finishCount;
-    ++(*progress).completedLapCount;
-    if ((*progress).requiredLapCount != 0u &&
-        (*progress).completedLapCount >=
-                (*progress).requiredLapCount) {
-        (*progress).raceCompleted = true;
+    ++((candidate.race).progress).finishCount;
+    ++((candidate.race).progress).completedLapCount;
+    if (((candidate.race).progress).requiredLapCount != 0u &&
+        ((candidate.race).progress).completedLapCount >=
+                ((candidate.race).progress).requiredLapCount) {
+        ((candidate.race).progress).raceCompleted = true;
         return;
     }
-    CheckpointSlotsClear((*race).checkpointSlotsPassed);
-    (*progress).currentLapCheckpointCount = 0u;
+    CheckpointSlotsClear((candidate.race).checkpointSlotsPassed);
+    ((candidate.race).progress).currentLapCheckpointCount = 0u;
 }
 
 }  // namespace detail
@@ -5896,10 +5918,10 @@ inline void AddReplacement<let CompactReplacements : bool = false>(
         return;
     
 }
-    CudaFixedArray<GmVec3, CudaCollisionReplacementInlineCapacity> *items = &candidate.body.collisionReplacements;
-    if ((*items).count <
-        sizeof((*items).values) / sizeof((*items).values[0])) {
-        (*items).values[(*items).count++] = replacement;
+
+    if ((candidate.body.collisionReplacements).count <
+        sizeof((candidate.body.collisionReplacements).values) / sizeof((candidate.body.collisionReplacements).values[0])) {
+        (candidate.body.collisionReplacements).values[(candidate.body.collisionReplacements).count++] = replacement;
         candidate.body.dynamicActive = true;
         return;
     }
@@ -5925,11 +5947,11 @@ inline void AddReplacement<let CompactReplacements : bool = false>(
         CudaPackedStaticConfigurationHeader *configuration,
         __constref GmVec3 localImpulse,
         __constref GmVec3 localPoint) {
-    CHmsDyna__CHmsStateDyna *state = &candidate.body.current;
+
     const GmVec3 worldImpulse = detail::TransformDirection(
-            (*state).rotation, localImpulse);
+            (candidate.body.current).rotation, localImpulse);
     const GmIso4 statePose = {
-            (*state).rotation, (*state).position};
+            (candidate.body.current).rotation, (candidate.body.current).position};
     const GmVec3 worldPoint =
             detail::TransformPoint(statePose, localPoint);
     const GmVec3 worldCom = detail::TransformPoint(
@@ -5938,17 +5960,17 @@ inline void AddReplacement<let CompactReplacements : bool = false>(
     const float inverseMass = forevervalidator::simulation::cuda::exact::Divide(
             1.0f, candidate.body.parameters.mass);
     GmVec3 linear = {
-            (*state).linearSpeed.x +
+            (candidate.body.current).linearSpeed.x +
                     worldImpulse.x * inverseMass,
-            (*state).linearSpeed.y +
+            (candidate.body.current).linearSpeed.y +
                     worldImpulse.y * inverseMass,
-            (*state).linearSpeed.z +
+            (candidate.body.current).linearSpeed.z +
                     worldImpulse.z * inverseMass,
     };
     const float oldLength =
-            ((*state).linearSpeed.y * (*state).linearSpeed.y +
-             (*state).linearSpeed.x * (*state).linearSpeed.x) +
-            (*state).linearSpeed.z * (*state).linearSpeed.z;
+            ((candidate.body.current).linearSpeed.y * (candidate.body.current).linearSpeed.y +
+             (candidate.body.current).linearSpeed.x * (candidate.body.current).linearSpeed.x) +
+            (candidate.body.current).linearSpeed.z * (candidate.body.current).linearSpeed.z;
     const float newLength =
             (linear.y * linear.y + linear.x * linear.x) +
             linear.z * linear.z;
@@ -5958,7 +5980,7 @@ inline void AddReplacement<let CompactReplacements : bool = false>(
                 newLength - oldLength) {
         linear = {};
     }
-    (*state).linearSpeed = linear;
+    (candidate.body.current).linearSpeed = linear;
 
     const GmVec3 lever = {
             worldPoint.x - worldCom.x,
@@ -5974,7 +5996,7 @@ inline void AddReplacement<let CompactReplacements : bool = false>(
                     lever.y * worldImpulse.x,
     };
     angular = detail::TransformDirection(
-            (*state).inverseInertiaWorld, angular);
+            (candidate.body.current).inverseInertiaWorld, angular);
     const float scale = configuration->tuning.contactResponse.
             pointImpulseAngularScale;
     angular.x = scale * angular.x;
@@ -5983,24 +6005,24 @@ inline void AddReplacement<let CompactReplacements : bool = false>(
     angular.y =
             configuration->tuning.contactResponse.
                     pointImpulseAngularYScale * angular.y;
-    (*state).angularSpeed.x += angular.x;
-    (*state).angularSpeed.y += angular.y;
-    (*state).angularSpeed.z += angular.z;
+    (candidate.body.current).angularSpeed.x += angular.x;
+    (candidate.body.current).angularSpeed.y += angular.y;
+    (candidate.body.current).angularSpeed.z += angular.z;
 
     const float maximum = configuration->tuning.contactResponse.
             pointImpulseAngularSpeedMax;
     const float angularLength =
-            ((*state).angularSpeed.y * (*state).angularSpeed.y +
-             (*state).angularSpeed.x * (*state).angularSpeed.x) +
-            (*state).angularSpeed.z * (*state).angularSpeed.z;
+            ((candidate.body.current).angularSpeed.y * (candidate.body.current).angularSpeed.y +
+             (candidate.body.current).angularSpeed.x * (candidate.body.current).angularSpeed.x) +
+            (candidate.body.current).angularSpeed.z * (candidate.body.current).angularSpeed.z;
     if (angularLength > maximum * maximum) {
         const float length = forevervalidator::simulation::cuda::exact::Sqrt(angularLength);
         const float clamp = forevervalidator::simulation::cuda::exact::FromDouble(
                 double(maximum) /
                 double(length));
-        (*state).angularSpeed.x *= clamp;
-        (*state).angularSpeed.y *= clamp;
-        (*state).angularSpeed.z *= clamp;
+        (candidate.body.current).angularSpeed.x *= clamp;
+        (candidate.body.current).angularSpeed.y *= clamp;
+        (candidate.body.current).angularSpeed.z *= clamp;
     }
     Accumulate(candidate.vehicle.forceAccumulators.impulse,
                localImpulse);
@@ -6142,13 +6164,13 @@ struct MaterialData {
         inout CudaCandidatePhysicsState candidate,
         __constref GmVec3 impulse,
         __constref GmVec3 point) {
-    CHmsDyna__CHmsStateDyna *state = &candidate.body.current;
+
     const float inverseMass = forevervalidator::simulation::cuda::exact::Divide(
             1.0f, candidate.body.parameters.mass);
-    (*state).linearSpeed.x += impulse.x * inverseMass;
-    (*state).linearSpeed.y += impulse.y * inverseMass;
-    (*state).linearSpeed.z =
-            impulse.z * inverseMass + (*state).linearSpeed.z;
+    (candidate.body.current).linearSpeed.x += impulse.x * inverseMass;
+    (candidate.body.current).linearSpeed.y += impulse.y * inverseMass;
+    (candidate.body.current).linearSpeed.z =
+            impulse.z * inverseMass + (candidate.body.current).linearSpeed.z;
     if (forevervalidator::simulation::cuda::dynamics::IsFullAngular(candidate.body)) {
         const GmVec3 center = WorldCenterOfMass(candidate);
         const GmVec3 lever = {
@@ -6165,11 +6187,11 @@ struct MaterialData {
                         lever.y * impulse.x,
         };
         angular = detail::TransformDirection(
-                (*state).inverseInertiaWorld, angular);
-        (*state).angularSpeed.x += angular.x;
-        (*state).angularSpeed.y += angular.y;
-        (*state).angularSpeed.z =
-                angular.z + (*state).angularSpeed.z;
+                (candidate.body.current).inverseInertiaWorld, angular);
+        (candidate.body.current).angularSpeed.x += angular.x;
+        (candidate.body.current).angularSpeed.y += angular.y;
+        (candidate.body.current).angularSpeed.z =
+                angular.z + (candidate.body.current).angularSpeed.z;
     }
     candidate.body.dynamicActive = true;
 }
@@ -6416,31 +6438,30 @@ inline void ApplyGenericImpulse(
         inout CudaCandidatePhysicsState candidate,
         CudaPackedStaticConfigurationHeader *configuration,
         inout Contact contact) {
-    CudaWheelState *wheel =
-            &candidate.vehicle.wheels.values[contact.wheelIndex];
+
     const float maximumNormalX =
             forevervalidator::simulation::cuda::exact::Sin(3.1415927f * 0.25f);
-    (*wheel).realTime.contactPresent =
+    (candidate.vehicle.wheels.values[contact.wheelIndex]).realTime.contactPresent =
             abs(contact.localNormal.x) < maximumNormalX;
-    if (!(*wheel).realTime.contactPresent) {
+    if (!(candidate.vehicle.wheels.values[contact.wheelIndex]).realTime.contactPresent) {
         candidate.vehicle.contacts.
                 lateralSlowDownContactActive = true;
-        (*wheel).realTime.rejectedNormalContactPoint =
+        (candidate.vehicle.wheels.values[contact.wheelIndex]).realTime.rejectedNormalContactPoint =
                 contact.localPoint;
-        (*wheel).realTime.rejectedNormalContact = true;
+        (candidate.vehicle.wheels.values[contact.wheelIndex]).realTime.rejectedNormalContact = true;
     } else {
-        ++(*wheel).realTime.contactNormalSampleCount;
-        Accumulate((*wheel).realTime.accumulatedContactNormal,
+        ++(candidate.vehicle.wheels.values[contact.wheelIndex]).realTime.contactNormalSampleCount;
+        Accumulate((candidate.vehicle.wheels.values[contact.wheelIndex]).realTime.accumulatedContactNormal,
                    contact.localNormal);
-        (*wheel).realTime.contactMaterial =
+        (candidate.vehicle.wheels.values[contact.wheelIndex]).realTime.contactMaterial =
                 uint8_t(
                         contact.peerMaterial);
     }
     contact.accepted = false;
-    (*wheel).realTime.latestContactPoint = contact.localPoint;
-    (*wheel).realTime.peerZAxisInCarLocal =
+    (candidate.vehicle.wheels.values[contact.wheelIndex]).realTime.latestContactPoint = contact.localPoint;
+    (candidate.vehicle.wheels.values[contact.wheelIndex]).realTime.peerZAxisInCarLocal =
             contact.peerZAxis;
-    (*wheel).realTime.peerCorpusId =
+    (candidate.vehicle.wheels.values[contact.wheelIndex]).realTime.peerCorpusId =
             CHmsCorpusId(contact.peerCorpusId);
     if (::forevervalidator::simulation::cuda::facts::WheelForceMode(configuration) !=
         uint(
@@ -6448,9 +6469,9 @@ inline void ApplyGenericImpulse(
         return;
     }
     const bool blocked = ApplyWheelReplacement(
-            (*wheel), contact, configuration);
-    if ((*wheel).realTime.contactPresent) {
-        ApplyWheelImpulse(candidate, configuration, (*wheel),
+            (candidate.vehicle.wheels.values[contact.wheelIndex]), contact, configuration);
+    if ((candidate.vehicle.wheels.values[contact.wheelIndex]).realTime.contactPresent) {
+        ApplyWheelImpulse(candidate, configuration, (candidate.vehicle.wheels.values[contact.wheelIndex]),
                           contact, blocked);
         return;
     }
@@ -6686,38 +6707,37 @@ static const float Pi = 3.1415927f;
 
  inline void UpdateBodyContactSnapshot(
         inout CudaCandidatePhysicsState candidate) {
-    CSceneVehicleCar__SContacts *contacts = &candidate.vehicle.contacts;
-    CudaVehicleCarFrameState *frame =
-            &candidate.vehicle.frameHistory.physicsCurrent;
-    if ((*contacts).bodyContactCount == 0u) {
-        (*frame).hasBodyContact = false;
-        (*frame).bodyContactVerticalAngle = 0.0f;
-        (*frame).bodyContactHorizontalAngle = 0.0f;
+
+
+    if ((candidate.vehicle.contacts).bodyContactCount == 0u) {
+        (candidate.vehicle.frameHistory.physicsCurrent).hasBodyContact = false;
+        (candidate.vehicle.frameHistory.physicsCurrent).bodyContactVerticalAngle = 0.0f;
+        (candidate.vehicle.frameHistory.physicsCurrent).bodyContactHorizontalAngle = 0.0f;
         return;
     }
     const float normalLength =
-            ((*contacts).bodyContactNormalSum.x *
-                     (*contacts).bodyContactNormalSum.x +
-             (*contacts).bodyContactNormalSum.y *
-                     (*contacts).bodyContactNormalSum.y) +
-            (*contacts).bodyContactNormalSum.z *
-                    (*contacts).bodyContactNormalSum.z;
+            ((candidate.vehicle.contacts).bodyContactNormalSum.x *
+                     (candidate.vehicle.contacts).bodyContactNormalSum.x +
+             (candidate.vehicle.contacts).bodyContactNormalSum.y *
+                     (candidate.vehicle.contacts).bodyContactNormalSum.y) +
+            (candidate.vehicle.contacts).bodyContactNormalSum.z *
+                    (candidate.vehicle.contacts).bodyContactNormalSum.z;
     if (normalLength > VectorEpsilonSquared) {
-        (*contacts).bodyContactNormalSum = Scale(
-                (*contacts).bodyContactNormalSum,
+        (candidate.vehicle.contacts).bodyContactNormalSum = Scale(
+                (candidate.vehicle.contacts).bodyContactNormalSum,
                 forevervalidator::simulation::cuda::exact::Divide(1.0f, forevervalidator::simulation::cuda::exact::Sqrt(normalLength)));
     }
-    (*contacts).bodyContactNormalSum =
-            Scale((*contacts).bodyContactNormalSum, -1.0f);
+    (candidate.vehicle.contacts).bodyContactNormalSum =
+            Scale((candidate.vehicle.contacts).bodyContactNormalSum, -1.0f);
     const float inverseCount = forevervalidator::simulation::cuda::exact::Divide(
             1.0f,
-            forevervalidator::simulation::cuda::exact::FromUnsignedInteger((*contacts).bodyContactCount));
-    (*contacts).bodyContactPointSum =
-            Scale((*contacts).bodyContactPointSum, inverseCount);
+            forevervalidator::simulation::cuda::exact::FromUnsignedInteger((candidate.vehicle.contacts).bodyContactCount));
+    (candidate.vehicle.contacts).bodyContactPointSum =
+            Scale((candidate.vehicle.contacts).bodyContactPointSum, inverseCount);
 
     GmVec3 horizontal = {
-            (*contacts).bodyContactNormalSum.x,
-            (*contacts).bodyContactNormalSum.y,
+            (candidate.vehicle.contacts).bodyContactNormalSum.x,
+            (candidate.vehicle.contacts).bodyContactNormalSum.y,
             0.0f,
     };
     const float horizontalLength =
@@ -6728,15 +6748,15 @@ static const float Pi = 3.1415927f;
                 horizontal,
                 forevervalidator::simulation::cuda::exact::Divide(1.0f, forevervalidator::simulation::cuda::exact::Sqrt(horizontalLength)));
     }
-    (*frame).bodyContactHorizontalAngle =
+    (candidate.vehicle.frameHistory.physicsCurrent).bodyContactHorizontalAngle =
             forevervalidator::simulation::cuda::exact::Divide(
                     abs(forevervalidator::simulation::cuda::exact::Atan2(
                             abs(horizontal.x), -horizontal.y)),
                     Pi);
     GmVec3 vertical = {
             0.0f,
-            (*contacts).bodyContactNormalSum.y,
-            (*contacts).bodyContactNormalSum.z,
+            (candidate.vehicle.contacts).bodyContactNormalSum.y,
+            (candidate.vehicle.contacts).bodyContactNormalSum.z,
     };
     const float verticalLength =
             vertical.y * vertical.y +
@@ -6746,53 +6766,53 @@ static const float Pi = 3.1415927f;
                 vertical,
                 forevervalidator::simulation::cuda::exact::Divide(1.0f, forevervalidator::simulation::cuda::exact::Sqrt(verticalLength)));
     }
-    (*frame).bodyContactVerticalAngle =
+    (candidate.vehicle.frameHistory.physicsCurrent).bodyContactVerticalAngle =
             forevervalidator::simulation::cuda::exact::Divide(
                     abs(forevervalidator::simulation::cuda::exact::Atan2(
                             abs(vertical.z), -vertical.y)),
                     Pi);
-    (*frame).bodyContactZPositive = 0.0f < vertical.z;
-    (*frame).hasBodyContact = true;
+    (candidate.vehicle.frameHistory.physicsCurrent).bodyContactZPositive = 0.0f < vertical.z;
+    (candidate.vehicle.frameHistory.physicsCurrent).hasBodyContact = true;
 }
 
  inline void UpdateWheelSnapshot(
         inout CudaCandidatePhysicsState candidate,
         inout CudaWheelState wheel) {
     wheel.previousPhysics = wheel.currentPhysics;
-    CSceneVehicleCar__SSimulationWheel__SState *snapshot = &wheel.currentPhysics;
-    (*snapshot).damperAbsorb = wheel.realTime.damperAbsorb;
-    (*snapshot).wheelSpinAngle = wheel.realTime.wheelSpinAngle;
-    (*snapshot).currentVisualSteerAngle =
+
+    (wheel.currentPhysics).damperAbsorb = wheel.realTime.damperAbsorb;
+    (wheel.currentPhysics).wheelSpinAngle = wheel.realTime.wheelSpinAngle;
+    (wheel.currentPhysics).currentVisualSteerAngle =
             wheel.realTime.currentVisualSteerAngle;
-    (*snapshot).contactMaterial = wheel.realTime.contactMaterial;
-    (*snapshot).contactPresent = wheel.realTime.contactPresent;
-    (*snapshot).slipping = wheel.realTime.slipping;
-    (*snapshot).localSurfacePoint =
+    (wheel.currentPhysics).contactMaterial = wheel.realTime.contactMaterial;
+    (wheel.currentPhysics).contactPresent = wheel.realTime.contactPresent;
+    (wheel.currentPhysics).slipping = wheel.realTime.slipping;
+    (wheel.currentPhysics).localSurfacePoint =
             wheel.currentPose.translation;
-    (*snapshot).localSurfacePoint.y -= wheel.rollingRadius;
-    (*snapshot).worldSurfacePoint = forevervalidator::simulation::cuda::collision::detail::TransformPoint(
+    (wheel.currentPhysics).localSurfacePoint.y -= wheel.rollingRadius;
+    (wheel.currentPhysics).worldSurfacePoint = forevervalidator::simulation::cuda::collision::detail::TransformPoint(
             candidate.vehicle.frameHistory.physicsCurrent.corpusIso,
-            (*snapshot).localSurfacePoint);
-    (*snapshot).visualRotation = wheel.realTime.visualRotation;
-    (*snapshot).rejectedNormalContact =
+            (wheel.currentPhysics).localSurfacePoint);
+    (wheel.currentPhysics).visualRotation = wheel.realTime.visualRotation;
+    (wheel.currentPhysics).rejectedNormalContact =
             wheel.realTime.rejectedNormalContact;
-    (*snapshot).rejectedNormalContactPoint =
+    (wheel.currentPhysics).rejectedNormalContactPoint =
             wheel.realTime.rejectedNormalContactPoint;
 }
 
  inline void UpdateMaterialFeedback(
         inout CudaCandidatePhysicsState candidate,
         CudaPackedStaticConfigurationHeader *configuration) {
-    CudaVehicleState *vehicle = &candidate.vehicle;
+
     VehicleMaterialDefinition material =
             MaterialConst(configuration,
                      uint(
-                             (*vehicle).contacts.
+                             (candidate.vehicle).contacts.
                                      lastWheelContactMaterial));
     const float absoluteForward = abs(
-            (*vehicle).frameHistory.physicsCurrent.forwardSpeed);
+            (candidate.vehicle).frameHistory.physicsCurrent.forwardSpeed);
     float depth = 0.0f;
-    if ((*vehicle).airControl.refreshMemory) {
+    if ((candidate.vehicle).airControl.refreshMemory) {
         const float scaled =
                 material.fakeContactSpeedScale *
                 absoluteForward;
@@ -6807,47 +6827,47 @@ static const float Pi = 3.1415927f;
     }
     const float speedTarget = forevervalidator::simulation::cuda::exact::Divide(
             absoluteForward, material.feedbackSpeedDivisor);
-    CudaVehicleCarFrameState *frame = &(*vehicle).frameHistory.physicsCurrent;
+
     const float feedbackSpeed = Smooth(
-            (*frame).materialFeedbackSpeed,
+            ((candidate.vehicle).frameHistory.physicsCurrent).materialFeedbackSpeed,
             speedTarget, 0.5f);
-    (*frame).materialFeedbackSpeed = feedbackSpeed;
+    ((candidate.vehicle).frameHistory.physicsCurrent).materialFeedbackSpeed = feedbackSpeed;
     const float feedbackIntensity = Smooth(
-            (*frame).materialFeedbackIntensity,
+            ((candidate.vehicle).frameHistory.physicsCurrent).materialFeedbackIntensity,
             cappedIntensity, 0.05f);
-    (*frame).materialFeedbackIntensity = feedbackIntensity;
-    if ((*vehicle).contacts.bodyImpactState >=
+    ((candidate.vehicle).frameHistory.physicsCurrent).materialFeedbackIntensity = feedbackIntensity;
+    if ((candidate.vehicle).contacts.bodyImpactState >=
                 CSceneVehicleCarImpactState_CSceneVehicleCarImpactState_High ||
-        ((*vehicle).contacts.frontWheelImpactState >=
+        ((candidate.vehicle).contacts.frontWheelImpactState >=
                  CSceneVehicleCarImpactState_CSceneVehicleCarImpactState_High &&
-         (*vehicle).contacts.rearWheelImpactState !=
+         (candidate.vehicle).contacts.rearWheelImpactState !=
                  CSceneVehicleCarImpactState_CSceneVehicleCarImpactState_None)) {
-        (*frame).materialFeedbackSpeed = 2.0f;
+        ((candidate.vehicle).frameHistory.physicsCurrent).materialFeedbackSpeed = 2.0f;
         if (2.0f <= feedbackSpeed) {
-            (*frame).materialFeedbackSpeed = feedbackSpeed;
+            ((candidate.vehicle).frameHistory.physicsCurrent).materialFeedbackSpeed = feedbackSpeed;
         }
-        (*frame).materialFeedbackIntensity = 1.0f;
+        ((candidate.vehicle).frameHistory.physicsCurrent).materialFeedbackIntensity = 1.0f;
         if (1.0f <= feedbackIntensity) {
-            (*frame).materialFeedbackIntensity =
+            ((candidate.vehicle).frameHistory.physicsCurrent).materialFeedbackIntensity =
                     feedbackIntensity;
         }
         return;
     }
-    if ((*vehicle).contacts.bodyImpactState ==
+    if ((candidate.vehicle).contacts.bodyImpactState ==
                 CSceneVehicleCarImpactState_CSceneVehicleCarImpactState_None &&
-        ((*vehicle).contacts.frontWheelImpactState ==
+        ((candidate.vehicle).contacts.frontWheelImpactState ==
                  CSceneVehicleCarImpactState_CSceneVehicleCarImpactState_None ||
-         (*vehicle).contacts.rearWheelImpactState ==
+         (candidate.vehicle).contacts.rearWheelImpactState ==
                  CSceneVehicleCarImpactState_CSceneVehicleCarImpactState_None)) {
         return;
     }
-    (*frame).materialFeedbackSpeed = 4.0f;
+    ((candidate.vehicle).frameHistory.physicsCurrent).materialFeedbackSpeed = 4.0f;
     if (4.0f <= feedbackSpeed) {
-        (*frame).materialFeedbackSpeed = feedbackSpeed;
+        ((candidate.vehicle).frameHistory.physicsCurrent).materialFeedbackSpeed = feedbackSpeed;
     }
-    (*frame).materialFeedbackIntensity = 0.66f;
+    ((candidate.vehicle).frameHistory.physicsCurrent).materialFeedbackIntensity = 0.66f;
     if (0.66f <= feedbackIntensity) {
-        (*frame).materialFeedbackIntensity = feedbackIntensity;
+        ((candidate.vehicle).frameHistory.physicsCurrent).materialFeedbackIntensity = feedbackIntensity;
     }
 }
 
@@ -6856,13 +6876,13 @@ static const float Pi = 3.1415927f;
  inline void AfterContacts(
         inout CudaCandidatePhysicsState candidate,
         CudaPackedStaticConfigurationHeader *configuration) {
-    CudaVehicleState *vehicle = &candidate.vehicle;
-    (*vehicle).frameHistory.physicsPrevious =
-            (*vehicle).frameHistory.physicsCurrent;
+
+    (candidate.vehicle).frameHistory.physicsPrevious =
+            (candidate.vehicle).frameHistory.physicsCurrent;
     for (uint wheel = 0u;
-         wheel < forevervalidator::simulation::cuda::facts::WheelCount(vehicle); ++wheel) {
-        (*vehicle).wheels.values[wheel].previousPhysics =
-                (*vehicle).wheels.values[wheel].currentPhysics;
+         wheel < (candidate.vehicle).wheels.count; ++wheel) {
+        (candidate.vehicle).wheels.values[wheel].previousPhysics =
+                (candidate.vehicle).wheels.values[wheel].currentPhysics;
     }
     const GmVec3 worldLinearSpeed =
             candidate.body.current.linearSpeed;
@@ -6877,53 +6897,53 @@ static const float Pi = 3.1415927f;
                     candidate.body.current.rotation.basisZ,
                     worldLinearSpeed),
     };
-    CudaVehicleCarFrameState *frame = &(*vehicle).frameHistory.physicsCurrent;
-    (*frame).forwardSpeed = linearSpeed.z;
-    (*frame).sideSpeed = linearSpeed.x;
-    (*frame).engineInputMemory =
-            (*vehicle).engine.engineInputMemory;
-    (*frame).turboActive =
-            (*vehicle).turbo.type !=
+
+    ((candidate.vehicle).frameHistory.physicsCurrent).forwardSpeed = linearSpeed.z;
+    ((candidate.vehicle).frameHistory.physicsCurrent).sideSpeed = linearSpeed.x;
+    ((candidate.vehicle).frameHistory.physicsCurrent).engineInputMemory =
+            (candidate.vehicle).engine.engineInputMemory;
+    ((candidate.vehicle).frameHistory.physicsCurrent).turboActive =
+            (candidate.vehicle).turbo.type !=
             CSceneVehicleCar__ETurboType_ETurboType_Inactive;
-    (*frame).turboProgressRatio = (*vehicle).turbo.progressRatio;
-    (*frame).corpusIso = candidate.body.corpusLocalIso;
-    (*frame).vehicleEvent0Value = (*vehicle).vehicleEvents[0].value;
-    (*frame).waterSplashEventCounter =
-            (*vehicle).vehicleEvents[1].value;
-    (*frame).localLinearSpeed =
+    ((candidate.vehicle).frameHistory.physicsCurrent).turboProgressRatio = (candidate.vehicle).turbo.progressRatio;
+    ((candidate.vehicle).frameHistory.physicsCurrent).corpusIso = candidate.body.corpusLocalIso;
+    ((candidate.vehicle).frameHistory.physicsCurrent).vehicleEvent0Value = (candidate.vehicle).vehicleEvents[0].value;
+    ((candidate.vehicle).frameHistory.physicsCurrent).waterSplashEventCounter =
+            (candidate.vehicle).vehicleEvents[1].value;
+    ((candidate.vehicle).frameHistory.physicsCurrent).localLinearSpeed =
             forevervalidator::simulation::cuda::collision::detail::TransformDirection(
-                    (*frame).corpusIso.rotation, linearSpeed);
-    (*frame).wheelSpeedOverrideActive =
-            (*vehicle).gearedDrive.wheelSpeedOverrideActive;
-    (*frame).airControlRefreshMemory =
-            (*vehicle).airControl.refreshMemory;
-    (*frame).surfaceFeedbackAccumulator =
-            (*vehicle).feedback.surfaceAccumulator;
-    (*frame).steeringControl = (*vehicle).controls.steeringControl;
-    (*frame).lowSpeedGateB = (*vehicle).controls.lowSpeedGateB;
-    (*frame).lowSpeedGateA = (*vehicle).controls.lowSpeedGateA;
-    (*frame).engineControlState = (*vehicle).gearedDrive.engineState;
-    (*frame).shiftDirection = (*vehicle).gearedDrive.shiftDirection;
-    (*frame).feedbackSideSpringValue =
-            (*vehicle).feedback.sideSpring.value;
-    (*frame).feedbackForwardSpringValue =
-            (*vehicle).feedback.forwardSpring.value;
-    (*frame).feedbackRamp1 = (*vehicle).feedback.ramp1;
-    (*frame).feedbackRamp0 = (*vehicle).feedback.ramp0;
+                    ((candidate.vehicle).frameHistory.physicsCurrent).corpusIso.rotation, linearSpeed);
+    ((candidate.vehicle).frameHistory.physicsCurrent).wheelSpeedOverrideActive =
+            (candidate.vehicle).gearedDrive.wheelSpeedOverrideActive;
+    ((candidate.vehicle).frameHistory.physicsCurrent).airControlRefreshMemory =
+            (candidate.vehicle).airControl.refreshMemory;
+    ((candidate.vehicle).frameHistory.physicsCurrent).surfaceFeedbackAccumulator =
+            (candidate.vehicle).feedback.surfaceAccumulator;
+    ((candidate.vehicle).frameHistory.physicsCurrent).steeringControl = (candidate.vehicle).controls.steeringControl;
+    ((candidate.vehicle).frameHistory.physicsCurrent).lowSpeedGateB = (candidate.vehicle).controls.lowSpeedGateB;
+    ((candidate.vehicle).frameHistory.physicsCurrent).lowSpeedGateA = (candidate.vehicle).controls.lowSpeedGateA;
+    ((candidate.vehicle).frameHistory.physicsCurrent).engineControlState = (candidate.vehicle).gearedDrive.engineState;
+    ((candidate.vehicle).frameHistory.physicsCurrent).shiftDirection = (candidate.vehicle).gearedDrive.shiftDirection;
+    ((candidate.vehicle).frameHistory.physicsCurrent).feedbackSideSpringValue =
+            (candidate.vehicle).feedback.sideSpring.value;
+    ((candidate.vehicle).frameHistory.physicsCurrent).feedbackForwardSpringValue =
+            (candidate.vehicle).feedback.forwardSpring.value;
+    ((candidate.vehicle).frameHistory.physicsCurrent).feedbackRamp1 = (candidate.vehicle).feedback.ramp1;
+    ((candidate.vehicle).frameHistory.physicsCurrent).feedbackRamp0 = (candidate.vehicle).feedback.ramp0;
 
     after_detail::UpdateBodyContactSnapshot(candidate);
-    (*frame).hasWheelContact =
-            (*vehicle).contacts.wheelContactCount != 0u;
-    (*frame).noGroundFrictionGuard =
-            (*vehicle).controls.noGroundFrictionGuard;
-    (*vehicle).contacts.wheelContactCount = 0u;
-    (*vehicle).contacts.bodyContactCount = 0u;
-    (*vehicle).contacts.bodyContactPointSum = {};
-    (*vehicle).contacts.bodyContactNormalSum = {};
+    ((candidate.vehicle).frameHistory.physicsCurrent).hasWheelContact =
+            (candidate.vehicle).contacts.wheelContactCount != 0u;
+    ((candidate.vehicle).frameHistory.physicsCurrent).noGroundFrictionGuard =
+            (candidate.vehicle).controls.noGroundFrictionGuard;
+    (candidate.vehicle).contacts.wheelContactCount = 0u;
+    (candidate.vehicle).contacts.bodyContactCount = 0u;
+    (candidate.vehicle).contacts.bodyContactPointSum = {};
+    (candidate.vehicle).contacts.bodyContactNormalSum = {};
     for (uint wheel = 0u;
-         wheel < forevervalidator::simulation::cuda::facts::WheelCount(vehicle); ++wheel) {
+         wheel < (candidate.vehicle).wheels.count; ++wheel) {
         after_detail::UpdateWheelSnapshot(
-                candidate, (*vehicle).wheels.values[wheel]);
+                candidate, (candidate.vehicle).wheels.values[wheel]);
     }
     after_detail::UpdateMaterialFeedback(
             candidate, configuration);
@@ -6931,11 +6951,11 @@ static const float Pi = 3.1415927f;
 
  inline void AfterContactsWithoutSnapshots(
         inout CudaCandidatePhysicsState candidate) {
-    CSceneVehicleCar__SContacts *contacts = &candidate.vehicle.contacts;
-    (*contacts).wheelContactCount = 0u;
-    (*contacts).bodyContactCount = 0u;
-    (*contacts).bodyContactPointSum = {};
-    (*contacts).bodyContactNormalSum = {};
+
+    (candidate.vehicle.contacts).wheelContactCount = 0u;
+    (candidate.vehicle.contacts).bodyContactCount = 0u;
+    (candidate.vehicle.contacts).bodyContactPointSum = {};
+    (candidate.vehicle.contacts).bodyContactNormalSum = {};
 }
 
 }  // namespace forevervalidator::simulation::cuda::vehicle
@@ -7160,13 +7180,12 @@ inline void AddForceAtPoint<let ReuseWorldCenter : bool = false>(
         __constref GmVec3 sharedWorldCenter = {}) {
     const GmVec3 worldForce =
             LocalToWorld(candidate.body, localForce);
-    CHmsDyna__CHmsStateDyna *state =
-            &candidate.body.current;
-    (*state).force.x = worldForce.x + (*state).force.x;
-    (*state).force.y = (*state).force.y + worldForce.y;
-    (*state).force.z = (*state).force.z + worldForce.z;
-    GmMat3 rotation = (*state).rotation;
-    GmVec3 position = (*state).position;
+
+    (candidate.body.current).force.x = worldForce.x + (candidate.body.current).force.x;
+    (candidate.body.current).force.y = (candidate.body.current).force.y + worldForce.y;
+    (candidate.body.current).force.z = (candidate.body.current).force.z + worldForce.z;
+    GmMat3 rotation = (candidate.body.current).rotation;
+    GmVec3 position = (candidate.body.current).position;
     const GmVec3 worldPoint = {
             ((rotation.basisY.x * localPoint.y +
               rotation.basisX.x * localPoint.x) +
@@ -7199,9 +7218,9 @@ inline void AddForceAtPoint<let ReuseWorldCenter : bool = false>(
             rz * worldForce.x - rx * worldForce.z;
     const float torqueZ =
             rx * worldForce.y - ry * worldForce.x;
-    (*state).torque.x = (*state).torque.x + torqueX;
-    (*state).torque.y = (*state).torque.y + torqueY;
-    (*state).torque.z = (*state).torque.z + torqueZ;
+    (candidate.body.current).torque.x = (candidate.body.current).torque.x + torqueX;
+    (candidate.body.current).torque.y = (candidate.body.current).torque.y + torqueY;
+    (candidate.body.current).torque.z = (candidate.body.current).torque.z + torqueZ;
     candidate.vehicle.forceAccumulators.force.x =
             candidate.vehicle.forceAccumulators.force.x +
             localForce.x;
@@ -7527,7 +7546,7 @@ inline void AddForceAtPoint<let ReuseWorldCenter : bool = false>(
  inline void CreateFakeContacts(
         inout CudaCandidatePhysicsState candidate,
         CudaPackedStaticConfigurationHeader *configuration) {
-    CudaVehicleState *vehicle = &candidate.vehicle;
+
     const GmVec3 linearSpeed = WorldToLocal(
             candidate.body, candidate.body.current.linearSpeed);
     uint8_t *texture =
@@ -7535,9 +7554,9 @@ inline void AddForceAtPoint<let ReuseWorldCenter : bool = false>(
                     configuration,
                     configuration->fakeContactTextureRgb);
     for (uint index = 0u;
-         index < forevervalidator::simulation::cuda::facts::WheelCount(vehicle); ++index) {
-        CudaWheelState *wheel = &(*vehicle).wheels.values[index];
-        if (!(*wheel).realTime.contactPresent) continue;
+         index < (candidate.vehicle).wheels.count; ++index) {
+
+        if (!((candidate.vehicle).wheels.values[index]).realTime.contactPresent) continue;
         GmVec3 restTranslation =
                 forevervalidator::simulation::cuda::facts::Wheel(
                         configuration,
@@ -7545,7 +7564,7 @@ inline void AddForceAtPoint<let ReuseWorldCenter : bool = false>(
         VehicleMaterialDefinition *material = Material(
                 configuration,
                 uint(
-                        (*wheel).realTime.contactMaterial));
+                        ((candidate.vehicle).wheels.values[index]).realTime.contactMaterial));
         if (material == nullptr ||
             !(*material).usesFakeContactTexture ||
             texture == nullptr ||
@@ -7601,19 +7620,19 @@ inline void AddForceAtPoint<let ReuseWorldCenter : bool = false>(
         contact.replacement = {};
         contact.peerMaterial =
                 uint(
-                        (*wheel).realTime.contactMaterial);
+                        ((candidate.vehicle).wheels.values[index]).realTime.contactMaterial);
         contact.peerZAxis = {};
         contact.peerCorpusId = 0u;
         contact.wheelIndex = index;
         contact.accepted = true;
         const GmVec3 peerAxis =
-                (*wheel).realTime.peerZAxisInCarLocal;
+                ((candidate.vehicle).wheels.values[index]).realTime.peerZAxisInCarLocal;
         const CHmsCorpusId peerId =
-                (*wheel).realTime.peerCorpusId;
+                ((candidate.vehicle).wheels.values[index]).realTime.peerCorpusId;
         forevervalidator::simulation::cuda::collision::response_detail::AbsorbWheel(
                 candidate, configuration, contact);
-        (*wheel).realTime.peerZAxisInCarLocal = peerAxis;
-        (*wheel).realTime.peerCorpusId = peerId;
+        ((candidate.vehicle).wheels.values[index]).realTime.peerZAxisInCarLocal = peerAxis;
+        ((candidate.vehicle).wheels.values[index]).realTime.peerCorpusId = peerId;
     }
 }
 
@@ -7621,7 +7640,7 @@ inline void ApplyFrictionForces<let Handling : uint8_t = CudaHandlingSpecializat
         inout CudaCandidatePhysicsState candidate,
         CudaPackedStaticConfigurationHeader *configuration,
         __constref GmVec3 speed) {
-    CudaVehicleState *vehicle = &candidate.vehicle;
+
     bool slipHandling = false;
     if (
             Handling ==
@@ -7638,16 +7657,16 @@ inline void ApplyFrictionForces<let Handling : uint8_t = CudaHandlingSpecializat
                         CSceneVehicleCarHandlingModel_CSceneVehicleCarHandlingModel_GearedDrive;
     }
     if (slipHandling &&
-        (*vehicle).controls.noGroundFrictionGuard &&
-        !IsGroundContact((*vehicle))) {
+        (candidate.vehicle).controls.noGroundFrictionGuard &&
+        !IsGroundContact((candidate.vehicle))) {
         return;
     }
     const float gate =
-            !(*vehicle).engine.useLowSpeedGateB
-            ? (*vehicle).controls.lowSpeedGateA
-            : (*vehicle).controls.lowSpeedGateB;
+            !(candidate.vehicle).engine.useLowSpeedGateB
+            ? (candidate.vehicle).controls.lowSpeedGateA
+            : (candidate.vehicle).controls.lowSpeedGateB;
     if (gate < ScalarEpsilon ||
-        (*vehicle).controls.forcedLowSpeedFriction) {
+        (candidate.vehicle).controls.forcedLowSpeedFriction) {
         GmVec3 force = speed;
         const float lengthSquared =
                 (force.y * force.y + force.x * force.x) +
@@ -7665,7 +7684,7 @@ inline void ApplyFrictionForces<let Handling : uint8_t = CudaHandlingSpecializat
             force.x = frictionScale * force.x;
             force.y = force.y * frictionScale;
             force.z = frictionScale * force.z;
-            if (!(*vehicle).controls.forcedLowSpeedFriction) {
+            if (!(candidate.vehicle).controls.forcedLowSpeedFriction) {
                 const float dampingScale =
                         -forevervalidator::simulation::cuda::facts::Tuning(configuration).
                                 lowSpeedLinearDamping;
@@ -7682,7 +7701,7 @@ inline void ApplyFrictionForces<let Handling : uint8_t = CudaHandlingSpecializat
         }
     }
     if (!slipHandling) {
-        if ((*vehicle).contacts.lateralSlowDownContactActive) {
+        if ((candidate.vehicle).contacts.lateralSlowDownContactActive) {
             const float scale = -forevervalidator::simulation::cuda::tuning::EvaluateSpeed(
                     configuration,
                     CudaTuningCurveId_LateralContactSlowDownFromSpeed,
@@ -7696,13 +7715,13 @@ inline void ApplyFrictionForces<let Handling : uint8_t = CudaHandlingSpecializat
         return;
     }
     const uint tick = candidate.world.tickTimeMs;
-    if ((*vehicle).contacts.lateralSlowDownContactActive) {
-        (*vehicle).contacts.lateralSlowDownLastTick = tick;
+    if ((candidate.vehicle).contacts.lateralSlowDownContactActive) {
+        (candidate.vehicle).contacts.lateralSlowDownLastTick = tick;
     }
-    if ((*vehicle).contacts.lateralSlowDownLastTick <= tick) {
+    if ((candidate.vehicle).contacts.lateralSlowDownLastTick <= tick) {
         const uint elapsed =
                 tick -
-                (*vehicle).contacts.lateralSlowDownLastTick;
+                (candidate.vehicle).contacts.lateralSlowDownLastTick;
         if (elapsed < forevervalidator::simulation::cuda::facts::Tuning(configuration).slipResponse.
                               lateralSlowDownTickWindow) {
             const float speedSquared =
@@ -7862,7 +7881,7 @@ inline void UpdateAirControl<let Handling : uint8_t = CudaHandlingSpecialization
         __constref GmVec3 angularSpeed,
         bool groundContact,
     bool resetMemory) {
-    CudaVehicleState *vehicle = &candidate.vehicle;
+
     bool slipHandling = false;
     if (
             Handling ==
@@ -7879,7 +7898,7 @@ inline void UpdateAirControl<let Handling : uint8_t = CudaHandlingSpecialization
                         CSceneVehicleCarHandlingModel_CSceneVehicleCarHandlingModel_GearedDrive;
     }
     if (slipHandling &&
-        (*vehicle).controls.noGroundFrictionGuard) {
+        (candidate.vehicle).controls.noGroundFrictionGuard) {
         return;
     }
     GmVec3 torque = {
@@ -7888,54 +7907,54 @@ inline void UpdateAirControl<let Handling : uint8_t = CudaHandlingSpecialization
             -angularSpeed.z,
     };
     const uint tick = candidate.world.tickTimeMs;
-    if (resetMemory) (*vehicle).airControl.memoryTick = tick;
-    if (resetMemory || (*vehicle).airControl.refreshMemory) {
-        (*vehicle).airControl.memoryAngular = angularSpeed;
+    if (resetMemory) (candidate.vehicle).airControl.memoryTick = tick;
+    if (resetMemory || (candidate.vehicle).airControl.refreshMemory) {
+        (candidate.vehicle).airControl.memoryAngular = angularSpeed;
     } else if (
-            tick - vehicle.airControl.memoryTick <
+            tick - (candidate.vehicle).airControl.memoryTick <
             forevervalidator::simulation::cuda::facts::Tuning(configuration).bodyAirResponse.
                     airControlMemoryTickWindow) {
         GmVec3 target = angularSpeed;
         bool strong = false;
         if ((ScalarEpsilon <
-                     (*vehicle).controls.steeringControl &&
-             (*vehicle).airControl.memoryAngular.y < 0.0f) ||
-            ((*vehicle).controls.steeringControl < -ScalarEpsilon &&
-             0.0f < (*vehicle).airControl.memoryAngular.y)) {
+                     (candidate.vehicle).controls.steeringControl &&
+             (candidate.vehicle).airControl.memoryAngular.y < 0.0f) ||
+            ((candidate.vehicle).controls.steeringControl < -ScalarEpsilon &&
+             0.0f < (candidate.vehicle).airControl.memoryAngular.y)) {
             if (forevervalidator::simulation::cuda::facts::Tuning(configuration).bodyAirResponse.
                         airControlYSwitchThreshold <
                 abs(angularSpeed.y)) {
                 strong = true;
-                (*vehicle).airControl.memoryAngular.y =
+                (candidate.vehicle).airControl.memoryAngular.y =
                         angularSpeed.y;
             }
         } else {
             if (!(ScalarEpsilon <
-                          (*vehicle).controls.steeringControl) ||
+                          (candidate.vehicle).controls.steeringControl) ||
                 !(0.0f <
-                          (*vehicle).airControl.memoryAngular.y)) {
-                if ((*vehicle).controls.steeringControl <
+                          (candidate.vehicle).airControl.memoryAngular.y)) {
+                if ((candidate.vehicle).controls.steeringControl <
                             -ScalarEpsilon &&
-                    (*vehicle).airControl.memoryAngular.y < 0.0f) {
+                    (candidate.vehicle).airControl.memoryAngular.y < 0.0f) {
                     strong = true;
                 }
             } else {
                 strong = true;
             }
-            (*vehicle).airControl.memoryAngular.y = angularSpeed.y;
+            (candidate.vehicle).airControl.memoryAngular.y = angularSpeed.y;
         }
-        target.y = (*vehicle).airControl.memoryAngular.y;
+        target.y = (candidate.vehicle).airControl.memoryAngular.y;
         if (slipHandling) {
             if (ScalarEpsilon <
-                        (*vehicle).controls.lowSpeedGateB &&
+                        (candidate.vehicle).controls.lowSpeedGateB &&
                 0.0f <
-                        (*vehicle).airControl.memoryAngular.x) {
-                (*vehicle).airControl.memoryAngular.x = 0.0f;
+                        (candidate.vehicle).airControl.memoryAngular.x) {
+                (candidate.vehicle).airControl.memoryAngular.x = 0.0f;
             } else {
-                (*vehicle).airControl.memoryAngular.x =
+                (candidate.vehicle).airControl.memoryAngular.x =
                         angularSpeed.x;
             }
-            target.x = (*vehicle).airControl.memoryAngular.x;
+            target.x = (candidate.vehicle).airControl.memoryAngular.x;
         }
         if (strong) {
             torque.x *= 3.0f;
@@ -8125,48 +8144,48 @@ inline void UpdateAirControl<let Handling : uint8_t = CudaHandlingSpecialization
  inline void UpdateImpactStates(
         inout CudaVehicleState vehicle,
         CudaPackedStaticConfigurationHeader *configuration) {
-    CSceneVehicleCar__SContacts *contacts = &vehicle.contacts;
-    (*contacts).frontWheelImpactState = ImpactSeverity(
-            (*contacts).frontWheelImpactBucket,
+
+    (vehicle.contacts).frontWheelImpactState = ImpactSeverity(
+            (vehicle.contacts).frontWheelImpactBucket,
             forevervalidator::simulation::cuda::facts::Tuning(configuration).contactResponse.
                     wheelImpactFeedbackLowThreshold,
             forevervalidator::simulation::cuda::facts::Tuning(configuration).contactResponse.
                     wheelImpactFeedbackHighThreshold,
-            (*contacts).frontWheelImpactState);
-    (*contacts).rearWheelImpactState = ImpactSeverity(
-            (*contacts).rearWheelImpactBucket,
+            (vehicle.contacts).frontWheelImpactState);
+    (vehicle.contacts).rearWheelImpactState = ImpactSeverity(
+            (vehicle.contacts).rearWheelImpactBucket,
             forevervalidator::simulation::cuda::facts::Tuning(configuration).contactResponse.
                     wheelImpactFeedbackLowThreshold,
             forevervalidator::simulation::cuda::facts::Tuning(configuration).contactResponse.
                     wheelImpactFeedbackHighThreshold,
-            (*contacts).rearWheelImpactState);
-    (*contacts).bodyImpactState = ImpactSeverity(
-            (*contacts).bodyImpactBucket,
+            (vehicle.contacts).rearWheelImpactState);
+    (vehicle.contacts).bodyImpactState = ImpactSeverity(
+            (vehicle.contacts).bodyImpactBucket,
             forevervalidator::simulation::cuda::facts::Tuning(configuration).contactResponse.
                     bodyImpactFeedbackLowThreshold,
             forevervalidator::simulation::cuda::facts::Tuning(configuration).contactResponse.
                     bodyImpactFeedbackHighThreshold,
-            (*contacts).bodyImpactState);
-    if ((*contacts).peakRearWheelImpactState <
-        (*contacts).rearWheelImpactState) {
-        (*contacts).peakRearWheelImpactState =
-                (*contacts).rearWheelImpactState;
-        (*contacts).peakWheelImpactMaterial =
-                (*contacts).lastWheelContactMaterial;
+            (vehicle.contacts).bodyImpactState);
+    if ((vehicle.contacts).peakRearWheelImpactState <
+        (vehicle.contacts).rearWheelImpactState) {
+        (vehicle.contacts).peakRearWheelImpactState =
+                (vehicle.contacts).rearWheelImpactState;
+        (vehicle.contacts).peakWheelImpactMaterial =
+                (vehicle.contacts).lastWheelContactMaterial;
     }
-    if ((*contacts).peakFrontWheelImpactState <
-        (*contacts).frontWheelImpactState) {
-        (*contacts).peakFrontWheelImpactState =
-                (*contacts).frontWheelImpactState;
-        (*contacts).peakWheelImpactMaterial =
-                (*contacts).lastWheelContactMaterial;
+    if ((vehicle.contacts).peakFrontWheelImpactState <
+        (vehicle.contacts).frontWheelImpactState) {
+        (vehicle.contacts).peakFrontWheelImpactState =
+                (vehicle.contacts).frontWheelImpactState;
+        (vehicle.contacts).peakWheelImpactMaterial =
+                (vehicle.contacts).lastWheelContactMaterial;
     }
-    if ((*contacts).peakBodyImpactState <
-        (*contacts).bodyImpactState) {
-        (*contacts).peakBodyImpactState =
-                (*contacts).bodyImpactState;
-        (*contacts).peakBodyImpactMaterial =
-                (*contacts).lastBodyContactMaterial;
+    if ((vehicle.contacts).peakBodyImpactState <
+        (vehicle.contacts).bodyImpactState) {
+        (vehicle.contacts).peakBodyImpactState =
+                (vehicle.contacts).bodyImpactState;
+        (vehicle.contacts).peakBodyImpactMaterial =
+                (vehicle.contacts).lastBodyContactMaterial;
     }
 }
 
@@ -8176,15 +8195,15 @@ inline void UpdateAirControl<let Handling : uint8_t = CudaHandlingSpecialization
         __constref GmVec3 currentForce,
         uint tick,
         bool groundContact) {
-    CudaVehicleState *vehicle = &candidate.vehicle;
-    if (!((*vehicle).controls.specialContactResponseGate >
+
+    if (!((candidate.vehicle).controls.specialContactResponseGate >
           ScalarEpsilon)) {
         return;
     }
-    switch ((*vehicle).controls.specialContactResponseMode) {
+    switch ((candidate.vehicle).controls.specialContactResponseMode) {
     case CSceneVehicleCarSpecialContactMode_CSceneVehicleCarSpecialContactMode_ImpulseFromForce:
         if (groundContact &&
-            (*vehicle).contacts.
+            (candidate.vehicle).contacts.
                     specialContactImpulseCooldownUntil < tick) {
             GmVec3 impulse = {
                     -currentForce.x,
@@ -8210,7 +8229,7 @@ inline void UpdateAirControl<let Handling : uint8_t = CudaHandlingSpecialization
             impulse.y *= magnitude;
             impulse.z *= magnitude;
             AddCentralImpulse(candidate, impulse);
-            (*vehicle).contacts.
+            (candidate.vehicle).contacts.
                     specialContactImpulseCooldownUntil =
                     tick + 100u;
         }
@@ -8225,9 +8244,9 @@ inline void UpdateAirControl<let Handling : uint8_t = CudaHandlingSpecialization
                         vehicleContactFeedbackScale;
         break;
     case CSceneVehicleCarSpecialContactMode_CSceneVehicleCarSpecialContactMode_Turbo:
-        (*vehicle).turbo.type =
+        (candidate.vehicle).turbo.type =
                 CSceneVehicleCar__ETurboType_ETurboType_Direct;
-        vehicle.turbo.impulseScale =
+        (candidate.vehicle).turbo.impulseScale =
                 forevervalidator::simulation::cuda::facts::Tuning(configuration).turbo.impulseScaleA;
         break;
     default:
@@ -8278,8 +8297,8 @@ inline void UpdateAirControl<let Handling : uint8_t = CudaHandlingSpecialization
         __constref GmVec3 savedForce,
         __constref GmVec3 savedImpulse,
         float surfaceFeedback) {
-    CudaVehicleState *vehicle = &candidate.vehicle;
-    (*vehicle).gearedDrive.scaledCurrentForce =
+
+    (candidate.vehicle).gearedDrive.scaledCurrentForce =
             WorldToLocal(
                     candidate.body,
                     candidate.body.current.force);
@@ -8287,40 +8306,40 @@ inline void UpdateAirControl<let Handling : uint8_t = CudaHandlingSpecialization
             forevervalidator::simulation::cuda::exact::Divide(
                     1.0f,
                     forevervalidator::simulation::cuda::facts::Tuning(configuration).feedback.forceDivisor);
-    (*vehicle).gearedDrive.scaledCurrentForce.x *= forceScale;
-    (*vehicle).gearedDrive.scaledCurrentForce.y =
+    (candidate.vehicle).gearedDrive.scaledCurrentForce.x *= forceScale;
+    (candidate.vehicle).gearedDrive.scaledCurrentForce.y =
             forceScale *
-            (*vehicle).gearedDrive.scaledCurrentForce.y;
-    (*vehicle).gearedDrive.scaledCurrentForce.z *= forceScale;
+            (candidate.vehicle).gearedDrive.scaledCurrentForce.y;
+    (candidate.vehicle).gearedDrive.scaledCurrentForce.z *= forceScale;
     const float rate = forevervalidator::simulation::cuda::tuning::Evaluate(
             configuration, CudaTuningCurveId_SurfaceFeedback,
             surfaceFeedback) +
             forevervalidator::simulation::cuda::facts::Tuning(configuration).feedback.surfaceBaseRate;
     const float accumulated =
-            rate * dt + (*vehicle).feedback.surfaceAccumulator;
-    (*vehicle).feedback.surfaceAccumulator =
+            rate * dt + (candidate.vehicle).feedback.surfaceAccumulator;
+    (candidate.vehicle).feedback.surfaceAccumulator =
             ClampZeroOne(accumulated);
     UpdateFeedbackSpring(
-            (*vehicle), (*vehicle).feedback.sideSpring, dt,
+            (candidate.vehicle), (candidate.vehicle).feedback.sideSpring, dt,
             savedForce.x, savedImpulse.x, false);
     UpdateFeedbackSpring(
-            (*vehicle), (*vehicle).feedback.forwardSpring, dt,
+            (candidate.vehicle), (candidate.vehicle).feedback.forwardSpring, dt,
             savedForce.z, savedImpulse.z, true);
     const float direction = AllPresentWheelContactsMatchMaterial(
-            (*vehicle), FeedbackRampContactId)
+            (candidate.vehicle), FeedbackRampContactId)
             ? 1.0f
             : -1.0f;
     const float curveInput =
             abs(linearSpeed.z * 3.6f);
-    (*vehicle).feedback.ramp0 = ClampZeroOne(
-            (*vehicle).feedback.ramp0 +
+    (candidate.vehicle).feedback.ramp0 = ClampZeroOne(
+            (candidate.vehicle).feedback.ramp0 +
             forevervalidator::simulation::cuda::tuning::Evaluate(
                     configuration,
                     CudaTuningCurveId_VehicleFeedbackRamp0,
                     curveInput) *
                     dt * direction);
-    (*vehicle).feedback.ramp1 = ClampZeroOne(
-            (*vehicle).feedback.ramp1 +
+    (candidate.vehicle).feedback.ramp1 = ClampZeroOne(
+            (candidate.vehicle).feedback.ramp1 +
             forevervalidator::simulation::cuda::tuning::Evaluate(
                     configuration,
                     CudaTuningCurveId_VehicleFeedbackRamp1,
@@ -8332,14 +8351,14 @@ inline void UpdateAirControl<let Handling : uint8_t = CudaHandlingSpecialization
         inout CudaVehicleState vehicle) {
     for (uint index = 0u;
          index < forevervalidator::simulation::cuda::facts::WheelCount(vehicle); ++index) {
-        CSceneVehicleCar__SSimulationWheel__SRealTimeState *wheel = &vehicle.wheels.values[index].realTime;
-        (*wheel).contactPresent = false;
-        (*wheel).contactNormalSampleCount = 0u;
-        (*wheel).latestContactPoint = {};
-        (*wheel).accumulatedContactNormal = {};
-        (*wheel).contactMaterial =
+
+        (vehicle.wheels.values[index].realTime).contactPresent = false;
+        (vehicle.wheels.values[index].realTime).contactNormalSampleCount = 0u;
+        (vehicle.wheels.values[index].realTime).latestContactPoint = {};
+        (vehicle.wheels.values[index].realTime).accumulatedContactNormal = {};
+        (vehicle.wheels.values[index].realTime).contactMaterial =
                 EPlugSurfaceMaterialId_EPlugSurfaceMaterialId_Concrete;
-        (*wheel).rejectedNormalContact = false;
+        (vehicle.wheels.values[index].realTime).rejectedNormalContact = false;
     }
     vehicle.contacts.frontWheelImpactBucket = 0.0f;
     vehicle.contacts.bodyContactPresent = false;
@@ -8661,17 +8680,17 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
         bool hasMaterial,
         __constref VehicleMaterialBlendValues material,
         inout Model6Result result) {
-    CudaVehicleState *vehicle = &candidate.vehicle;
+
     const bool lateralHandling =
             forevervalidator::simulation::cuda::facts::Tuning(configuration).handlingModel ==
             uint(
                     CSceneVehicleCarHandlingModel_CSceneVehicleCarHandlingModel_Lateral);
     for (uint index = 0u;
-         index < forevervalidator::simulation::cuda::facts::WheelCount(vehicle); ++index) {
-        CudaWheelState *wheel = &(*vehicle).wheels.values[index];
+         index < (candidate.vehicle).wheels.count; ++index) {
+
         WheelSuspensionForce<ReuseWheelPassInvariants>(
-                candidate, configuration, (*wheel), index);
-        if (!wheel.realTime.contactPresent ||
+                candidate, configuration, ((candidate.vehicle).wheels.values[index]), index);
+        if (!((candidate.vehicle).wheels.values[index]).realTime.contactPresent ||
             !(forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                       lateralForceScale > 0.0f) ||
             !lateralHandling) {
@@ -8681,11 +8700,11 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
                 Material(
                         configuration,
                         uint(
-                                (*wheel).realTime.contactMaterial));
+                                ((candidate.vehicle).wheels.values[index]).realTime.contactMaterial));
         if (wheelMaterial == nullptr) {
             return ForceStatus::MissingMaterial;
         }
-        const float slipGrip = wheel.realTime.slipping
+        const float slipGrip = ((candidate.vehicle).wheels.values[index]).realTime.slipping
                 ? forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                           slippingSideFrictionScale
                 : 1.0f;
@@ -8697,8 +8716,8 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
                         linearSpeed.z) *
                 slipGrip;
         GmVec3 lateral = {
-                (*wheel).realTime.accumulatedContactNormal.y,
-                -(*wheel).realTime.accumulatedContactNormal.x,
+                ((candidate.vehicle).wheels.values[index]).realTime.accumulatedContactNormal.y,
+                -((candidate.vehicle).wheels.values[index]).realTime.accumulatedContactNormal.x,
                 0.0f,
         };
         lateral = wheel_detail::NormalizeOr(
@@ -8725,7 +8744,7 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
                  linearSpeed.z * lateral.z);
         const float sideForceMagnitude = abs(sideForce);
         if (!(maximumSide < sideForceMagnitude)) {
-            (*wheel).realTime.slipping = false;
+            ((candidate.vehicle).wheels.values[index]).realTime.slipping = false;
         } else {
             const float capped =
                     SignNonNegative(sideForce) * maximumSide;
@@ -8737,9 +8756,9 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
                     forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                             sideFrictionSlipBlend *
                             sideForce;
-            (*wheel).realTime.slipping = true;
+            ((candidate.vehicle).wheels.values[index]).realTime.slipping = true;
         }
-        if ((*wheel).realTime.slipping) {
+        if (((candidate.vehicle).wheels.values[index]).realTime.slipping) {
             result.slipFlag = 1;
         }
         const GmVec3 lateralForce = {
@@ -8772,32 +8791,32 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
             (linearSpeed.y * linearSpeed.y +
              linearSpeed.x * linearSpeed.x) +
             linearSpeed.z * linearSpeed.z);
-    if (!(*vehicle).controls.forcedLowSpeedFriction) {
+    if (!(candidate.vehicle).controls.forcedLowSpeedFriction) {
         if (!(speedMagnitude <
-              (*vehicle).reverseGearSpeedThreshold)) {
-            if ((*vehicle).controls.lowSpeedGateA >
+              (candidate.vehicle).reverseGearSpeedThreshold)) {
+            if ((candidate.vehicle).controls.lowSpeedGateA >
                 LowSpeedGateThreshold) {
-                (*vehicle).engine.useLowSpeedGateB = false;
+                (candidate.vehicle).engine.useLowSpeedGateB = false;
             }
         } else if (!(LowSpeedGateThreshold <
-                     (*vehicle).controls.lowSpeedGateB)) {
-            (*vehicle).engine.useLowSpeedGateB = false;
+                     (candidate.vehicle).controls.lowSpeedGateB)) {
+            (candidate.vehicle).engine.useLowSpeedGateB = false;
         } else {
-            (*vehicle).engine.useLowSpeedGateB = true;
+            (candidate.vehicle).engine.useLowSpeedGateB = true;
         }
     }
     for (uint index = 0u;
-         index < forevervalidator::simulation::cuda::facts::WheelCount(vehicle); ++index) {
-        CudaWheelState *wheel = &(*vehicle).wheels.values[index];
+         index < (candidate.vehicle).wheels.count; ++index) {
+
         const bool front =
                 forevervalidator::simulation::cuda::facts::WheelAxle(
                         configuration,
                         index) == VehicleWheelAxle_Front;
         const float halfTrack =
                 (front
-                         ? (*vehicle).gearedDrive.
+                         ? (candidate.vehicle).gearedDrive.
                                    wheelLongitudinalSpan
-                         : -(*vehicle).gearedDrive.
+                         : -(candidate.vehicle).gearedDrive.
                                    wheelLongitudinalSpan) *
                 0.5f;
         float steerRamp = 1.0f;
@@ -8841,11 +8860,11 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
                 sideForce;
         if (front) {
             const float reverseSign =
-                    !(*vehicle).engine.useLowSpeedGateB
+                    !(candidate.vehicle).engine.useLowSpeedGateB
                     ? 1.0f
                     : -1.0f;
             const float slipScale =
-                    wheel.realTime.slipping
+                    ((candidate.vehicle).wheels.values[index]).realTime.slipping
                     ? forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                               slippingSteerTorqueScale
                     : 1.0f;
@@ -8856,7 +8875,7 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
                             linearSpeed.z);
             const float steerAssist =
                     reverseSign * steerRamp *
-                    (*vehicle).controls.currentSteering *
+                    (candidate.vehicle).controls.currentSteering *
                     steerTorque * slipScale;
             sideTorque = sideTorque - steerAssist;
         }
@@ -8884,31 +8903,31 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
         sideSlowdownInput = sideLimit;
     }
     const float driveScale =
-            material.y * (*vehicle).controls.lowSpeedGateA +
-            ((*vehicle).engine.useLowSpeedGateB ? -1.0f : 0.0f) *
+            material.y * (candidate.vehicle).controls.lowSpeedGateA +
+            ((candidate.vehicle).engine.useLowSpeedGateB ? -1.0f : 0.0f) *
                     material.y *
-                    (*vehicle).controls.lowSpeedGateB +
-            ((*vehicle).turbo.type !=
+                    (candidate.vehicle).controls.lowSpeedGateB +
+            ((candidate.vehicle).turbo.type !=
                              CSceneVehicleCar__ETurboType_ETurboType_Inactive
-                     ? (*vehicle).turbo.impulseScale
+                     ? (candidate.vehicle).turbo.impulseScale
                      : 0.0f);
     float driveForce =
             (accelerationBase -
              forevervalidator::simulation::cuda::facts::Tuning(configuration).steering.slowDownScale *
                      sideSlowdownInput *
-                     abs(vehicle.controls.currentSteering) *
+                     abs((candidate.vehicle).controls.currentSteering) *
                      forevervalidator::simulation::cuda::tuning::EvaluateSpeed(
                              configuration,
                              CudaTuningCurveId_SteerSlowDownFromSpeed,
                              linearSpeed.z)) *
             driveScale;
-    if ((*vehicle).controls.forcedLowSpeedFriction) {
+    if ((candidate.vehicle).controls.forcedLowSpeedFriction) {
         driveForce =
-                (*vehicle).turbo.type ==
+                (candidate.vehicle).turbo.type ==
                                 CSceneVehicleCar__ETurboType_ETurboType_Inactive
                 ? 0.0f
                 : accelerationBase *
-                          (*vehicle).turbo.impulseScale;
+                          (candidate.vehicle).turbo.impulseScale;
     }
     float opposing = 0.0f;
     if (linearSpeed.z > 0.0f) {
@@ -8918,7 +8937,7 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
                  forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                          forwardAccelSpeedCoef *
                          linearSpeed.z) *
-                vehicle.controls.lowSpeedGateB;
+                (candidate.vehicle).controls.lowSpeedGateB;
         const float cap =
                 material.z *
                 (result.slipFlag == 0
@@ -8928,18 +8947,18 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
                                    forwardAccelCapWhenSlipping);
         if (cap < opposing) {
             opposing = cap;
-            MarkAllWheelsSlipping((*vehicle));
+            MarkAllWheelsSlipping((candidate.vehicle));
         }
     }
     if (linearSpeed.z < 0.0f &&
-        (*vehicle).controls.forcedLowSpeedFriction) {
+        (candidate.vehicle).controls.forcedLowSpeedFriction) {
         opposing =
                 (forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                          forwardAccelBase -
                  forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                          forwardAccelSpeedCoef *
                          linearSpeed.z) *
-                vehicle.controls.lowSpeedGateA;
+                (candidate.vehicle).controls.lowSpeedGateA;
         const float cap =
                 material.z *
                 (result.slipFlag == 0
@@ -8949,11 +8968,11 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
                                    forwardAccelCapWhenSlipping);
         if (cap < opposing) {
             opposing = cap;
-            MarkAllWheelsSlipping((*vehicle));
+            MarkAllWheelsSlipping((candidate.vehicle));
         }
         opposing = -opposing;
     }
-    if ((*vehicle).controls.forcedLowSpeedFriction &&
+    if ((candidate.vehicle).controls.forcedLowSpeedFriction &&
         abs(linearSpeed.z) < 1.0f) {
         opposing *= abs(linearSpeed.z);
     }
@@ -9023,17 +9042,17 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
         CudaPackedStaticConfigurationHeader *configuration,
         __constref GmVec3 linearSpeed,
         float visualSteerYaw) {
-    CudaVehicleState *vehicle = &candidate.vehicle;
-    CSceneVehicleCar__SGearedDriveState *drive = &(*vehicle).gearedDrive;
-    (*drive).burnoutPhase =
+
+
+    ((candidate.vehicle).gearedDrive).burnoutPhase =
             CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_CircularDrift;
-    (*drive).burnoutDirection =
+    ((candidate.vehicle).gearedDrive).burnoutDirection =
             SignNonNegative(visualSteerYaw);
 
     GmVec3 normalSum = GmVec3();
     for (uint index = 0u;
-         index < forevervalidator::simulation::cuda::facts::WheelCount(vehicle); ++index) {
-        CudaWheelState wheel = (*vehicle).wheels.values[index];
+         index < (candidate.vehicle).wheels.count; ++index) {
+        CudaWheelState wheel = (candidate.vehicle).wheels.values[index];
         if (!wheel.realTime.contactPresent) continue;
         normalSum.x =
                 normalSum.x +
@@ -9053,20 +9072,20 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
         const float inverseLength =
                 forevervalidator::simulation::cuda::exact::Divide(
                         1.0f, forevervalidator::simulation::cuda::exact::Sqrt(normalLengthSquared));
-        (*drive).burnoutContactNormal = {
+        ((candidate.vehicle).gearedDrive).burnoutContactNormal = {
                 normalSum.x * inverseLength,
                 normalSum.y * inverseLength,
                 normalSum.z * inverseLength,
         };
     } else {
-        (*drive).burnoutContactNormal = {0.0f, 1.0f, 0.0f};
-        (*drive).burnoutPhase =
+        ((candidate.vehicle).gearedDrive).burnoutContactNormal = {0.0f, 1.0f, 0.0f};
+        ((candidate.vehicle).gearedDrive).burnoutPhase =
                 CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_Inactive;
     }
 
     const GmVec3 bodyCenter =
             candidate.body.physicalParameters.localCenterOfMass;
-    GmBoxAligned waterBox = (*vehicle).water.boxLocal;
+    GmBoxAligned waterBox = (candidate.vehicle).water.boxLocal;
     float zExtra =
             waterBox.halfExtents.y * 0.0f +
             waterBox.halfExtents.x * 0.0f;
@@ -9076,26 +9095,26 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
             waterBox.center.y - bodyCenter.y,
             waterBox.center.z - bodyCenter.z + zExtra,
     };
-    (*drive).burnoutBaseRadius = forevervalidator::simulation::cuda::exact::Sqrt(
+    ((candidate.vehicle).gearedDrive).burnoutBaseRadius = forevervalidator::simulation::cuda::exact::Sqrt(
             (radiusSeed.x * radiusSeed.x +
              radiusSeed.y * radiusSeed.y) +
             radiusSeed.z * radiusSeed.z);
 
     GmVec3 tangent = wheel_detail::Cross(
-            (*drive).burnoutContactNormal, linearSpeed);
-    tangent.x *= (*drive).burnoutDirection;
-    tangent.y *= (*drive).burnoutDirection;
-    tangent.z *= (*drive).burnoutDirection;
+            ((candidate.vehicle).gearedDrive).burnoutContactNormal, linearSpeed);
+    tangent.x *= ((candidate.vehicle).gearedDrive).burnoutDirection;
+    tangent.y *= ((candidate.vehicle).gearedDrive).burnoutDirection;
+    tangent.z *= ((candidate.vehicle).gearedDrive).burnoutDirection;
     tangent = wheel_detail::NormalizeOr(
             tangent, tangent, VectorEpsilonSquared);
 
-    (*drive).burnoutContactNormal = TransformDirection(
-            (*drive).frameIso.rotation,
-            (*drive).burnoutContactNormal);
-    if ((*drive).burnoutContactNormal.y < 0.75f) {
-        (*drive).burnoutPhase =
+    ((candidate.vehicle).gearedDrive).burnoutContactNormal = TransformDirection(
+            ((candidate.vehicle).gearedDrive).frameIso.rotation,
+            ((candidate.vehicle).gearedDrive).burnoutContactNormal);
+    if (((candidate.vehicle).gearedDrive).burnoutContactNormal.y < 0.75f) {
+        ((candidate.vehicle).gearedDrive).burnoutPhase =
                 CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_Inactive;
-        (*drive).burnoutContactNormal = {0.0f, 1.0f, 0.0f};
+        ((candidate.vehicle).gearedDrive).burnoutContactNormal = {0.0f, 1.0f, 0.0f};
     }
 
     const GmVec3 forwardAxis = {0.0f, 0.0f, 1.0f};
@@ -9108,23 +9127,23 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
         signedAngle <
                 -forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.burnout.
                         angleLimitNegative) {
-        (*drive).burnoutPhase =
+        ((candidate.vehicle).gearedDrive).burnoutPhase =
                 CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_Inactive;
     } else {
         const GmVec3 tangentWorld = TransformDirection(
-                (*drive).frameIso.rotation, tangent);
+                ((candidate.vehicle).gearedDrive).frameIso.rotation, tangent);
         GmVec3 bodyCenterWorld = TransformDirection(
-                (*drive).frameIso.rotation, bodyCenter);
-        bodyCenterWorld.x += (*drive).frameIso.translation.x;
-        bodyCenterWorld.y += (*drive).frameIso.translation.y;
-        bodyCenterWorld.z += (*drive).frameIso.translation.z;
+                ((candidate.vehicle).gearedDrive).frameIso.rotation, bodyCenter);
+        bodyCenterWorld.x += ((candidate.vehicle).gearedDrive).frameIso.translation.x;
+        bodyCenterWorld.y += ((candidate.vehicle).gearedDrive).frameIso.translation.y;
+        bodyCenterWorld.z += ((candidate.vehicle).gearedDrive).frameIso.translation.z;
         const float targetRadius = forevervalidator::simulation::cuda::tuning::EvaluateSpeed(
                 configuration,
                 CudaTuningCurveId_BurnoutRadiusFromSpeed,
                 linearSpeed.z) +
-                (*drive).burnoutBaseRadius;
-        (*drive).burnoutTargetRadius = targetRadius;
-        (*drive).burnoutCenter = {
+                ((candidate.vehicle).gearedDrive).burnoutBaseRadius;
+        ((candidate.vehicle).gearedDrive).burnoutTargetRadius = targetRadius;
+        ((candidate.vehicle).gearedDrive).burnoutCenter = {
                 bodyCenterWorld.x +
                         tangentWorld.x * targetRadius,
                 bodyCenterWorld.y +
@@ -9133,8 +9152,8 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
                         tangentWorld.z * targetRadius,
         };
     }
-    (*drive).wheelSpeedOverrideActive =
-            (*drive).burnoutPhase ==
+    ((candidate.vehicle).gearedDrive).wheelSpeedOverrideActive =
+            ((candidate.vehicle).gearedDrive).burnoutPhase ==
             CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_CircularDrift;
 }
 
@@ -9147,27 +9166,27 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
         float visualSteerYaw,
         bool hasGroundMaterial,
         int waterActive) {
-    CudaVehicleState *vehicle = &candidate.vehicle;
-    CSceneVehicleCar__SGearedDriveState *drive = &(*vehicle).gearedDrive;
-    if ((*vehicle).controls.lowSpeedGateA < LowSpeedGateThreshold ||
-        (*vehicle).controls.lowSpeedGateB < LowSpeedGateThreshold ||
+
+
+    if ((candidate.vehicle).controls.lowSpeedGateA < LowSpeedGateThreshold ||
+        (candidate.vehicle).controls.lowSpeedGateB < LowSpeedGateThreshold ||
         abs(visualSteerYaw) < ScalarEpsilon ||
-        (*drive).burnoutDirection !=
+        ((candidate.vehicle).gearedDrive).burnoutDirection !=
                 SignNonNegative(visualSteerYaw) ||
-        (*vehicle).contacts.lateralSlowDownContactActive ||
-        (*vehicle).contacts.bodyContactPresent ||
+        (candidate.vehicle).contacts.lateralSlowDownContactActive ||
+        (candidate.vehicle).contacts.bodyContactPresent ||
         !hasGroundMaterial || waterActive != 0 ||
-        (*vehicle).controls.forcedLowSpeedFriction) {
-        (*drive).burnoutPhase =
+        (candidate.vehicle).controls.forcedLowSpeedFriction) {
+        ((candidate.vehicle).gearedDrive).burnoutPhase =
                 CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_Inactive;
         return;
     }
 
     GmVec3 normalSum = GmVec3();
     for (uint index = 0u;
-         index < forevervalidator::simulation::cuda::facts::WheelCount(vehicle); ++index) {
+         index < (candidate.vehicle).wheels.count; ++index) {
         GmVec3 normal =
-                (*vehicle).wheels.values[index].realTime.
+                (candidate.vehicle).wheels.values[index].realTime.
                         accumulatedContactNormal;
         normalSum.x = normalSum.x + normal.x;
         normalSum.y = normal.y + normalSum.y;
@@ -9177,40 +9196,40 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
             normalSum, {0.0f, 1.0f, 0.0f},
             VectorEpsilonSquared);
     const GmVec3 worldNormal = TransformDirection(
-            (*drive).frameIso.rotation, averageNormal);
+            ((candidate.vehicle).gearedDrive).frameIso.rotation, averageNormal);
     const float normalDrift = abs(SignedAngle(
-            worldNormal, (*drive).burnoutContactNormal));
+            worldNormal, ((candidate.vehicle).gearedDrive).burnoutContactNormal));
     if (normalDrift >
         forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.burnout.angleLimit) {
-        (*drive).burnoutPhase =
+        ((candidate.vehicle).gearedDrive).burnoutPhase =
                 CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_Inactive;
         return;
     }
 
     const GmVec3 bodyCenter =
             candidate.body.physicalParameters.localCenterOfMass;
-    GmMat3 frameRotation = (*drive).frameIso.rotation;
+    GmMat3 frameRotation = ((candidate.vehicle).gearedDrive).frameIso.rotation;
     const GmVec3 negativeTranslation = {
-            -(*drive).frameIso.translation.x,
-            -(*drive).frameIso.translation.y,
-            -(*drive).frameIso.translation.z,
+            -((candidate.vehicle).gearedDrive).frameIso.translation.x,
+            -((candidate.vehicle).gearedDrive).frameIso.translation.y,
+            -((candidate.vehicle).gearedDrive).frameIso.translation.z,
     };
     const GmVec3 localCenter = {
             forevervalidator::simulation::cuda::dynamics::detail::Dot(
                     frameRotation.basisX,
-                    (*drive).burnoutCenter) +
+                    ((candidate.vehicle).gearedDrive).burnoutCenter) +
                     forevervalidator::simulation::cuda::dynamics::detail::Dot(
                             frameRotation.basisX,
                             negativeTranslation),
             forevervalidator::simulation::cuda::dynamics::detail::Dot(
                     frameRotation.basisY,
-                    (*drive).burnoutCenter) +
+                    ((candidate.vehicle).gearedDrive).burnoutCenter) +
                     forevervalidator::simulation::cuda::dynamics::detail::Dot(
                             frameRotation.basisY,
                             negativeTranslation),
             forevervalidator::simulation::cuda::dynamics::detail::Dot(
                     frameRotation.basisZ,
-                    (*drive).burnoutCenter) +
+                    ((candidate.vehicle).gearedDrive).burnoutCenter) +
                     forevervalidator::simulation::cuda::dynamics::detail::Dot(
                             frameRotation.basisZ,
                             negativeTranslation),
@@ -9242,20 +9261,20 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
     if (abs(tangentSpeed) >
         forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.burnout.
                 tangentSpeedMax) {
-        (*drive).burnoutPhase =
+        ((candidate.vehicle).gearedDrive).burnoutPhase =
                 CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_Inactive;
     }
     const bool radiusNeedsCorrection =
-            radius > drive.burnoutBaseRadius ||
+            radius > ((candidate.vehicle).gearedDrive).burnoutBaseRadius ||
             radius <
                     forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.burnout.
                             radiusMin;
     if (!radiusNeedsCorrection) {
-        (*drive).burnoutPhase =
+        ((candidate.vehicle).gearedDrive).burnoutPhase =
                 CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_Inactive;
     } else {
         const float correctionExponent =
-                (radius - drive.burnoutTargetRadius) *
+                (radius - ((candidate.vehicle).gearedDrive).burnoutTargetRadius) *
                         forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                                 burnout.radiusCorrectionScale -
                 radialSpeed *
@@ -9275,11 +9294,11 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
     }
 
     for (uint index = 0u;
-         index < forevervalidator::simulation::cuda::facts::WheelCount(vehicle); ++index) {
-        CudaWheelState *wheel = &(*vehicle).wheels.values[index];
+         index < (candidate.vehicle).wheels.count; ++index) {
+
         WheelSuspensionForce(
-                candidate, configuration, (*wheel), index);
-        (*wheel).realTime.slipping = false;
+                candidate, configuration, ((candidate.vehicle).wheels.values[index]), index);
+        ((candidate.vehicle).wheels.values[index]).realTime.slipping = false;
     }
 
     const float lateralSpeed = forevervalidator::simulation::cuda::exact::FromDouble(
@@ -9306,7 +9325,7 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
     const float angleNorm = forevervalidator::simulation::cuda::exact::FromDouble(
             double(angle) / pi);
     const double signedAngle =
-            double((*drive).burnoutDirection) *
+            double(((candidate.vehicle).gearedDrive).burnoutDirection) *
             double(angleNorm) * pi;
     if (!isfinite_portable(angleNorm) ||
         signedAngle <
@@ -9317,7 +9336,7 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
                 double(
                         forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                                 burnout.angleLimitPositive)) {
-        (*drive).burnoutPhase =
+        ((candidate.vehicle).gearedDrive).burnoutPhase =
                 CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_Inactive;
     } else {
         float angleReturnTorque = 0.0f;
@@ -9395,8 +9414,8 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
         bool dirtSurface,
         __constref GmVec3 linearSpeed) {
     if (!dirtSurface || linearSpeed.z <= 6.0f) return;
-    CudaVehicleState *vehicle = &candidate.vehicle;
-    if ((*vehicle).controls.lowSpeedGateB >
+
+    if ((candidate.vehicle).controls.lowSpeedGateB >
         LowSpeedGateThreshold) {
         AddCentralForce(candidate, {
                 -0.1f * linearSpeed.x,
@@ -9405,12 +9424,12 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
         });
     }
     const bool canApply =
-            (*vehicle).controls.lowSpeedGateB <
+            (candidate.vehicle).controls.lowSpeedGateB <
                     LowSpeedGateThreshold ||
-            (*vehicle).controls.lowSpeedGateB ==
+            (candidate.vehicle).controls.lowSpeedGateB ==
                     LowSpeedGateThreshold;
-    if ((*vehicle).controls.forcedLowSpeedFriction ||
-        (*vehicle).controls.lowSpeedGateA <=
+    if ((candidate.vehicle).controls.forcedLowSpeedFriction ||
+        (candidate.vehicle).controls.lowSpeedGateA <=
                 LowSpeedGateThreshold ||
         !canApply) {
         return;
@@ -9428,7 +9447,7 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
     const float sideDenominator =
             forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                     dirtSlideGateScale *
-                    vehicle.controls.lowSpeedGateA +
+                    (candidate.vehicle).controls.lowSpeedGateA +
             1.0f;
     const GmVec3 front = {
             forevervalidator::simulation::cuda::exact::Divide(
@@ -9440,7 +9459,7 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
             forevervalidator::simulation::cuda::exact::Divide(
                     forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                                     dirtSlideForwardGateScale *
-                            vehicle.controls.lowSpeedGateA *
+                            (candidate.vehicle).controls.lowSpeedGateA *
                             1.5f * absoluteUnitX * absoluteXGate *
                             forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                                     dirtSlideForwardForceScale,
@@ -9452,16 +9471,16 @@ inline ForceStatus ComputeModel3Ground<let ReuseWheelPassInvariants : bool>(
             forevervalidator::simulation::cuda::exact::Divide(
                     forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                                     dirtSlideForwardGateScale *
-                            vehicle.controls.lowSpeedGateA *
+                            (candidate.vehicle).controls.lowSpeedGateA *
                             absoluteUnitX * absoluteXGate *
                             forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                                     dirtSlideForwardForceScale,
                     denominator),
     };
     for (uint index = 0u;
-         index < forevervalidator::simulation::cuda::facts::WheelCount(vehicle); ++index) {
+         index < (candidate.vehicle).wheels.count; ++index) {
         CudaWheelState wheel =
-                (*vehicle).wheels.values[index];
+                (candidate.vehicle).wheels.values[index];
         if (!wheel.realTime.slipping) continue;
         if (index <= 1u) {
             AddForceAtPoint(
@@ -9512,38 +9531,38 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
         __constref VehicleMaterialBlendValues material,
         int waterActive,
         inout Model6Result result) {
-    CudaVehicleState *vehicle = &candidate.vehicle;
+
     const uint tick = candidate.world.tickTimeMs;
-    (*vehicle).gearedDrive.frameIso.rotation =
+    (candidate.vehicle).gearedDrive.frameIso.rotation =
             candidate.body.write.rotation;
-    (*vehicle).gearedDrive.frameIso.translation =
+    (candidate.vehicle).gearedDrive.frameIso.translation =
             candidate.body.write.position;
-    (*vehicle).controls.noGroundFrictionGuard =
+    (candidate.vehicle).controls.noGroundFrictionGuard =
             waterActive != 0;
     const bool dirt = AllWheelsMaterial(
-            (*vehicle),
+            (candidate.vehicle),
             uint(
                     EPlugSurfaceMaterialId_EPlugSurfaceMaterialId_Dirt));
-    if ((*vehicle).gearedDrive.burnoutPhase ==
+    if ((candidate.vehicle).gearedDrive.burnoutPhase ==
         CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_CircularDrift) {
         ApplyCircularBurnout(
                 candidate, configuration, currentForce,
                 linearSpeed, angularSpeed, visualSteerYaw,
                 hasGroundMaterial, waterActive);
-        if ((*vehicle).gearedDrive.burnoutPhase !=
+        if ((candidate.vehicle).gearedDrive.burnoutPhase !=
             CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_CircularDrift) {
-            (*vehicle).gearedDrive.burnoutPhase =
+            (candidate.vehicle).gearedDrive.burnoutPhase =
                     CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_TimedSpin;
-            (*vehicle).gearedDrive.burnoutStartTick = tick;
+            (candidate.vehicle).gearedDrive.burnoutStartTick = tick;
         }
-        (*vehicle).gearedDrive.localSpeed = linearSpeed;
+        (candidate.vehicle).gearedDrive.localSpeed = linearSpeed;
         return ForceStatus::Success;
     }
     int slipSeen = 0;
-    AdvanceBurnout((*vehicle), configuration, tick, slipSeen);
+    AdvanceBurnout((candidate.vehicle), configuration, tick, slipSeen);
 
     const float sideFade =
-            BurnoutSideFade((*vehicle), configuration, tick);
+            BurnoutSideFade((candidate.vehicle), configuration, tick);
     forevervalidator::simulation::cuda::exact::SinCosResult steeringSinCos = forevervalidator::simulation::cuda::exact::SinCosResult();
     GmVec3 sharedFeedbackForce = GmVec3();
     GmVec3 sharedWorldCenter = GmVec3();
@@ -9553,7 +9572,7 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
 
         steeringSinCos = forevervalidator::simulation::cuda::exact::SinCos(visualSteerYaw);
         sharedFeedbackForce =
-                GroundFeedbackForce((*vehicle), configuration);
+                GroundFeedbackForce((candidate.vehicle), configuration);
         sharedWorldCenter =
                 WorldCenterOfMass(candidate);
         sharedMaximumSideFriction =
@@ -9561,7 +9580,7 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
                         configuration,
                         CudaTuningCurveId_MaxSideFrictionFromSpeed,
                         linearSpeed.z);
-        if ((*vehicle).gearedDrive.burnoutPhase ==
+        if ((candidate.vehicle).gearedDrive.burnoutPhase ==
             CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_TimedSpin) {
             sharedBurnoutRollover =
                     forevervalidator::simulation::cuda::tuning::EvaluateSpeed(
@@ -9572,12 +9591,12 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
     
 }
     for (uint index = 0u;
-         index < forevervalidator::simulation::cuda::facts::WheelCount(vehicle); ++index) {
-        CudaWheelState *wheel = &(*vehicle).wheels.values[index];
+         index < (candidate.vehicle).wheels.count; ++index) {
+
         WheelSuspensionForce<ReuseWheelPassInvariants>(
-                candidate, configuration, (*wheel), index,
+                candidate, configuration, ((candidate.vehicle).wheels.values[index]), index,
                 sharedWorldCenter);
-        if (!wheel.realTime.contactPresent ||
+        if (!((candidate.vehicle).wheels.values[index]).realTime.contactPresent ||
             !(forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                       lateralForceScale >= 0.0f)) {
             continue;
@@ -9586,24 +9605,24 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
                 Material(
                         configuration,
                         uint(
-                                (*wheel).realTime.contactMaterial));
+                                ((candidate.vehicle).wheels.values[index]).realTime.contactMaterial));
         if (wheelMaterial == nullptr) {
             return ForceStatus::MissingMaterial;
         }
         const GmVec3 lever = {
-                (*wheel).realTime.latestContactPoint.x -
+                ((candidate.vehicle).wheels.values[index]).realTime.latestContactPoint.x -
                         configuration->dynaParameters.
                                 localCenterOfMass.x,
-                (*wheel).realTime.latestContactPoint.y -
+                ((candidate.vehicle).wheels.values[index]).realTime.latestContactPoint.y -
                         configuration->dynaParameters.
                                 localCenterOfMass.y,
-                (*wheel).realTime.latestContactPoint.z -
+                ((candidate.vehicle).wheels.values[index]).realTime.latestContactPoint.z -
                         configuration->dynaParameters.
                                 localCenterOfMass.z,
         };
         GmVec3 sideAxis = {
-                (*wheel).realTime.accumulatedContactNormal.y,
-                -(*wheel).realTime.accumulatedContactNormal.x,
+                ((candidate.vehicle).wheels.values[index]).realTime.accumulatedContactNormal.y,
+                -((candidate.vehicle).wheels.values[index]).realTime.accumulatedContactNormal.x,
                 0.0f,
         };
         sideAxis = wheel_detail::NormalizeOr(
@@ -9644,7 +9663,7 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
                 forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                         currentTorqueZScale;
         AddTorque(candidate, feedbackTorque);
-        if ((*vehicle).gearedDrive.burnoutPhase ==
+        if ((candidate.vehicle).gearedDrive.burnoutPhase ==
             CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_TimedSpin) {
             float rollover;
             {
@@ -9668,20 +9687,20 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
         if (minAbsorb != maxAbsorb) {
             normalizedDamper =
                     forevervalidator::simulation::cuda::exact::Divide(
-                            (*wheel).realTime.damperAbsorb - minAbsorb,
+                            ((candidate.vehicle).wheels.values[index]).realTime.damperAbsorb - minAbsorb,
                             maxAbsorb - minAbsorb);
         }
         const float damper = forevervalidator::simulation::cuda::tuning::Evaluate(
                 configuration,
                 CudaTuningCurveId_SuspensionDamperAbsorbModulation,
                 normalizedDamper);
-        const float slipGrip = wheel.realTime.slipping
+        const float slipGrip = ((candidate.vehicle).wheels.values[index]).realTime.slipping
                 ? forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                           slippingSideFrictionScale
                 : 1.0f;
         const float lowSpeedGrip =
-                wheel.realTime.slipping &&
-                        vehicle.controls.lowSpeedGateB >
+                ((candidate.vehicle).wheels.values[index]).realTime.slipping &&
+                        (candidate.vehicle).controls.lowSpeedGateB >
                                 LowSpeedGateThreshold
                 ? forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                           lowSpeedBSlippingGripScale
@@ -9704,7 +9723,7 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
                          lateralForceScale *
                 0.5f * sideSpeed * sideFade;
         if (!(maximum < abs(requested))) {
-            (*wheel).realTime.slipping = false;
+            ((candidate.vehicle).wheels.values[index]).realTime.slipping = false;
         } else {
             requested =
                     (1.0f -
@@ -9714,7 +9733,7 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
                     forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                             sideFrictionSlipBlend *
                             requested;
-            (*wheel).realTime.slipping = true;
+            ((candidate.vehicle).wheels.values[index]).realTime.slipping = true;
             result.slipFlag = 1;
         }
         ApplyDirtSlide(
@@ -9727,42 +9746,42 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
     }
 
     if (!hasGroundMaterial) {
-        if ((*vehicle).gearedDrive.burnoutPhase ==
+        if ((candidate.vehicle).gearedDrive.burnoutPhase ==
             CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_TimedSpin) {
-            (*vehicle).gearedDrive.burnoutExitStartTick = tick;
-            (*vehicle).gearedDrive.burnoutPhase =
+            (candidate.vehicle).gearedDrive.burnoutExitStartTick = tick;
+            (candidate.vehicle).gearedDrive.burnoutPhase =
                     CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_ExitFade;
         }
-        (*vehicle).slipMemory.active = slipSeen != 0;
-        (*vehicle).gearedDrive.localSpeed = linearSpeed;
+        (candidate.vehicle).slipMemory.active = slipSeen != 0;
+        (candidate.vehicle).gearedDrive.localSpeed = linearSpeed;
         return ForceStatus::Success;
     }
 
-    if ((*vehicle).controls.forcedLowSpeedFriction == 0u &&
-        (*vehicle).controls.lowSpeedGateB >
+    if ((candidate.vehicle).controls.forcedLowSpeedFriction == 0u &&
+        (candidate.vehicle).controls.lowSpeedGateB >
                 LowSpeedGateThreshold &&
-        (*vehicle).controls.lowSpeedGateA <
+        (candidate.vehicle).controls.lowSpeedGateA <
                 LowSpeedGateThreshold &&
-        (*vehicle).gearedDrive.burnoutPhase ==
+        (candidate.vehicle).gearedDrive.burnoutPhase ==
                 CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_TimedSpin) {
-        (*vehicle).gearedDrive.burnoutExitStartTick = tick;
-        (*vehicle).gearedDrive.burnoutPhase =
+        (candidate.vehicle).gearedDrive.burnoutExitStartTick = tick;
+        (candidate.vehicle).gearedDrive.burnoutPhase =
                 CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_ExitFade;
     }
-    if ((*vehicle).controls.forcedLowSpeedFriction == 0u &&
-        (*vehicle).controls.lowSpeedGateA >
+    if ((candidate.vehicle).controls.forcedLowSpeedFriction == 0u &&
+        (candidate.vehicle).controls.lowSpeedGateA >
                 LowSpeedGateThreshold &&
-        (*vehicle).controls.lowSpeedGateB >
+        (candidate.vehicle).controls.lowSpeedGateB >
                 LowSpeedGateThreshold) {
         if (linearSpeed.z <
                     forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.burnout.
                             donutSpeedLow &&
-            vehicle.gearedDrive.frameIso.rotation.basisY.y >
+            (candidate.vehicle).gearedDrive.frameIso.rotation.basisY.y >
                     0.75f) {
-            (*vehicle).gearedDrive.burnoutPhase =
+            (candidate.vehicle).gearedDrive.burnoutPhase =
                     CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_TimedSpin;
-            (*vehicle).gearedDrive.wheelSpeedOverrideActive = true;
-            (*vehicle).gearedDrive.burnoutStartTick = tick;
+            (candidate.vehicle).gearedDrive.wheelSpeedOverrideActive = true;
+            (candidate.vehicle).gearedDrive.burnoutStartTick = tick;
         } else if (
                 linearSpeed.z <
                         forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.burnout.
@@ -9776,7 +9795,7 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
                     linearSpeed, visualSteerYaw);
         }
     }
-    UpdateGearDirection((*vehicle), linearSpeed);
+    UpdateGearDirection((candidate.vehicle), linearSpeed);
     const float rolloverInput =
             forevervalidator::simulation::cuda::exact::Divide(
                     linearSpeed.x * linearSpeed.x,
@@ -9805,17 +9824,17 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
     float sideLimit = 0.0f;
     float sideRequested = 0.0f;
     for (uint index = 0u;
-         index < forevervalidator::simulation::cuda::facts::WheelCount(vehicle); ++index) {
-        CudaWheelState *wheel = &(*vehicle).wheels.values[index];
+         index < (candidate.vehicle).wheels.count; ++index) {
+
         const bool front =
                 forevervalidator::simulation::cuda::facts::WheelAxle(
                         configuration,
                         index) == VehicleWheelAxle_Front;
         const float halfTrack =
                 (front
-                         ? (*vehicle).gearedDrive.
+                         ? (candidate.vehicle).gearedDrive.
                                    wheelLongitudinalSpan
-                         : -(*vehicle).gearedDrive.
+                         : -(candidate.vehicle).gearedDrive.
                                    wheelLongitudinalSpan) *
                 0.5f;
         const float wheelSpeed =
@@ -9862,12 +9881,12 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
 }
             float assist =
                     steerRamp *
-                    (*vehicle).controls.currentSteering *
+                    (candidate.vehicle).controls.currentSteering *
                     steeringDriveTorque;
-            if ((*vehicle).engine.useLowSpeedGateB) {
+            if ((candidate.vehicle).engine.useLowSpeedGateB) {
                 assist = -assist;
             }
-            if ((*wheel).realTime.slipping) {
+            if (((candidate.vehicle).wheels.values[index]).realTime.slipping) {
                 assist *= forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                         slippingSteerTorqueScale;
             }
@@ -9878,9 +9897,9 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
                 {0.0f, sideTorque * halfTrack, 0.0f});
         slipSeen |= slipped;
     }
-    UpdateSlipMemory((*vehicle), tick, slipSeen);
+    UpdateSlipMemory((candidate.vehicle), tick, slipSeen);
     const float slipMix = SlipAccelerationMix(
-            (*vehicle), configuration, tick,
+            (candidate.vehicle), configuration, tick,
             sideLimit, sideRequested);
     const float slippingAcceleration =
             forevervalidator::simulation::cuda::facts::Tuning(configuration).slipResponse.
@@ -9890,7 +9909,7 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
                     CudaTuningCurveId_SlipResponseSlippingAccelFromSpeed,
                     linearSpeed.z);
     const float gearAcceleration =
-            (*vehicle).engine.useLowSpeedGateB
+            (candidate.vehicle).engine.useLowSpeedGateB
             ? forevervalidator::simulation::cuda::tuning::EvaluateSpeed(
                       configuration,
                       CudaTuningCurveId_ReverseGearAccelFromSpeed,
@@ -9900,43 +9919,43 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
                       CudaTuningCurveId_SlipResponseAccelFromSpeed,
                       linearSpeed.z, true);
     const float blended =
-            (*vehicle).gearedDrive.engineState ==
+            (candidate.vehicle).gearedDrive.engineState ==
                     CSceneVehicleCarEngineControlState_CSceneVehicleCarEngineControlState_GearShift
             ? 0.0f
             : (1.0f - slipMix) * slippingAcceleration +
                       gearAcceleration * slipMix;
     const float turbo =
-            (*vehicle).turbo.type !=
+            (candidate.vehicle).turbo.type !=
                     CSceneVehicleCar__ETurboType_ETurboType_Inactive
-            ? gearAcceleration * (*vehicle).turbo.impulseScale
+            ? gearAcceleration * (candidate.vehicle).turbo.impulseScale
             : 0.0f;
     const float rearSign =
-            (*vehicle).engine.useLowSpeedGateB ? -1.0f : 0.0f;
+            (candidate.vehicle).engine.useLowSpeedGateB ? -1.0f : 0.0f;
     const float slowdown =
             forevervalidator::simulation::cuda::facts::Tuning(configuration).steering.slowDownScale *
-            abs(vehicle.controls.currentSteering) *
+            abs((candidate.vehicle).controls.currentSteering) *
             forevervalidator::simulation::cuda::tuning::EvaluateSpeed(
                     configuration,
                     CudaTuningCurveId_SteerSlowDownFromSpeed,
                     linearSpeed.z, true) *
-            (vehicle.engine.useLowSpeedGateB ? -1.0f : 1.0f);
+            ((candidate.vehicle).engine.useLowSpeedGateB ? -1.0f : 1.0f);
     float drive =
             BurnoutExitAcceleration(
-                    (*vehicle), configuration, tick) +
-            BurnoutDriveFade((*vehicle), configuration, tick) *
+                    (candidate.vehicle), configuration, tick) +
+            BurnoutDriveFade((candidate.vehicle), configuration, tick) *
                     (turbo +
-                     ((*vehicle).controls.lowSpeedGateA * material.y +
+                     ((candidate.vehicle).controls.lowSpeedGateA * material.y +
                       rearSign * material.y *
-                              (*vehicle).controls.lowSpeedGateB) *
+                              (candidate.vehicle).controls.lowSpeedGateB) *
                              blended) -
             slowdown;
     if (waterActive != 0) {
         drive *= 0.5f;
     }
-    if ((*vehicle).controls.forcedLowSpeedFriction) {
-        drive = (*vehicle).turbo.type !=
+    if ((candidate.vehicle).controls.forcedLowSpeedFriction) {
+        drive = (candidate.vehicle).turbo.type !=
                         CSceneVehicleCar__ETurboType_ETurboType_Inactive
-                ? gearAcceleration * (*vehicle).turbo.impulseScale
+                ? gearAcceleration * (candidate.vehicle).turbo.impulseScale
                 : 0.0f;
     }
     float opposing = 0.0f;
@@ -9948,8 +9967,8 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
                  forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                          forwardAccelSpeedCoef *
                          linearSpeed.z) *
-                vehicle.controls.lowSpeedGateB *
-                SlippingWheelScale((*vehicle), configuration);
+                (candidate.vehicle).controls.lowSpeedGateB *
+                SlippingWheelScale((candidate.vehicle), configuration);
         const float cap =
                 material.z *
                 (result.slipFlag
@@ -9959,26 +9978,26 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
                                    forwardAccelCap);
         if (cap < opposing) {
             opposing = cap;
-            MarkAllWheelsSlipping((*vehicle));
+            MarkAllWheelsSlipping((candidate.vehicle));
             opposingSlipped = true;
         }
     } else if (
             linearSpeed.z < 0.0f &&
-            (*vehicle).controls.lowSpeedGateA >
+            (candidate.vehicle).controls.lowSpeedGateA >
                     LowSpeedGateThreshold) {
-        if (!vehicle.controls.forcedLowSpeedFriction &&
+        if (!(candidate.vehicle).controls.forcedLowSpeedFriction &&
             forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.burnout.
                             reverseForceThreshold <
                     -drive *
                             forevervalidator::simulation::cuda::facts::Tuning(configuration).feedback.
                                     forceDivisor *
                             linearSpeed.z &&
-            vehicle.gearedDrive.frameIso.rotation.basisY.y >
+            (candidate.vehicle).gearedDrive.frameIso.rotation.basisY.y >
                     0.75f) {
-            (*vehicle).gearedDrive.burnoutStartTick = tick;
-            (*vehicle).gearedDrive.burnoutPhase =
+            (candidate.vehicle).gearedDrive.burnoutStartTick = tick;
+            (candidate.vehicle).gearedDrive.burnoutPhase =
                     CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_TimedSpin;
-            (*vehicle).gearedDrive.wheelSpeedOverrideActive =
+            (candidate.vehicle).gearedDrive.wheelSpeedOverrideActive =
                     true;
         }
         opposing =
@@ -9987,8 +10006,8 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
                  forevervalidator::simulation::cuda::facts::Tuning(configuration).gearedDrive.
                          forwardAccelSpeedCoef *
                          linearSpeed.z) *
-                vehicle.controls.lowSpeedGateA *
-                SlippingWheelScale((*vehicle), configuration);
+                (candidate.vehicle).controls.lowSpeedGateA *
+                SlippingWheelScale((candidate.vehicle), configuration);
         const float cap =
                 material.z *
                 (result.slipFlag
@@ -9998,7 +10017,7 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
                                    forwardAccelCapReverse);
         if (cap < opposing) {
             opposing = cap;
-            MarkAllWheelsSlipping((*vehicle));
+            MarkAllWheelsSlipping((candidate.vehicle));
             opposingSlipped = true;
         }
     }
@@ -10038,8 +10057,8 @@ inline ForceStatus ComputeModel6Ground<let ReuseWheelPassInvariants : bool>(
                     forevervalidator::simulation::cuda::facts::Tuning(configuration).bodyAirResponse.
                             groundedSolidFeedback1),
     });
-    (*vehicle).slipMemory.active = slipSeen != 0;
-    (*vehicle).gearedDrive.localSpeed = linearSpeed;
+    (candidate.vehicle).slipMemory.active = slipSeen != 0;
+    (candidate.vehicle).gearedDrive.localSpeed = linearSpeed;
     return ForceStatus::Success;
 }
 
@@ -10049,13 +10068,13 @@ inline ForceStatus ComputeForcesModel6<let ReuseWheelPassInvariants : bool = fal
         inout CudaCandidatePhysicsState candidate,
         CudaPackedStaticConfigurationHeader *configuration,
         float dt) {
-    CudaVehicleState *vehicle = &candidate.vehicle;
+
     GmVec3 savedForce;
     GmVec3 savedImpulse;
     force_detail::SaveAndClearFeedback(
-            (*vehicle), savedForce, savedImpulse);
-    if (wheel_detail::SpeedBlocked((*vehicle)) ||
-        (*vehicle).water.boxLocal.halfExtents.x < 0.0f) {
+            (candidate.vehicle), savedForce, savedImpulse);
+    if (wheel_detail::SpeedBlocked((candidate.vehicle)) ||
+        (candidate.vehicle).water.boxLocal.halfExtents.x < 0.0f) {
         force_detail::SetZeroDynamics(candidate);
         return ForceStatus::Success;
     }
@@ -10085,7 +10104,7 @@ inline ForceStatus ComputeForcesModel6<let ReuseWheelPassInvariants : bool = fal
             Handling>(
             candidate, configuration, dt);
     const bool groundContact =
-            force_detail::IsGroundContact((*vehicle));
+            force_detail::IsGroundContact((candidate.vehicle));
     candidate.body.physicalParameters.
             vehicleContactFeedbackScale =
             groundContact
@@ -10120,7 +10139,7 @@ inline ForceStatus ComputeForcesModel6<let ReuseWheelPassInvariants : bool = fal
             candidate.body, candidate.body.current.angularSpeed);
     const GmVec3 currentForce = force_detail::WorldToLocal(
             candidate.body, candidate.body.current.force);
-    (*vehicle).engine.lowSpeedFeedbackForce = 0.0f;
+    (candidate.vehicle).engine.lowSpeedFeedbackForce = 0.0f;
     force_detail::ApplyFrictionForces<Handling>(
             candidate, configuration, linearSpeed);
     force_detail::ClampLinearSpeed(candidate, linearSpeed);
@@ -10134,8 +10153,8 @@ inline ForceStatus ComputeForcesModel6<let ReuseWheelPassInvariants : bool = fal
             configuration, currentForce, slopeA, slopeB);
     const float visualSteerYaw =
             force_detail::VisualSteerYaw(
-                    (*vehicle), configuration, linearSpeed);
-    (*vehicle).gearedDrive.localSpeed = linearSpeed;
+                    (candidate.vehicle), configuration, linearSpeed);
+    (candidate.vehicle).gearedDrive.localSpeed = linearSpeed;
     force_detail::Model6Result modelResult;
     modelResult.surfaceFeedback = 0.0f;
     modelResult.slipFlag = 0;
@@ -10201,9 +10220,9 @@ inline ForceStatus ComputeForcesModel6<let ReuseWheelPassInvariants : bool = fal
     bool sideKill = false;
     bool anyContact = false;
     for (uint index = 0u;
-         index < forevervalidator::simulation::cuda::facts::WheelCount(vehicle); ++index) {
+         index < (candidate.vehicle).wheels.count; ++index) {
         CudaWheelState wheel =
-                (*vehicle).wheels.values[index];
+                (candidate.vehicle).wheels.values[index];
         if (wheel.realTime.contactPresent) {
             anyContact = true;
             sideKill |= forevervalidator::simulation::cuda::facts::WheelKillsLateralSpeed(
@@ -10211,13 +10230,13 @@ inline ForceStatus ComputeForcesModel6<let ReuseWheelPassInvariants : bool = fal
         }
     }
     if (anyContact) {
-        vehicle.engine.lowSpeedFeedbackForce =
-                -vehicle.controls.lowSpeedGateB *
-                        vehicle.engine.
+        (candidate.vehicle).engine.lowSpeedFeedbackForce =
+                -(candidate.vehicle).controls.lowSpeedGateB *
+                        (candidate.vehicle).engine.
                                 lowSpeedFeedbackGateScale -
                 forevervalidator::simulation::cuda::facts::Tuning(configuration).
                         lowSpeedFrictionMagnitude *
-                        vehicle.engine.
+                        (candidate.vehicle).engine.
                                 lowSpeedFeedbackFrictionScale;
     }
     if (sideKill &&
@@ -10238,16 +10257,16 @@ inline ForceStatus ComputeForcesModel6<let ReuseWheelPassInvariants : bool = fal
             candidate, configuration, currentForce,
             tick, groundContact);
     force_detail::UpdateImpactStates(
-            (*vehicle), configuration);
-    (*vehicle).lastComputeForcesTick = tick;
+            (candidate.vehicle), configuration);
+    (candidate.vehicle).lastComputeForcesTick = tick;
     force_detail::ProcessTurboContacts(
-            (*vehicle), configuration, tick);
-    force_detail::UpdateTurbo((*vehicle), tick);
+            (candidate.vehicle), configuration, tick);
+    force_detail::UpdateTurbo((candidate.vehicle), tick);
     force_detail::UpdateFeedback(
             candidate, configuration, dt, linearSpeed,
             savedForce, savedImpulse,
             modelResult.surfaceFeedback);
-    force_detail::ClearContactScratch((*vehicle));
+    force_detail::ClearContactScratch((candidate.vehicle));
     return ForceStatus::Success;
 }
 
@@ -11199,7 +11218,7 @@ inline void IntegrateVehiclePrefix<let ReuseWheelPassInvariants : bool = false, 
     inout CudaCandidatePhysicsState candidate,
     CudaPackedStaticConfigurationHeader *configuration,
     float dt) {
-    CudaVehicleState *vehicle = &candidate.vehicle;
+
     GmVec3 worldSpeed = candidate.body.current.linearSpeed;
     GmMat3 rotation = candidate.body.current.rotation;
     const GmVec3 localSpeed = {
@@ -11208,7 +11227,7 @@ inline void IntegrateVehiclePrefix<let ReuseWheelPassInvariants : bool = false, 
             forevervalidator::simulation::cuda::dynamics::detail::Dot(rotation.basisZ, worldSpeed),
     };
     const float forwardSpeed = localSpeed.z;
-    if (wheel_detail::UpdateWheelVisuals((*vehicle))) {
+    if (wheel_detail::UpdateWheelVisuals((candidate.vehicle))) {
         const float denominator =
                 abs(forwardSpeed) *
                         configuration->tuning.visual.wheelSpeedScale +
@@ -11217,40 +11236,40 @@ inline void IntegrateVehiclePrefix<let ReuseWheelPassInvariants : bool = false, 
         {
 
             invariants = ComputeWheelVisualInvariants(
-                    (*vehicle), configuration,
+                    (candidate.vehicle), configuration,
                     forwardSpeed, denominator);
         
 }
         for (uint index = 0u;
-             index < forevervalidator::simulation::cuda::facts::WheelCount(vehicle); ++index) {
+             index < (candidate.vehicle).wheels.count; ++index) {
             UpdateWheelVisual<ReuseWheelPassInvariants>(
-                    (*vehicle), (*vehicle).wheels.values[index],
+                    (candidate.vehicle), (candidate.vehicle).wheels.values[index],
                     configuration, index,
                     forwardSpeed, dt, denominator,
                     invariants);
         }
     }
-    if (wheel_detail::IntegrateWheels((*vehicle))) {
+    if (wheel_detail::IntegrateWheels((candidate.vehicle))) {
         for (uint index = 0u;
-             index < forevervalidator::simulation::cuda::facts::WheelCount(vehicle); ++index) {
+             index < (candidate.vehicle).wheels.count; ++index) {
             IntegrateWheelSuspension(
-                    (*vehicle).wheels.values[index],
+                    (candidate.vehicle).wheels.values[index],
                     configuration, index, dt);
         }
     }
-    if (wheel_detail::IntegrateEngine((*vehicle))) {
-        if (!(*vehicle).controls.forcedLowSpeedFriction) {
+    if (wheel_detail::IntegrateEngine((candidate.vehicle))) {
+        if (!(candidate.vehicle).controls.forcedLowSpeedFriction) {
             const float input =
-                    !(*vehicle).engine.useLowSpeedGateB
-                    ? (*vehicle).controls.lowSpeedGateA
-                    : (*vehicle).controls.lowSpeedGateB;
+                    !(candidate.vehicle).engine.useLowSpeedGateB
+                    ? (candidate.vehicle).controls.lowSpeedGateA
+                    : (candidate.vehicle).controls.lowSpeedGateB;
             IntegrateEngine<Handling>(
-                    (*vehicle), configuration, input, dt);
+                    (candidate.vehicle), configuration, input, dt);
         } else {
-            (*vehicle).engine.engineInputMemory = 0.0f;
+            (candidate.vehicle).engine.engineInputMemory = 0.0f;
         }
     }
-    UpdateCurrentSteering((*vehicle), configuration, dt);
+    UpdateCurrentSteering((candidate.vehicle), configuration, dt);
 }
 
 }  // namespace forevervalidator::simulation::cuda::vehicle
@@ -11986,16 +12005,15 @@ static const uint RespawnPenalty = 50u;
     if (stuntEvents.count >= 2048u) {
         return Status::EventCapacityExceeded;
     }
-    ReplayStuntEvent *event =
-            &stuntEvents.values[stuntEvents.count++];
-    (*event).figure = uint(figure);
-    (*event).degree = degree;
-    (*event).score = score;
-    (*event).bonus = bonus;
-    (*event).straightLanding = straightLanding;
-    (*event).reverseLanding = reverseLanding;
-    (*event).masterJump = masterJump;
-    (*event).chain = chain;
+
+    (stuntEvents.values[stuntEvents.count++]).figure = uint(figure);
+    (stuntEvents.values[stuntEvents.count++]).degree = degree;
+    (stuntEvents.values[stuntEvents.count++]).score = score;
+    (stuntEvents.values[stuntEvents.count++]).bonus = bonus;
+    (stuntEvents.values[stuntEvents.count++]).straightLanding = straightLanding;
+    (stuntEvents.values[stuntEvents.count++]).reverseLanding = reverseLanding;
+    (stuntEvents.values[stuntEvents.count++]).masterJump = masterJump;
+    (stuntEvents.values[stuntEvents.count++]).chain = chain;
     return Status::Success;
 }
 
@@ -12213,26 +12231,26 @@ static const uint RespawnPenalty = 50u;
         inout CudaRaceState race,
         bool enabled,
         uint timeLimitMs) {
-    CudaStuntState *stunts = &race.stunts;
-    (*stunts).replayStuntsEnabled = enabled;
-    (*stunts).replayStuntStateAvailable = false;
-    (*stunts).replayStuntsTimeLimitMs = timeLimitMs;
-    (*stunts).replayStuntsRaceStartTimeMs = UINT32_MAX;
-    (*stunts).replayStuntState = {};
-    (*stunts).stuntInputHistorySize = 0u;
-    (*stunts).stuntLocationHistorySize = 0u;
-    (*stunts).stuntPreviousLocation = detail::IdentityIso();
-    (*stunts).stuntTakeoffLocation = detail::IdentityIso();
-    (*stunts).stuntPreviousLandingTick = UINT32_MAX;
-    (*stunts).stuntChain = 0u;
-    (*stunts).stuntComboWindowMs = 0u;
-    (*stunts).stuntScoreAtTimeLimit = {};
+
+    (race.stunts).replayStuntsEnabled = enabled;
+    (race.stunts).replayStuntStateAvailable = false;
+    (race.stunts).replayStuntsTimeLimitMs = timeLimitMs;
+    (race.stunts).replayStuntsRaceStartTimeMs = UINT32_MAX;
+    (race.stunts).replayStuntState = {};
+    (race.stunts).stuntInputHistorySize = 0u;
+    (race.stunts).stuntLocationHistorySize = 0u;
+    (race.stunts).stuntPreviousLocation = detail::IdentityIso();
+    (race.stunts).stuntTakeoffLocation = detail::IdentityIso();
+    (race.stunts).stuntPreviousLandingTick = UINT32_MAX;
+    (race.stunts).stuntChain = 0u;
+    (race.stunts).stuntComboWindowMs = 0u;
+    (race.stunts).stuntScoreAtTimeLimit = {};
     for (uint index = 0u; index < 39u; ++index) {
-        (*stunts).stuntFigureScores[index] = 0u;
+        (race.stunts).stuntFigureScores[index] = 0u;
     }
-    (*stunts).stuntsScore = 0u;
+    (race.stunts).stuntsScore = 0u;
     race.stuntEvents = {};
-    detail::Reset((*stunts));
+    detail::Reset((race.stunts));
 }
 
  inline void ApplyRespawnPenalty(inout CudaStuntState race) {
@@ -12248,19 +12266,19 @@ static const uint RespawnPenalty = 50u;
  inline Status ApplyTimePenalty(
         inout CudaRaceState race,
         uint overtimeMs) {
-    CudaStuntState *stunts = &race.stunts;
-    if (!(*stunts).replayStuntsEnabled) return Status::Success;
+
+    if (!(race.stunts).replayStuntsEnabled) return Status::Success;
     const uint penalty = overtimeMs / 100u;
     const uint scoreAtTimeLimit =
-            (*stunts).stuntScoreAtTimeLimit.present
-                    ? (*stunts).stuntScoreAtTimeLimit.value
-                    : (*stunts).stuntsScore;
-    (*stunts).stuntsScore =
+            (race.stunts).stuntScoreAtTimeLimit.present
+                    ? (race.stunts).stuntScoreAtTimeLimit.value
+                    : (race.stunts).stuntsScore;
+    (race.stunts).stuntsScore =
             penalty < scoreAtTimeLimit
                     ? scoreAtTimeLimit - penalty
                     : 0u;
     if (penalty == 0u) return Status::Success;
-    (*stunts).stuntComboWindowMs = detail::InterComboDelay;
+    (race.stunts).stuntComboWindowMs = detail::InterComboDelay;
     return detail::AppendEvent(
             race.stuntEvents, 34u, 0u, penalty, 0.0f,
             false, false, false, 0u);
@@ -12606,105 +12624,105 @@ inline void ResetWheelSnapshot(inout CSceneVehicleCar__SSimulationWheel__SState 
 inline void VehicleReset(
         inout CudaCandidatePhysicsState candidate,
         CudaPackedStaticConfigurationHeader *configuration) {
-    CudaVehicleState *vehicle = &candidate.vehicle;
-    (*vehicle).controls.lowSpeedGateA = 0.0f;
-    (*vehicle).controls.lowSpeedGateB = 0.0f;
-    (*vehicle).controls.steeringControl = 0.0f;
-    (*vehicle).controls.currentSteering = 0.0f;
-    (*vehicle).controls.specialContactResponseGate = 0.0f;
-    (*vehicle).contacts.specialContactImpulseCooldownUntil = 0u;
-    (*vehicle).controls.forcedLowSpeedFriction = false;
-    (*vehicle).water.splashPending = false;
+
+    (candidate.vehicle).controls.lowSpeedGateA = 0.0f;
+    (candidate.vehicle).controls.lowSpeedGateB = 0.0f;
+    (candidate.vehicle).controls.steeringControl = 0.0f;
+    (candidate.vehicle).controls.currentSteering = 0.0f;
+    (candidate.vehicle).controls.specialContactResponseGate = 0.0f;
+    (candidate.vehicle).contacts.specialContactImpulseCooldownUntil = 0u;
+    (candidate.vehicle).controls.forcedLowSpeedFriction = false;
+    (candidate.vehicle).water.splashPending = false;
 
     ResetVehiclePassthrough(candidate);
-    ResetFrame((*vehicle).frameHistory.physicsPrevious);
-    ResetFrame((*vehicle).frameHistory.physicsCurrent);
-    (*vehicle).frameHistory.physicsCurrent.vehicleEvent0Value =
-            (*vehicle).vehicleEvents[0].value;
-    (*vehicle).frameHistory.physicsPrevious.vehicleEvent0Value =
-            (*vehicle).vehicleEvents[0].value;
-    (*vehicle).frameHistory.physicsCurrent.waterSplashEventCounter =
-            (*vehicle).vehicleEvents[1].value;
-    (*vehicle).frameHistory.physicsPrevious.waterSplashEventCounter =
-            (*vehicle).vehicleEvents[1].value;
+    ResetFrame((candidate.vehicle).frameHistory.physicsPrevious);
+    ResetFrame((candidate.vehicle).frameHistory.physicsCurrent);
+    (candidate.vehicle).frameHistory.physicsCurrent.vehicleEvent0Value =
+            (candidate.vehicle).vehicleEvents[0].value;
+    (candidate.vehicle).frameHistory.physicsPrevious.vehicleEvent0Value =
+            (candidate.vehicle).vehicleEvents[0].value;
+    (candidate.vehicle).frameHistory.physicsCurrent.waterSplashEventCounter =
+            (candidate.vehicle).vehicleEvents[1].value;
+    (candidate.vehicle).frameHistory.physicsPrevious.waterSplashEventCounter =
+            (candidate.vehicle).vehicleEvents[1].value;
 
-    (*vehicle).turbo.progressRatio = 0.0f;
-    (*vehicle).turbo.type =
+    (candidate.vehicle).turbo.progressRatio = 0.0f;
+    (candidate.vehicle).turbo.type =
             CSceneVehicleCar__ETurboType_ETurboType_Inactive;
-    (*vehicle).turbo.impulseScale = 0.0f;
-    (*vehicle).airControl.refreshMemory = false;
-    (*vehicle).airControl.memoryTick = 0u;
-    (*vehicle).airControl.memoryAngular = {};
-    (*vehicle).radiusSteering.steerAngle = 0.0f;
-    (*vehicle).radiusSteering.phase =
+    (candidate.vehicle).turbo.impulseScale = 0.0f;
+    (candidate.vehicle).airControl.refreshMemory = false;
+    (candidate.vehicle).airControl.memoryTick = 0u;
+    (candidate.vehicle).airControl.memoryAngular = {};
+    (candidate.vehicle).radiusSteering.steerAngle = 0.0f;
+    (candidate.vehicle).radiusSteering.phase =
             CSceneVehicleCarRadiusSteeringPhase_CSceneVehicleCarRadiusSteeringPhase_Idle;
-    (*vehicle).radiusSteering.previousSteerSign = 0.0f;
-    (*vehicle).slipMemory.steeringMemoryTick = UINT32_MAX;
-    (*vehicle).slipMemory.active = false;
-    (*vehicle).slipMemory.lastTick = UINT32_MAX;
-    (*vehicle).slipMemory.startTick = UINT32_MAX;
-    (*vehicle).gearedDrive.wheelSpeedOverrideActive = false;
-    (*vehicle).gearedDrive.burnoutStartTick = UINT32_MAX;
-    (*vehicle).gearedDrive.burnoutExitStartTick = UINT32_MAX;
-    (*vehicle).gearedDrive.frameIso = IdentityIso();
-    (*vehicle).gearedDrive.burnoutContactNormal = {};
-    (*vehicle).gearedDrive.localSpeed = {};
-    (*vehicle).gearedDrive.burnoutPhase =
+    (candidate.vehicle).radiusSteering.previousSteerSign = 0.0f;
+    (candidate.vehicle).slipMemory.steeringMemoryTick = UINT32_MAX;
+    (candidate.vehicle).slipMemory.active = false;
+    (candidate.vehicle).slipMemory.lastTick = UINT32_MAX;
+    (candidate.vehicle).slipMemory.startTick = UINT32_MAX;
+    (candidate.vehicle).gearedDrive.wheelSpeedOverrideActive = false;
+    (candidate.vehicle).gearedDrive.burnoutStartTick = UINT32_MAX;
+    (candidate.vehicle).gearedDrive.burnoutExitStartTick = UINT32_MAX;
+    (candidate.vehicle).gearedDrive.frameIso = IdentityIso();
+    (candidate.vehicle).gearedDrive.burnoutContactNormal = {};
+    (candidate.vehicle).gearedDrive.localSpeed = {};
+    (candidate.vehicle).gearedDrive.burnoutPhase =
             CSceneVehicleCarBurnoutPhase_CSceneVehicleCarBurnoutPhase_Inactive;
-    (*vehicle).gearedDrive.engineState =
+    (candidate.vehicle).gearedDrive.engineState =
             CSceneVehicleCarEngineControlState_CSceneVehicleCarEngineControlState_Steady;
-    (*vehicle).gearedDrive.inputWindowExceeded = false;
-    (*vehicle).gearedDrive.wheelDriveSpeedInhibited = false;
+    (candidate.vehicle).gearedDrive.inputWindowExceeded = false;
+    (candidate.vehicle).gearedDrive.wheelDriveSpeedInhibited = false;
 
-    (*vehicle).contacts.bodyContactPresent = false;
-    (*vehicle).contacts.lateralSlowDownContactActive = false;
-    (*vehicle).contacts.lateralSlowDownLastTick = UINT32_MAX;
-    (*vehicle).controls.noGroundFrictionGuard = false;
-    (*vehicle).contacts.frontWheelImpactState =
+    (candidate.vehicle).contacts.bodyContactPresent = false;
+    (candidate.vehicle).contacts.lateralSlowDownContactActive = false;
+    (candidate.vehicle).contacts.lateralSlowDownLastTick = UINT32_MAX;
+    (candidate.vehicle).controls.noGroundFrictionGuard = false;
+    (candidate.vehicle).contacts.frontWheelImpactState =
             CSceneVehicleCarImpactState_CSceneVehicleCarImpactState_None;
-    (*vehicle).contacts.rearWheelImpactState =
+    (candidate.vehicle).contacts.rearWheelImpactState =
             CSceneVehicleCarImpactState_CSceneVehicleCarImpactState_None;
-    (*vehicle).contacts.bodyImpactState =
+    (candidate.vehicle).contacts.bodyImpactState =
             CSceneVehicleCarImpactState_CSceneVehicleCarImpactState_None;
-    (*vehicle).contacts.lastWheelContactMaterial =
+    (candidate.vehicle).contacts.lastWheelContactMaterial =
             EPlugSurfaceMaterialId_EPlugSurfaceMaterialId_Concrete;
-    (*vehicle).contacts.lastBodyContactMaterial =
+    (candidate.vehicle).contacts.lastBodyContactMaterial =
             EPlugSurfaceMaterialId_EPlugSurfaceMaterialId_Concrete;
-    (*vehicle).contacts.peakRearWheelImpactState =
+    (candidate.vehicle).contacts.peakRearWheelImpactState =
             CSceneVehicleCarImpactState_CSceneVehicleCarImpactState_None;
-    (*vehicle).contacts.peakFrontWheelImpactState =
+    (candidate.vehicle).contacts.peakFrontWheelImpactState =
             CSceneVehicleCarImpactState_CSceneVehicleCarImpactState_None;
-    (*vehicle).contacts.peakBodyImpactState =
+    (candidate.vehicle).contacts.peakBodyImpactState =
             CSceneVehicleCarImpactState_CSceneVehicleCarImpactState_None;
-    (*vehicle).contacts.frontWheelImpactBucket = 0.0f;
-    (*vehicle).contacts.peakWheelImpactMaterial =
+    (candidate.vehicle).contacts.frontWheelImpactBucket = 0.0f;
+    (candidate.vehicle).contacts.peakWheelImpactMaterial =
             EPlugSurfaceMaterialId_EPlugSurfaceMaterialId_Concrete;
-    (*vehicle).contacts.rearWheelImpactBucket = 0.0f;
-    (*vehicle).contacts.peakBodyImpactMaterial =
+    (candidate.vehicle).contacts.rearWheelImpactBucket = 0.0f;
+    (candidate.vehicle).contacts.peakBodyImpactMaterial =
             EPlugSurfaceMaterialId_EPlugSurfaceMaterialId_Concrete;
-    (*vehicle).contacts.bodyImpactBucket = 0.0f;
-    (*vehicle).lastComputeForcesTick = 0u;
-    (*vehicle).forceAccumulators = {};
-    (*vehicle).contacts.bodyContactPointSum = {};
-    (*vehicle).contacts.bodyContactNormalSum = {};
-    (*vehicle).contacts.bodyContactCount = 0u;
-    (*vehicle).contacts.wheelContactCount = 0u;
-    (*vehicle).feedback.surfaceAccumulator = 0.0f;
+    (candidate.vehicle).contacts.bodyImpactBucket = 0.0f;
+    (candidate.vehicle).lastComputeForcesTick = 0u;
+    (candidate.vehicle).forceAccumulators = {};
+    (candidate.vehicle).contacts.bodyContactPointSum = {};
+    (candidate.vehicle).contacts.bodyContactNormalSum = {};
+    (candidate.vehicle).contacts.bodyContactCount = 0u;
+    (candidate.vehicle).contacts.wheelContactCount = 0u;
+    (candidate.vehicle).feedback.surfaceAccumulator = 0.0f;
     for (uint index = 0u;
-         index < forevervalidator::simulation::cuda::facts::WheelCount(vehicle); ++index) {
-        ResetWheel((*vehicle).wheels.values[index], configuration);
+         index < (candidate.vehicle).wheels.count; ++index) {
+        ResetWheel((candidate.vehicle).wheels.values[index], configuration);
     }
-    (*vehicle).engine.useLowSpeedGateB = false;
-    (*vehicle).engine.engineInputMemory = 0.0f;
-    (*vehicle).engine.gearIndex = 1;
-    (*vehicle).engine.targetTransmissionInput = 0.0f;
-    (*vehicle).engine.lowSpeedFeedbackForce = 0.0f;
-    (*vehicle).engine.shiftCooldown = 0.0f;
-    (*vehicle).engine.slipRpmScale = 1.0f;
+    (candidate.vehicle).engine.useLowSpeedGateB = false;
+    (candidate.vehicle).engine.engineInputMemory = 0.0f;
+    (candidate.vehicle).engine.gearIndex = 1;
+    (candidate.vehicle).engine.targetTransmissionInput = 0.0f;
+    (candidate.vehicle).engine.lowSpeedFeedbackForce = 0.0f;
+    (candidate.vehicle).engine.shiftCooldown = 0.0f;
+    (candidate.vehicle).engine.slipRpmScale = 1.0f;
     for (uint spring = 0u; spring < 4u; ++spring) {
-        (*vehicle).dynaPartSprings[spring].value = 0.0f;
-        (*vehicle).dynaPartSprings[spring].target = 0.0f;
-        (*vehicle).dynaPartSprings[spring].velocity = 0.0f;
+        (candidate.vehicle).dynaPartSprings[spring].value = 0.0f;
+        (candidate.vehicle).dynaPartSprings[spring].target = 0.0f;
+        (candidate.vehicle).dynaPartSprings[spring].velocity = 0.0f;
     }
     candidate.body.physicalParameters.
             vehicleContactFeedbackScale =
@@ -13255,14 +13273,14 @@ namespace forevervalidator::simulation::cuda::candidate_events {
                 bucket = bucket + 1u == groupCount
                         ? 0u : bucket + 1u;
             }
-            CudaSearchInputEvent *entry = &source[groupBegin + bucket];
-            if ((*entry).timeMs == 0) {
-                (*entry).timeMs = 1;
-                (*entry).action = value.action;
-                (*entry).valueKind = index;
+
+            if ((source[groupBegin + bucket]).timeMs == 0) {
+                (source[groupBegin + bucket]).timeMs = 1;
+                (source[groupBegin + bucket]).action = value.action;
+                (source[groupBegin + bucket]).valueKind = index;
             } else {
                 destination[
-                        outputCount + (*entry).valueKind] = value;
+                        outputCount + (source[groupBegin + bucket]).valueKind] = value;
             }
         }
 
@@ -14053,19 +14071,19 @@ bool ApplyModifier(
                           modifier.window.maximumTimeMs)
                 : *eventCount;
         for (uint index = begin; index < end; ++index) {
-            CudaSearchInputEvent *event = &events[index];
+
             if ((!*normalized &&
-                 ((*event).timeMs < modifier.window.minimumTimeMs ||
-                  (*event).timeMs > modifier.window.maximumTimeMs)) ||
-                (*event).action != 4u || !IsAnalog((*event))) {
+                 ((events[index]).timeMs < modifier.window.minimumTimeMs ||
+                  (events[index]).timeMs > modifier.window.maximumTimeMs)) ||
+                (events[index]).action != 4u || !IsAnalog((events[index]))) {
                 continue;
             }
             int value =
                     random.UniformS32(-65536, 65536);
-            if (value == (*event).value) {
+            if (value == (events[index]).value) {
                 value = value == 65536 ? -65536 : 65536;
             }
-            (*event).value = value;
+            (events[index]).value = value;
         }
         if (!legacyMutationPipeline &&
             modifier.window.minimumTimeMs >= mutableFromTimeMs &&
@@ -14098,11 +14116,11 @@ bool ApplyModifier(
                 modifier.timeParameterMs /
                 int64_t(tickDurationMs);
         for (uint index = 0u; index < count; ++index) {
-            CudaSearchInputEvent *event = &events[eligible[index]];
+
             const int64_t shiftTicks = random.UniformS64(
                     -maximumShiftTicks, maximumShiftTicks);
             int64_t time =
-                    int64_t((*event).timeMs) +
+                    int64_t((events[eligible[index]]).timeMs) +
                     shiftTicks * tickDurationMs;
             if (time < modifier.window.minimumTimeMs) {
                 time = modifier.window.minimumTimeMs;
@@ -14110,22 +14128,22 @@ bool ApplyModifier(
             if (time > modifier.window.maximumTimeMs) {
                 time = modifier.window.maximumTimeMs;
             }
-            (*event).timeMs = int(time);
-            if (IsSteerAction((*event).action)) {
+            (events[eligible[index]]).timeMs = int(time);
+            if (IsSteerAction((events[eligible[index]]).action)) {
                 if ((modifier.optionFlags & 1u) != 0u) {
-                    (*event).value = random.UniformS32(
+                    (events[eligible[index]]).value = random.UniformS32(
                             modifier.secondaryAnalogMinimum,
                             modifier.secondaryAnalogMaximum);
                 } else {
                     const int delta = random.UniformS32(
                             modifier.analogMinimum,
                             modifier.analogMaximum);
-                    (*event).value = SaturateAnalog(
-                            int64_t((*event).value) +
+                    (events[eligible[index]]).value = SaturateAnalog(
+                            int64_t((events[eligible[index]]).value) +
                             delta);
                 }
-            } else if (IsSwitch((*event))) {
-                (*event).value = (*event).value != 0 ? 0 : 1;
+            } else if (IsSwitch((events[eligible[index]]))) {
+                (events[eligible[index]]).value = (events[eligible[index]]).value != 0 ? 0 : 1;
             }
         }
         if (!legacyMutationPipeline &&
@@ -14522,7 +14540,12 @@ struct DeviceConditionValue {
     return {};
 }
 
- [ForceInline] bool EvaluateCondition(
+struct DeviceExpressionResult {
+    double value = 0.0;
+    bool valid = false;
+};
+
+ [ForceInline] DeviceExpressionResult EvaluateExpression(
         CudaSearchConditionInstruction *instructions,
         uint instructionCount,
         __constref CudaCandidatePhysicsState state,
@@ -14530,24 +14553,26 @@ struct DeviceConditionValue {
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds,
         double currentTimeSeconds) {
-    if (instructionCount == 0u) return true;
+    if (instructionCount == 0u) {
+        return {1.0, true};
+    }
     DeviceConditionValue stack[32];
     uint size = 0u;
     for (uint index = 0u; index < instructionCount; ++index) {
         const CudaSearchConditionInstruction instruction = instructions[index];
         if (instruction.opcode == CudaSearchConditionOpcode_Constant) {
-            if (size >= 32u) return false;
+            if (size >= 32u) return {};
             stack[size++] = {instruction.x};
             continue;
         }
         if (instruction.opcode == CudaSearchConditionOpcode_ConstantVector) {
-            if (size >= 32u) return false;
+            if (size >= 32u) return {};
             stack[size++] = {instruction.x, instruction.y, instruction.z, true};
             continue;
         }
         if (instruction.opcode == CudaSearchConditionOpcode_Scalar ||
             instruction.opcode == CudaSearchConditionOpcode_Vector) {
-            if (size >= 32u) return false;
+            if (size >= 32u) return {};
             DeviceConditionValue value = ConditionSource(
                     instruction.value, state, iterationCount,
                     lastImprovementTimeSeconds,
@@ -14562,42 +14587,104 @@ struct DeviceConditionValue {
             if ((instruction.opcode == CudaSearchConditionOpcode_Scalar &&
                  value.vector) ||
                 (instruction.opcode == CudaSearchConditionOpcode_Vector &&
-                 !value.vector)) return false;
+                 !value.vector)) return {};
             stack[size++] = value;
             continue;
         }
         if (instruction.opcode == CudaSearchConditionOpcode_KilometersPerHour ||
             instruction.opcode == CudaSearchConditionOpcode_Degrees) {
-            if (size == 0u || stack[size - 1u].vector) return false;
+            if (size == 0u || stack[size - 1u].vector) return {};
             stack[size - 1u].x *= instruction.opcode ==
                     CudaSearchConditionOpcode_KilometersPerHour
                     ? double_from_bits(0x400ccccccccccccdull) : double_from_bits(0x404ca5dc1a63c1f8ull);
             continue;
         }
-        if (size < 2u) return false;
+        if (size < 2u) return {};
         const DeviceConditionValue right = stack[--size];
-        DeviceConditionValue *left = &stack[size - 1u];
+
         switch (instruction.opcode) {
         case CudaSearchConditionOpcode_Distance:
-            if (!(*left).vector || !right.vector) return false;
-            (*left) = {sqrt(((*left).x-right.x)*((*left).x-right.x) +
-                         ((*left).y-right.y)*((*left).y-right.y) +
-                         ((*left).z-right.z)*((*left).z-right.z))};
+            if (!(stack[size - 1u]).vector || !right.vector) return {};
+            (stack[size - 1u]) = {sqrt(((stack[size - 1u]).x-right.x)*((stack[size - 1u]).x-right.x) +
+                         ((stack[size - 1u]).y-right.y)*((stack[size - 1u]).y-right.y) +
+                         ((stack[size - 1u]).z-right.z)*((stack[size - 1u]).z-right.z))};
             break;
-        case CudaSearchConditionOpcode_Add: (*left).x += right.x; break;
-        case CudaSearchConditionOpcode_Subtract: (*left).x -= right.x; break;
-        case CudaSearchConditionOpcode_Multiply: (*left).x *= right.x; break;
-        case CudaSearchConditionOpcode_Divide: (*left).x = right.x == 0.0 ? 0.0 : (*left).x / right.x; break;
-        case CudaSearchConditionOpcode_Greater: (*left) = {(*left).x > right.x ? 1.0 : 0.0}; break;
-        case CudaSearchConditionOpcode_Less: (*left) = {(*left).x < right.x ? 1.0 : 0.0}; break;
-        case CudaSearchConditionOpcode_GreaterOrEqual: (*left) = {(*left).x >= right.x ? 1.0 : 0.0}; break;
-        case CudaSearchConditionOpcode_LessOrEqual: (*left) = {(*left).x <= right.x ? 1.0 : 0.0}; break;
-        case CudaSearchConditionOpcode_Equal: (*left) = {(*left).x == right.x ? 1.0 : 0.0}; break;
-        case CudaSearchConditionOpcode_LogicalAnd: (*left) = {(*left).x != 0.0 && right.x != 0.0 ? 1.0 : 0.0}; break;
-        default: return false;
+        case CudaSearchConditionOpcode_Add: (stack[size - 1u]).x += right.x; break;
+        case CudaSearchConditionOpcode_Subtract: (stack[size - 1u]).x -= right.x; break;
+        case CudaSearchConditionOpcode_Multiply: (stack[size - 1u]).x *= right.x; break;
+        case CudaSearchConditionOpcode_Divide: (stack[size - 1u]).x = right.x == 0.0 ? 0.0 : (stack[size - 1u]).x / right.x; break;
+        case CudaSearchConditionOpcode_Greater: (stack[size - 1u]) = {(stack[size - 1u]).x > right.x ? 1.0 : 0.0}; break;
+        case CudaSearchConditionOpcode_Less: (stack[size - 1u]) = {(stack[size - 1u]).x < right.x ? 1.0 : 0.0}; break;
+        case CudaSearchConditionOpcode_GreaterOrEqual: (stack[size - 1u]) = {(stack[size - 1u]).x >= right.x ? 1.0 : 0.0}; break;
+        case CudaSearchConditionOpcode_LessOrEqual: (stack[size - 1u]) = {(stack[size - 1u]).x <= right.x ? 1.0 : 0.0}; break;
+        case CudaSearchConditionOpcode_Equal: (stack[size - 1u]) = {(stack[size - 1u]).x == right.x ? 1.0 : 0.0}; break;
+        case CudaSearchConditionOpcode_LogicalAnd: (stack[size - 1u]) = {(stack[size - 1u]).x != 0.0 && right.x != 0.0 ? 1.0 : 0.0}; break;
+        default: return {};
         }
     }
-    return size == 1u && !stack[0].vector && stack[0].x != 0.0;
+    if (size != 1u || stack[0].vector) return {};
+    return {stack[0].x, true};
+}
+
+ bool EvaluateCondition(
+        CudaSearchConditionInstruction *instructions,
+        uint instructionCount,
+        __constref CudaCandidatePhysicsState state,
+        uint64_t iterationCount,
+        double lastImprovementTimeSeconds,
+        double lastRestartTimeSeconds,
+        double currentTimeSeconds) {
+    const DeviceExpressionResult result = EvaluateExpression(
+            instructions, instructionCount, state, iterationCount,
+            lastImprovementTimeSeconds, lastRestartTimeSeconds,
+            currentTimeSeconds);
+    return result.valid && result.value != 0.0;
+}
+
+ bool UpdateScriptedSample(
+        __constref CudaSearchEvaluatorConfiguration evaluator,
+        __constref CudaCandidatePhysicsState state,
+        uint64_t iterationCount,
+        double lastImprovementTimeSeconds,
+        double lastRestartTimeSeconds,
+        double currentTimeSeconds,
+        double currentTimeMs,
+        inout cuda_search_detail__DeviceSample sample) {
+    double values[16];
+    double scores[16];
+    for (uint i = 0u;
+         i < evaluator.scriptedObjectiveCount; ++i) {
+        const CudaSearchScriptedObjective objective =
+                evaluator.scriptedObjectives[i];
+        const DeviceExpressionResult expression = EvaluateExpression(
+                &evaluator.scriptedInstructions[
+                        objective.firstInstruction],
+                objective.instructionCount, state, iterationCount,
+                lastImprovementTimeSeconds,
+                lastRestartTimeSeconds, currentTimeSeconds);
+        values[i] = expression.value;
+        if (!expression.valid || !isfinite_portable(values[i])) return false;
+        scores[i] = objective.kind == 0u
+                ? -values[i]
+                : objective.kind == 1u
+                  ? values[i]
+                  : -abs(values[i] - objective.target);
+        if (!isfinite_portable(scores[i])) return false;
+    }
+    for (uint i = 0u;
+         i < evaluator.scriptedObjectiveCount; ++i) {
+        if (!sample.valid ||
+            scores[i] > sample.objectiveScores[i]) {
+            sample.objectiveScores[i] = scores[i];
+            sample.metricValues[i] = values[i];
+        }
+    }
+    sample.valid = true;
+    sample.scriptedObjectiveCount =
+            evaluator.scriptedObjectiveCount;
+    sample.score = sample.objectiveScores[0];
+    sample.timeMs = currentTimeMs;
+    return true;
 }
 
  cuda_search_detail__DeviceSample EvaluateState(
@@ -14621,6 +14708,7 @@ struct DeviceConditionValue {
     result.valid = false;
     result.mutation = false;
     result.preciseFinish = false;
+    result.scriptedObjectiveCount = 0u;
     result.timeMs = currentTimeMs;
     GmVec3 position = state.body.current.position;
     switch (evaluator.kind) {
@@ -15077,7 +15165,7 @@ void PrepareVulkanSearchTick(
 {
     VulkanSearchParameters* parameters =
         reinterpret<VulkanSearchParameters*>(searchPush.parameters);
-    uint slot = dispatchThreadId.x;
+    uint slot = searchPush.candidateBase + dispatchThreadId.x;
     if (slot >= parameters->candidateCount) return;
     uint8_t* simulationActive =
         reinterpret<uint8_t*>(parameters->simulationActive);
@@ -15201,6 +15289,32 @@ void EvaluateVulkanSearchTick(
         reinterpret<uint8_t*>(parameters->evaluatorReported);
     bool evaluatorReported = reported[slot] != 0u;
     uint* eventCounts = reinterpret<uint*>(parameters->eventCounts);
+    cuda_search_detail__DeviceSample* samples =
+        reinterpret<cuda_search_detail__DeviceSample*>(
+            parameters->candidateBestSamples);
+    if (evaluator->kind == CudaSearchEvaluatorKind_Scripted)
+    {
+        cuda_search_detail__DeviceSample sample = samples[slot + 1u];
+        if (UpdateScriptedSample(
+                *evaluator, *state,
+                parameters->baseline != 0u ? 0u : candidateId + 1u,
+                parameters->lastImprovementTimeSeconds,
+                parameters->lastRestartTimeSeconds,
+                parameters->currentTimeSeconds,
+                double(publicTime), sample))
+        {
+            sample.candidateId = candidateId;
+            sample.candidateSlot = slot;
+            sample.evaluationTick = evaluationIndex;
+            sample.eventCount = eventCounts[slot];
+            sample.logicalOrder = 1u + uint64_t(slot) *
+                parameters->evaluationTickCount + evaluationIndex;
+            sample.mutation = parameters->baseline == 0u ? 1u : 0u;
+            samples[slot + 1u] = sample;
+        }
+        evaluationIndices[slot] = evaluationIndex + 1u;
+        return;
+    }
     uint stuntsScore = 0u;
     if (parameters->simulateStunts != 0u)
     {
@@ -15221,9 +15335,6 @@ void EvaluateVulkanSearchTick(
     sample.logicalOrder = 1u + uint64_t(slot) *
         parameters->evaluationTickCount + evaluationIndex;
     sample.mutation = parameters->baseline == 0u ? 1u : 0u;
-    cuda_search_detail__DeviceSample* samples =
-        reinterpret<cuda_search_detail__DeviceSample*>(
-            parameters->candidateBestSamples);
     if (SearchStrictlyBetter(
             sample, samples[slot + 1u], MaximizesScore(evaluator->kind)))
         samples[slot + 1u] = sample;
@@ -15254,43 +15365,43 @@ namespace forevervalidator::simulation::vulkan_search {
 forevervalidator::simulation::cuda::vehicle::ForceStatus
 ExecuteSearchForcePass(
     CudaPackedStaticConfigurationHeader* configuration,
-    CudaCandidatePhysicsState* state,
+    inout CudaCandidatePhysicsState state,
     float dt)
 {
     forevervalidator::simulation::cuda::environment::BeginForcePass(
-        state->body, configuration);
-    if (!state->vehicle.mobil.physicsUpdatesEnabled)
+        state.body, configuration);
+    if (!state.vehicle.mobil.physicsUpdatesEnabled)
         return forevervalidator::simulation::cuda::vehicle::ForceStatus::Success;
     return forevervalidator::simulation::cuda::vehicle::ComputeForcesModel6<
         true, CudaHandlingSpecialization_Generic>(
-            *state, configuration, dt);
+            state, configuration, dt);
 }
 
 [noinline]
 uint ExecuteSearchCollisionDetection(
     CudaPackedSceneHeader* scene,
     CudaPackedStaticConfigurationHeader* configuration,
-    CudaCandidatePhysicsState* state,
+    inout CudaCandidatePhysicsState state,
     cuda__collision__VulkanCollisionSearchScratch* scratch,
     float dt)
 {
     forevervalidator::simulation::cuda::dynamics::PreCollision<true>(
-        state->body, *scratch, dt);
+        state.body, *scratch, dt);
     return forevervalidator::simulation::cuda::collision::Detect<
         false, true, true, false>(
-            scene, configuration, *state, *scratch);
+            scene, configuration, state, *scratch);
 }
 
 [noinline]
 uint ExecuteSearchCollisionResponse(
     CudaPackedSceneHeader* scene,
     CudaPackedStaticConfigurationHeader* configuration,
-    CudaCandidatePhysicsState* state,
+    inout CudaCandidatePhysicsState state,
     cuda__collision__VulkanCollisionSearchScratch* scratch)
 {
     return forevervalidator::simulation::cuda::collision::Respond<
         false, true, true>(
-            scene, configuration, *state, *scratch);
+            scene, configuration, state, *scratch);
 }
 
 [noinline]
@@ -15298,7 +15409,7 @@ forevervalidator::simulation::cuda::physics::Status
 ExecuteSearchCollisionSubstep(
     CudaPackedSceneHeader* scene,
     CudaPackedStaticConfigurationHeader* configuration,
-    CudaCandidatePhysicsState* state,
+    inout CudaCandidatePhysicsState state,
     cuda__collision__VulkanCollisionSearchScratch* scratch,
     float dt)
 {
@@ -15319,7 +15430,7 @@ ExecuteSearchCollisionSubstep(
             uint(forevervalidator::simulation::cuda::physics::Status::
                 CollisionFailureBase) + collisionStatus);
     forevervalidator::simulation::cuda::dynamics::PostCollision<true>(
-        state->body, *scratch);
+        state.body, *scratch);
     return forevervalidator::simulation::cuda::physics::Status::Success;
 }
 
@@ -15327,15 +15438,15 @@ ExecuteSearchCollisionSubstep(
 forevervalidator::simulation::cuda::physics::Status ExecuteSearchPhysicsStep(
     CudaPackedSceneHeader* scene,
     CudaPackedStaticConfigurationHeader* configuration,
-    CudaCandidatePhysicsState* state,
+    inout CudaCandidatePhysicsState state,
     cuda__collision__VulkanCollisionSearchScratch* scratch)
 {
-    const float dt = float(int(state->world.schemePeriodMs)) * 0.001f;
-    if (state->body.dynamicActive)
+    const float dt = float(int(state.world.schemePeriodMs)) * 0.001f;
+    if (state.body.dynamicActive)
     {
-        state->body.temporary = state->body.current;
-        GmVec3 linear = state->body.current.linearSpeed;
-        GmVec3 angular = state->body.current.angularSpeed;
+        state.body.temporary = state.body.current;
+        GmVec3 linear = state.body.current.linearSpeed;
+        GmVec3 angular = state.body.current.angularSpeed;
         const float linearLength =
             forevervalidator::simulation::cuda::exact::Sqrt(
                 (linear.y * linear.y + linear.x * linear.x) +
@@ -15347,7 +15458,7 @@ forevervalidator::simulation::cuda::physics::Status ExecuteSearchPhysicsStep(
         const float scaled =
             forevervalidator::simulation::cuda::exact::Divide(
                 (linearLength + angularLength) * dt,
-                state->body.parameters.maxStepDistance);
+                state.body.parameters.maxStepDistance);
         uint substeps =
             forevervalidator::simulation::cuda::exact::
                 TruncateToUint32Modulo(scaled) + 1u;
@@ -15377,11 +15488,11 @@ forevervalidator::simulation::cuda::physics::Status ExecuteSearchPhysicsStep(
         if (finalStatus != forevervalidator::simulation::cuda::physics::
                                    Status::Success)
             return finalStatus;
-        state->body.write = state->body.temporary;
+        state.body.write = state.body.temporary;
     }
-    if (state->vehicle.mobil.physicsUpdatesEnabled)
+    if (state.vehicle.mobil.physicsUpdatesEnabled)
         forevervalidator::simulation::cuda::vehicle::
-            AfterContactsWithoutSnapshots(*state);
+            AfterContactsWithoutSnapshots(state);
     return forevervalidator::simulation::cuda::physics::Status::Success;
 }
 
@@ -15465,7 +15576,7 @@ void ExecuteVulkanSearchPhysics(
             parameters->collisionScratch) + slot;
     forevervalidator::simulation::cuda::physics::Status physicsStatus =
         ExecuteSearchPhysicsStep(
-        scene, configuration, state, scratch);
+        scene, configuration, *state, scratch);
     if (physicsStatus !=
             forevervalidator::simulation::cuda::physics::Status::Success)
     {
@@ -15511,6 +15622,26 @@ void ExecuteVulkanSearchPhysics(
 
 namespace forevervalidator::simulation::vulkan_search {
 
+bool SearchScriptedBetter(
+    __constref cuda_search_detail__DeviceSample candidate,
+    __constref cuda_search_detail__DeviceSample incumbent)
+{
+    if (candidate.valid == 0u) return false;
+    if (incumbent.valid == 0u) return true;
+    if (candidate.scriptedObjectiveCount == 0u ||
+        candidate.scriptedObjectiveCount != incumbent.scriptedObjectiveCount)
+        return false;
+    bool better = false;
+    for (uint i = 0u; i < candidate.scriptedObjectiveCount; ++i)
+    {
+        if (candidate.objectiveScores[i] < incumbent.objectiveScores[i])
+            return false;
+        better = better ||
+            candidate.objectiveScores[i] > incumbent.objectiveScores[i];
+    }
+    return better;
+}
+
 [noinline]
 void FinalizeVulkanSearchBatch(VulkanSearchParameters* parameters)
 {
@@ -15546,7 +15677,9 @@ void FinalizeVulkanSearchBatch(VulkanSearchParameters* parameters)
     cuda_search_detail__DeviceSample incumbent = samples[0];
     if (parameters->baseline != 0u)
     {
-        if (samples[1].valid != 0u)
+        if (evaluator->kind == CudaSearchEvaluatorKind_Scripted
+                ? SearchScriptedBetter(samples[1], incumbent)
+                : samples[1].valid != 0u)
         {
             incumbent = samples[1];
             result.winnerSlot = 0u;
@@ -15557,7 +15690,9 @@ void FinalizeVulkanSearchBatch(VulkanSearchParameters* parameters)
         for (uint slot = 0u; slot < parameters->candidateCount; ++slot)
         {
             cuda_search_detail__DeviceSample sample = samples[slot + 1u];
-            if (SearchStrictlyBetter(sample, incumbent, maximize))
+            if (evaluator->kind == CudaSearchEvaluatorKind_Scripted
+                    ? SearchScriptedBetter(sample, incumbent)
+                    : SearchStrictlyBetter(sample, incumbent, maximize))
             {
                 ++result.mutationImprovementCount;
                 incumbent = sample;
@@ -15568,7 +15703,8 @@ void FinalizeVulkanSearchBatch(VulkanSearchParameters* parameters)
     result.winner = incumbent;
 
     if (result.winnerSlot != UINT32_MAX && incumbent.valid != 0u &&
-        (parameters->baseline != 0u ||
+        (evaluator->kind == CudaSearchEvaluatorKind_Scripted ||
+         parameters->baseline != 0u ||
          SearchStrictlyBetter(incumbent, samples[0], maximize)))
     {
         uint slot = result.winnerSlot;
@@ -15614,9 +15750,10 @@ void ExecuteVulkanSearchCandidates(
         reinterpret<CudaPackedStaticConfigurationHeader*>(
             parameters->configuration);
     uint8_t* stateBytes = reinterpret<uint8_t*>(parameters->candidateStates);
-    CudaCandidatePhysicsState* state =
+    CudaCandidatePhysicsState* deviceState =
         reinterpret<CudaCandidatePhysicsState*>(
             stateBytes + uint64_t(slot) * parameters->stateWordCount * 4u);
+    CudaCandidatePhysicsState localState = *deviceState;
     uint* statuses = reinterpret<uint*>(parameters->statuses);
     cuda_search_detail__DeviceSample* samples =
         reinterpret<cuda_search_detail__DeviceSample*>(
@@ -15624,7 +15761,7 @@ void ExecuteVulkanSearchCandidates(
     cuda_search_detail__DeviceSample localBest = samples[slot + 1u];
     if (!forevervalidator::simulation::ValidPackedInputs(
             scene, configuration) ||
-        state->schemaVersion != CudaCandidateState_SchemaVersion)
+        localState.schemaVersion != CudaCandidateState_SchemaVersion)
     {
         statuses[slot] = 4u;
         samples[slot + 1u] = localBest;
@@ -15677,6 +15814,7 @@ void ExecuteVulkanSearchCandidates(
         {
             statuses[slot] = 2u;
             samples[slot + 1u] = localBest;
+            *deviceState = localState;
             return;
         }
 
@@ -15699,28 +15837,29 @@ void ExecuteVulkanSearchCandidates(
             ControlsFromState(controlState);
         tick.stuntsInput = forevervalidator::simulation::cuda_search_detail::
             StuntsFromState(controlState, parameters->prestartDurationMs);
-        GmVec3 previousPosition = state->body.current.position;
+        GmVec3 previousPosition = localState.body.current.position;
 
         forevervalidator::simulation::ApplyControlAndTimingPrefix(
-            *state, tick, false);
-        if (state->firstStep == 0u)
+            localState, tick, false);
+        if (localState.firstStep == 0u)
             forevervalidator::simulation::cuda::transition::PrepareStep(
-                *state, tick, configuration);
-        state->vehicle.mobil.absorbContactEnabled = 1u;
-        state->vehicle.mobil.physicsUpdatesEnabled =
+                localState, tick, configuration);
+        localState.vehicle.mobil.absorbContactEnabled = 1u;
+        localState.vehicle.mobil.physicsUpdatesEnabled =
             (tick.actionFlags & 2u) == 0u;
         for (uint respawn = 0u;
              respawn < tick.respawnAtCheckpointCount; ++respawn)
         {
             if (forevervalidator::simulation::cuda::transition::Respawn(
-                    *state, configuration))
+                    localState, configuration))
             {
                 ++results[slot].executedRespawnCount;
-                ++state->incrementalRespawnCount;
+                ++localState.incrementalRespawnCount;
                 if (parameters->simulateStunts != 0u)
                 {
+                    *deviceState = localState;
                     CudaCandidateState* fullState =
-                        reinterpret<CudaCandidateState*>(state);
+                        reinterpret<CudaCandidateState*>(deviceState);
                     forevervalidator::simulation::cuda::stunts::
                         ApplyRespawnPenalty(fullState->stunts);
                 }
@@ -15729,7 +15868,7 @@ void ExecuteVulkanSearchCandidates(
 
         forevervalidator::simulation::cuda::physics::Status physicsStatus =
             ExecuteSearchPhysicsStep(
-                scene, configuration, state, scratch);
+                scene, configuration, localState, scratch);
         if (physicsStatus !=
                 forevervalidator::simulation::cuda::physics::Status::Success)
         {
@@ -15740,18 +15879,20 @@ void ExecuteVulkanSearchCandidates(
                 100000u * scratch->collisionCount;
             statuses[slot] = 4u;
             samples[slot + 1u] = localBest;
+            *deviceState = localState;
             return;
         }
 
         if (parameters->simulateStunts != 0u)
         {
             CudaCandidateState* fullState =
-                reinterpret<CudaCandidateState*>(state);
+                reinterpret<CudaCandidateState*>(deviceState);
             forevervalidator::simulation::cuda::collision::detail::
                 CaptureReplacementOverflow(
                     *scratch, fullState->collisionReplacementOverflow);
-            if (state->stuntsEnabled != 0u)
+            if (localState.stuntsEnabled != 0u)
             {
+                *deviceState = localState;
                 forevervalidator::simulation::cuda::stunts::Status stuntStatus =
                     forevervalidator::simulation::cuda::stunts::Update(
                         *fullState, tick);
@@ -15763,10 +15904,11 @@ void ExecuteVulkanSearchCandidates(
                     samples[slot + 1u] = localBest;
                     return;
                 }
+                localState = *deviceState;
             }
         }
-        state->firstStep = 0u;
-        ++state->controlCursor;
+        localState.firstStep = 0u;
+        ++localState.controlCursor;
         ++results[slot].executedTickCount;
         results[slot].status = 0u;
         results[slot].failureTick = UINT32_MAX;
@@ -15775,14 +15917,41 @@ void ExecuteVulkanSearchCandidates(
         if (parameters->conditionInstructionCount != 0u &&
             !EvaluateCondition(
                 condition, parameters->conditionInstructionCount,
-                *state,
+                localState,
                 parameters->baseline != 0u ? 0u : candidateId + 1u,
                 parameters->lastImprovementTimeSeconds,
                 parameters->lastRestartTimeSeconds,
                 parameters->currentTimeSeconds))
         {
             ++evaluationIndex;
-            if (state->race.progress.raceCompleted != 0u)
+            if (localState.race.progress.raceCompleted != 0u)
+            {
+                completed = true;
+                break;
+            }
+            continue;
+        }
+
+        if (evaluator->kind == CudaSearchEvaluatorKind_Scripted)
+        {
+            if (UpdateScriptedSample(
+                    *evaluator, localState,
+                    parameters->baseline != 0u ? 0u : candidateId + 1u,
+                    parameters->lastImprovementTimeSeconds,
+                    parameters->lastRestartTimeSeconds,
+                    parameters->currentTimeSeconds,
+                    double(publicTime), localBest))
+            {
+                localBest.candidateId = candidateId;
+                localBest.candidateSlot = slot;
+                localBest.evaluationTick = evaluationIndex;
+                localBest.eventCount = eventCount;
+                localBest.logicalOrder = 1u + uint64_t(slot) *
+                    parameters->evaluationTickCount + evaluationIndex;
+                localBest.mutation = parameters->baseline == 0u ? 1u : 0u;
+            }
+            ++evaluationIndex;
+            if (localState.race.progress.raceCompleted != 0u)
             {
                 completed = true;
                 break;
@@ -15794,11 +15963,11 @@ void ExecuteVulkanSearchCandidates(
         if (parameters->simulateStunts != 0u)
         {
             CudaCandidateState* fullState =
-                reinterpret<CudaCandidateState*>(state);
+                reinterpret<CudaCandidateState*>(deviceState);
             stuntsScore = fullState->stunts.stuntsScore;
         }
         cuda_search_detail__DeviceSample sample = EvaluateState(
-            *evaluator, *state, previousPosition,
+            *evaluator, localState, previousPosition,
             double(publicTime - parameters->tickDurationMs),
             double(publicTime), stuntsScore, &evaluatorReported);
         sample.candidateId = candidateId;
@@ -15833,6 +16002,7 @@ void ExecuteVulkanSearchCandidates(
     evaluationIndices[slot] = evaluationIndex;
     evaluatorReportedValues[slot] = evaluatorReported ? 1u : 0u;
     samples[slot + 1u] = localBest;
+    *deviceState = localState;
 }
 
 }

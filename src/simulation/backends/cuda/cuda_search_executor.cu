@@ -1942,7 +1942,12 @@ __device__ DeviceConditionValue ConditionSource(
     return {};
 }
 
-__device__ __noinline__ bool EvaluateCondition(
+struct DeviceExpressionResult {
+    double value = 0.0;
+    bool valid = false;
+};
+
+__device__ __noinline__ DeviceExpressionResult EvaluateExpression(
         const CudaSearchConditionInstruction *instructions,
         std::uint32_t instructionCount,
         const CudaCandidatePhysicsState &state,
@@ -1950,24 +1955,26 @@ __device__ __noinline__ bool EvaluateCondition(
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds,
         double currentTimeSeconds) {
-    if (instructionCount == 0u) return true;
+    if (instructionCount == 0u) {
+        return {1.0, true};
+    }
     DeviceConditionValue stack[32];
     std::uint32_t size = 0u;
     for (std::uint32_t index = 0u; index < instructionCount; ++index) {
         const CudaSearchConditionInstruction instruction = instructions[index];
         if (instruction.opcode == CudaSearchConditionOpcode::Constant) {
-            if (size >= 32u) return false;
+            if (size >= 32u) return {};
             stack[size++] = {instruction.x};
             continue;
         }
         if (instruction.opcode == CudaSearchConditionOpcode::ConstantVector) {
-            if (size >= 32u) return false;
+            if (size >= 32u) return {};
             stack[size++] = {instruction.x, instruction.y, instruction.z, true};
             continue;
         }
         if (instruction.opcode == CudaSearchConditionOpcode::Scalar ||
             instruction.opcode == CudaSearchConditionOpcode::Vector) {
-            if (size >= 32u) return false;
+            if (size >= 32u) return {};
             DeviceConditionValue value = ConditionSource(
                     instruction.value, state, iterationCount,
                     lastImprovementTimeSeconds,
@@ -1982,24 +1989,24 @@ __device__ __noinline__ bool EvaluateCondition(
             if ((instruction.opcode == CudaSearchConditionOpcode::Scalar &&
                  value.vector) ||
                 (instruction.opcode == CudaSearchConditionOpcode::Vector &&
-                 !value.vector)) return false;
+                 !value.vector)) return {};
             stack[size++] = value;
             continue;
         }
         if (instruction.opcode == CudaSearchConditionOpcode::KilometersPerHour ||
             instruction.opcode == CudaSearchConditionOpcode::Degrees) {
-            if (size == 0u || stack[size - 1u].vector) return false;
+            if (size == 0u || stack[size - 1u].vector) return {};
             stack[size - 1u].x *= instruction.opcode ==
                     CudaSearchConditionOpcode::KilometersPerHour
                     ? 3.6 : 57.2957795130823208768;
             continue;
         }
-        if (size < 2u) return false;
+        if (size < 2u) return {};
         const DeviceConditionValue right = stack[--size];
         DeviceConditionValue &left = stack[size - 1u];
         switch (instruction.opcode) {
         case CudaSearchConditionOpcode::Distance:
-            if (!left.vector || !right.vector) return false;
+            if (!left.vector || !right.vector) return {};
             left = {sqrt((left.x-right.x)*(left.x-right.x) +
                          (left.y-right.y)*(left.y-right.y) +
                          (left.z-right.z)*(left.z-right.z))};
@@ -2014,10 +2021,72 @@ __device__ __noinline__ bool EvaluateCondition(
         case CudaSearchConditionOpcode::LessOrEqual: left = {left.x <= right.x ? 1.0 : 0.0}; break;
         case CudaSearchConditionOpcode::Equal: left = {left.x == right.x ? 1.0 : 0.0}; break;
         case CudaSearchConditionOpcode::LogicalAnd: left = {left.x != 0.0 && right.x != 0.0 ? 1.0 : 0.0}; break;
-        default: return false;
+        default: return {};
         }
     }
-    return size == 1u && !stack[0].vector && stack[0].x != 0.0;
+    if (size != 1u || stack[0].vector) return {};
+    return {stack[0].x, true};
+}
+
+__device__ bool EvaluateCondition(
+        const CudaSearchConditionInstruction *instructions,
+        std::uint32_t instructionCount,
+        const CudaCandidatePhysicsState &state,
+        std::uint64_t iterationCount,
+        double lastImprovementTimeSeconds,
+        double lastRestartTimeSeconds,
+        double currentTimeSeconds) {
+    const DeviceExpressionResult result = EvaluateExpression(
+            instructions, instructionCount, state, iterationCount,
+            lastImprovementTimeSeconds, lastRestartTimeSeconds,
+            currentTimeSeconds);
+    return result.valid && result.value != 0.0;
+}
+
+__device__ bool UpdateScriptedSample(
+        const CudaSearchEvaluatorConfiguration &evaluator,
+        const CudaCandidatePhysicsState &state,
+        std::uint64_t iterationCount,
+        double lastImprovementTimeSeconds,
+        double lastRestartTimeSeconds,
+        double currentTimeSeconds,
+        double currentTimeMs,
+        DeviceSample *sample) {
+    double values[16];
+    double scores[16];
+    for (std::uint32_t i = 0u;
+         i < evaluator.scriptedObjectiveCount; ++i) {
+        const CudaSearchScriptedObjective objective =
+                evaluator.scriptedObjectives[i];
+        const DeviceExpressionResult expression = EvaluateExpression(
+                &evaluator.scriptedInstructions[
+                        objective.firstInstruction],
+                objective.instructionCount, state, iterationCount,
+                lastImprovementTimeSeconds,
+                lastRestartTimeSeconds, currentTimeSeconds);
+        values[i] = expression.value;
+        if (!expression.valid || !isfinite(values[i])) return false;
+        scores[i] = objective.kind == 0u
+                ? -values[i]
+                : objective.kind == 1u
+                  ? values[i]
+                  : -fabs(values[i] - objective.target);
+        if (!isfinite(scores[i])) return false;
+    }
+    for (std::uint32_t i = 0u;
+         i < evaluator.scriptedObjectiveCount; ++i) {
+        if (!sample->valid ||
+            scores[i] > sample->objectiveScores[i]) {
+            sample->objectiveScores[i] = scores[i];
+            sample->metricValues[i] = values[i];
+        }
+    }
+    sample->valid = true;
+    sample->scriptedObjectiveCount =
+            evaluator.scriptedObjectiveCount;
+    sample->score = sample->objectiveScores[0];
+    sample->timeMs = currentTimeMs;
+    return true;
 }
 
 __device__ DeviceSample EvaluateState(
@@ -2146,6 +2215,20 @@ __global__ void SeedCandidateBestSamplesKernel(
         seed.candidateSlot = InvalidCandidateSlot;
         candidateBestSamples[0] = seed;
     }
+}
+
+__global__ void SelectScriptedWinnerKernel(
+        const DeviceSample *samples,
+        std::uint32_t candidateCount,
+        DeviceSample *winner) {
+    if (blockIdx.x != 0u || threadIdx.x != 0u) return;
+    DeviceSample incumbent = samples[0];
+    for (std::uint32_t slot = 0u; slot < candidateCount; ++slot) {
+        if (StrictlyDominates(samples[slot + 1u], incumbent)) {
+            incumbent = samples[slot + 1u];
+        }
+    }
+    *winner = incumbent;
 }
 
 __global__ void GenerateSearchCandidatesKernel(
@@ -2755,7 +2838,7 @@ __global__ __launch_bounds__(
     CudaSearchInputEvent nextEvent{};
     bool hasNextEvent =
             eventCount != 0u && inputCursor.Next(&nextEvent);
-    const CudaSearchEvaluatorConfiguration configuredEvaluator =
+    const CudaSearchEvaluatorConfiguration &configuredEvaluator =
             *evaluator;
     const DeviceSample incumbent = candidateBestSamples[0];
     const bool pruneFinishTime =
@@ -2910,6 +2993,27 @@ __global__ __launch_bounds__(
                     baseline ? 0u : candidateId + 1u,
                     lastImprovementTimeSeconds,
                     lastRestartTimeSeconds, currentTimeSeconds)) {
+            ++evaluationIndex;
+            if (state.race.progress.raceCompleted) break;
+            continue;
+        }
+        if (configuredEvaluator.kind ==
+            CudaSearchEvaluatorKind::Scripted) {
+            if (UpdateScriptedSample(
+                        configuredEvaluator, state,
+                        baseline ? 0u : candidateId + 1u,
+                        lastImprovementTimeSeconds,
+                        lastRestartTimeSeconds, currentTimeSeconds,
+                        static_cast<double>(publicTime), &localBest)) {
+                localBest.mutation = !baseline;
+                localBest.candidateId = candidateId;
+                localBest.candidateSlot = slot;
+                localBest.evaluationTick = evaluationIndex;
+                localBest.eventCount = eventCount;
+                localBest.logicalOrder = 1u +
+                        static_cast<std::uint64_t>(slot) *
+                                evaluationTickCount + evaluationIndex;
+            }
             ++evaluationIndex;
             if (state.race.progress.raceCompleted) break;
             continue;
@@ -3404,6 +3508,7 @@ __global__ void FinalizeSearchBatchKernel(
         std::uint32_t eventCapacity,
         std::uint32_t evaluationTickCount,
         bool maximize,
+        bool scripted,
         bool baseline,
         bool captureBestState,
         DeviceSample *globalBestSample,
@@ -3440,7 +3545,9 @@ __global__ void FinalizeSearchBatchKernel(
              slot < candidateCount; ++slot) {
             const DeviceSample sample =
                     candidateBestSamples[slot + 1u];
-            if (StrictlyBetter(sample, incumbent, maximize)) {
+            if (scripted
+                        ? StrictlyDominates(sample, incumbent)
+                        : StrictlyBetter(sample, incumbent, maximize)) {
                 ++result.mutationImprovementCount;
                 incumbent = sample;
             }
@@ -4456,6 +4563,7 @@ struct CudaSearchExecutor::Impl {
                 std::chrono::duration<double>(
                         std::chrono::system_clock::now().time_since_epoch())
                         .count();
+        result.evaluationCurrentTimeSeconds = currentTimeSeconds;
         if (specializedModule) {
             const CUresult simulationLaunch = LaunchDriverKernel(
                     specializedModule->Kernel(selectedMinimumBlocks),
@@ -4662,13 +4770,21 @@ struct CudaSearchExecutor::Impl {
         }
         cudaEventRecord(finishRefined.Get());
         std::size_t temporaryBytes = reductionTemporary.Bytes();
-        error = cub::DeviceReduce::Reduce(
-                reductionTemporary.Get(), temporaryBytes,
-                candidateBestSamples.Get(), reducedBest.Get(),
-                winnerCount,
-                BetterSample{
-                        MaximizesScore(configuration.evaluator.kind)},
-                DeviceSample{});
+        if (configuration.evaluator.kind ==
+            CudaSearchEvaluatorKind::Scripted) {
+            SelectScriptedWinnerKernel<<<1u, 1u>>>(
+                    candidateBestSamples.Get(), candidateCount,
+                    reducedBest.Get());
+            error = cudaGetLastError();
+        } else {
+            error = cub::DeviceReduce::Reduce(
+                    reductionTemporary.Get(), temporaryBytes,
+                    candidateBestSamples.Get(), reducedBest.Get(),
+                    winnerCount,
+                    BetterSample{
+                            MaximizesScore(configuration.evaluator.kind)},
+                    DeviceSample{});
+        }
         if (error != cudaSuccess) {
             result.status = CudaSearchStatus::DeviceFailure;
             result.diagnostic =
@@ -4748,6 +4864,8 @@ struct CudaSearchExecutor::Impl {
                         configuration.maximumEventCount),
                 evaluationTickCount,
                 MaximizesScore(configuration.evaluator.kind),
+                configuration.evaluator.kind ==
+                        CudaSearchEvaluatorKind::Scripted,
                 baseline,
                 configuration.captureBestState,
                 globalBestSample.Get(),
@@ -4887,6 +5005,15 @@ struct CudaSearchExecutor::Impl {
             result.best.timeMs = bestSample.timeMs;
             result.best.detail0 = bestSample.detail0;
             result.best.detail1 = bestSample.detail1;
+            result.best.scriptedObjectiveCount =
+                    bestSample.scriptedObjectiveCount;
+            for (std::uint32_t i = 0u;
+                 i < bestSample.scriptedObjectiveCount; ++i) {
+                result.best.objectiveScores[i] =
+                        bestSample.objectiveScores[i];
+                result.best.metricValues[i] =
+                        bestSample.metricValues[i];
+            }
             result.best.inputs = immutableInputPrefix;
             const std::size_t suffixOffset =
                     result.best.inputs.size();
@@ -5915,6 +6042,13 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
             sample.valid = true;
             sample.mutation = incumbent.mutation;
             sample.preciseFinish = incumbent.preciseFinish;
+            sample.scriptedObjectiveCount =
+                    incumbent.scriptedObjectiveCount;
+            for (std::uint32_t i = 0u;
+                 i < sample.scriptedObjectiveCount; ++i) {
+                sample.objectiveScores[i] = incumbent.objectiveScores[i];
+                sample.metricValues[i] = incumbent.metricValues[i];
+            }
             const std::uint32_t eventCount = static_cast<std::uint32_t>(
                     preparedConfiguration.baselineInputs.size());
             sample.eventCount = eventCount;

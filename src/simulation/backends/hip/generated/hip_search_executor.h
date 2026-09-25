@@ -65,12 +65,7 @@ enum class HipSearchEvaluatorKind : std::uint32_t {
     VolumeEntry,
     StuntPoints,
     FinishTime,
-};
-
-struct HipSearchEvaluatorConfiguration {
-    HipSearchEvaluatorKind kind = HipSearchEvaluatorKind::FinishTime;
-    std::uint32_t optionFlags = 0u;
-    double values[10]{};
+    Scripted,
 };
 
 enum class HipSearchConditionOpcode : std::uint32_t {
@@ -147,6 +142,27 @@ struct HipSearchConditionInstruction {
     double z = 0.0;
 };
 
+inline constexpr std::uint32_t HipSearchMaximumScriptedObjectives = 16u;
+inline constexpr std::uint32_t HipSearchMaximumScriptedInstructions = 256u;
+
+struct HipSearchScriptedObjective {
+    std::uint32_t kind = 0u;
+    std::uint32_t firstInstruction = 0u;
+    std::uint32_t instructionCount = 0u;
+    double target = 0.0;
+};
+
+struct HipSearchEvaluatorConfiguration {
+    HipSearchEvaluatorKind kind = HipSearchEvaluatorKind::FinishTime;
+    std::uint32_t optionFlags = 0u;
+    double values[10]{};
+    std::uint32_t scriptedObjectiveCount = 0u;
+    HipSearchScriptedObjective
+            scriptedObjectives[HipSearchMaximumScriptedObjectives]{};
+    HipSearchConditionInstruction
+            scriptedInstructions[HipSearchMaximumScriptedInstructions]{};
+};
+
 struct HipSearchConditionConfiguration {
     std::vector<HipSearchConditionInstruction> instructions;
     double lastImprovementTimeSeconds = 0.0;
@@ -170,6 +186,9 @@ struct HipSearchIncumbent {
     double detail0 = 0.0;
     double detail1 = 0.0;
     bool preciseFinish = false;
+    std::uint32_t scriptedObjectiveCount = 0u;
+    double objectiveScores[HipSearchMaximumScriptedObjectives]{};
+    double metricValues[HipSearchMaximumScriptedObjectives]{};
 };
 
 struct HipSearchExecutorConfiguration {
@@ -219,11 +238,15 @@ struct HipSearchBest {
     double detail1 = 0.0;
     HipCandidateState state{};
     std::vector<HipSearchInputEvent> inputs;
+    std::uint32_t scriptedObjectiveCount = 0u;
+    double objectiveScores[HipSearchMaximumScriptedObjectives]{};
+    double metricValues[HipSearchMaximumScriptedObjectives]{};
 };
 
 struct HipSearchBatchExecution {
     HipSearchStatus status = HipSearchStatus::InvalidArgument;
     std::uint64_t firstCandidateId = 0u;
+    double evaluationCurrentTimeSeconds = 0.0;
     std::uint32_t candidateCount = 0u;
     std::uint32_t evaluatedCandidateCount = 0u;
     std::uint64_t evaluatorCalls = 0u;

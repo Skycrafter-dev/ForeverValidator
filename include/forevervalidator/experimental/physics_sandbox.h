@@ -431,13 +431,33 @@ struct PhysicsSandboxCudaStuntPointsEvaluator {};
 
 struct PhysicsSandboxCudaFinishTimeEvaluator {};
 
+struct PhysicsSandboxCudaConditionInstruction;
+
+enum class PhysicsSandboxCudaScriptedObjectiveKind : std::uint32_t {
+    Min,
+    Max,
+    Target,
+};
+
+struct PhysicsSandboxCudaScriptedObjective {
+    PhysicsSandboxCudaScriptedObjectiveKind kind =
+            PhysicsSandboxCudaScriptedObjectiveKind::Max;
+    double target = 0.0;
+    std::vector<PhysicsSandboxCudaConditionInstruction> instructions;
+};
+
+struct PhysicsSandboxCudaScriptedEvaluator {
+    std::vector<PhysicsSandboxCudaScriptedObjective> objectives;
+};
+
 using PhysicsSandboxCudaEvaluator = std::variant<
         PhysicsSandboxCudaVelocityEvaluator,
         PhysicsSandboxCudaPointEvaluator,
         PhysicsSandboxCudaPoseEvaluator,
         PhysicsSandboxCudaVolumeEntryEvaluator,
         PhysicsSandboxCudaStuntPointsEvaluator,
-        PhysicsSandboxCudaFinishTimeEvaluator>;
+        PhysicsSandboxCudaFinishTimeEvaluator,
+        PhysicsSandboxCudaScriptedEvaluator>;
 
 struct PhysicsSandboxCudaSearchIncumbent {
     bool mutation = false;
@@ -449,6 +469,8 @@ struct PhysicsSandboxCudaSearchIncumbent {
     double detail0 = 0.0;
     double detail1 = 0.0;
     bool preciseFinish = false;
+    std::vector<double> objectiveScores;
+    std::vector<double> metricValues;
 };
 
 enum class PhysicsSandboxCudaConditionOpcode : std::uint32_t {
@@ -600,6 +622,7 @@ struct PhysicsSandboxCudaSearchMetrics {
 
 struct PhysicsSandboxCudaSearchBatch {
     std::uint64_t firstCandidateId = 0u;
+    double evaluationCurrentTimeSeconds = 0.0;
     std::uint32_t candidateCount = 0u;
     std::uint32_t evaluatedCandidateCount = 0u;
     std::uint64_t evaluatorCalls = 0u;
@@ -617,6 +640,8 @@ struct PhysicsSandboxCudaSearchBatch {
     double bestTimeMs = 0.0;
     double bestDetail0 = 0.0;
     double bestDetail1 = 0.0;
+    std::vector<double> bestObjectiveScores;
+    std::vector<double> bestMetricValues;
     PhysicsSandboxStateView bestState{};
     std::vector<PhysicsSandboxInputEvent> bestInputs;
     std::optional<PhysicsSandboxState> bestSnapshot;

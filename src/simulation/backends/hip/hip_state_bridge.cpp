@@ -87,6 +87,8 @@ CudaSearchBatchExecution ToCudaResult(
     CudaSearchBatchExecution result;
     result.status = static_cast<CudaSearchStatus>(source.status);
     result.firstCandidateId = source.firstCandidateId;
+    result.evaluationCurrentTimeSeconds =
+            source.evaluationCurrentTimeSeconds;
     result.candidateCount = source.candidateCount;
     result.evaluatedCandidateCount = source.evaluatedCandidateCount;
     result.evaluatorCalls = source.evaluatorCalls;
@@ -103,6 +105,15 @@ CudaSearchBatchExecution ToCudaResult(
     result.best.timeMs = source.best.timeMs;
     result.best.detail0 = source.best.detail0;
     result.best.detail1 = source.best.detail1;
+    result.best.scriptedObjectiveCount =
+            source.best.scriptedObjectiveCount;
+    for (std::uint32_t i = 0u;
+         i < source.best.scriptedObjectiveCount; ++i) {
+        result.best.objectiveScores[i] =
+                source.best.objectiveScores[i];
+        result.best.metricValues[i] =
+                source.best.metricValues[i];
+    }
     result.best.state = BitCopy<CudaCandidateState>(source.best.state);
     result.best.inputs.reserve(source.best.inputs.size());
     for (const HipSearchInputEvent &input : source.best.inputs) {

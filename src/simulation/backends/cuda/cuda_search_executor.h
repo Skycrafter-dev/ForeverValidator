@@ -64,12 +64,7 @@ enum class CudaSearchEvaluatorKind : std::uint32_t {
     VolumeEntry,
     StuntPoints,
     FinishTime,
-};
-
-struct CudaSearchEvaluatorConfiguration {
-    CudaSearchEvaluatorKind kind = CudaSearchEvaluatorKind::FinishTime;
-    std::uint32_t optionFlags = 0u;
-    double values[10]{};
+    Scripted,
 };
 
 enum class CudaSearchConditionOpcode : std::uint32_t {
@@ -146,6 +141,27 @@ struct CudaSearchConditionInstruction {
     double z = 0.0;
 };
 
+inline constexpr std::uint32_t CudaSearchMaximumScriptedObjectives = 16u;
+inline constexpr std::uint32_t CudaSearchMaximumScriptedInstructions = 256u;
+
+struct CudaSearchScriptedObjective {
+    std::uint32_t kind = 0u;
+    std::uint32_t firstInstruction = 0u;
+    std::uint32_t instructionCount = 0u;
+    double target = 0.0;
+};
+
+struct CudaSearchEvaluatorConfiguration {
+    CudaSearchEvaluatorKind kind = CudaSearchEvaluatorKind::FinishTime;
+    std::uint32_t optionFlags = 0u;
+    double values[10]{};
+    std::uint32_t scriptedObjectiveCount = 0u;
+    CudaSearchScriptedObjective
+            scriptedObjectives[CudaSearchMaximumScriptedObjectives]{};
+    CudaSearchConditionInstruction
+            scriptedInstructions[CudaSearchMaximumScriptedInstructions]{};
+};
+
 struct CudaSearchConditionConfiguration {
     std::vector<CudaSearchConditionInstruction> instructions;
     double lastImprovementTimeSeconds = 0.0;
@@ -169,6 +185,9 @@ struct CudaSearchIncumbent {
     double detail0 = 0.0;
     double detail1 = 0.0;
     bool preciseFinish = false;
+    std::uint32_t scriptedObjectiveCount = 0u;
+    double objectiveScores[CudaSearchMaximumScriptedObjectives]{};
+    double metricValues[CudaSearchMaximumScriptedObjectives]{};
 };
 
 struct CudaSearchExecutorConfiguration {
@@ -218,11 +237,15 @@ struct CudaSearchBest {
     double detail1 = 0.0;
     CudaCandidateState state{};
     std::vector<CudaSearchInputEvent> inputs;
+    std::uint32_t scriptedObjectiveCount = 0u;
+    double objectiveScores[CudaSearchMaximumScriptedObjectives]{};
+    double metricValues[CudaSearchMaximumScriptedObjectives]{};
 };
 
 struct CudaSearchBatchExecution {
     CudaSearchStatus status = CudaSearchStatus::InvalidArgument;
     std::uint64_t firstCandidateId = 0u;
+    double evaluationCurrentTimeSeconds = 0.0;
     std::uint32_t candidateCount = 0u;
     std::uint32_t evaluatedCandidateCount = 0u;
     std::uint64_t evaluatorCalls = 0u;

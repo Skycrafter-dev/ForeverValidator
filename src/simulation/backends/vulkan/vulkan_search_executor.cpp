@@ -158,9 +158,9 @@ struct VulkanSearchBatchSummary {
     std::uint32_t bestChanged = 0u;
 };
 
-static_assert(sizeof(DeviceSample) == 64u);
-static_assert(offsetof(VulkanSearchBatchSummary, totalMutationCount) == 64u);
-static_assert(sizeof(VulkanSearchBatchSummary) == 104u);
+static_assert(sizeof(DeviceSample) == 328u);
+static_assert(offsetof(VulkanSearchBatchSummary, totalMutationCount) == 328u);
+static_assert(sizeof(VulkanSearchBatchSummary) == 368u);
 
 struct VulkanSearchTimelineDescriptor {
     std::uint64_t firstTick = 0u;
@@ -491,6 +491,8 @@ struct VulkanSearchExecutor::Impl {
                     std::chrono::duration<double>(
                             std::chrono::system_clock::now().time_since_epoch())
                             .count();
+            result.evaluationCurrentTimeSeconds =
+                    parameters.currentTimeSeconds;
             parameters.baselineInputCount = static_cast<std::uint32_t>(
                     configuration.baselineInputs.size());
             parameters.immutableTailInputCount =
@@ -1005,6 +1007,16 @@ struct VulkanSearchExecutor::Impl {
                     ? batchSummary.winnerEventCount
                     : (winnerSlot != InvalidCandidateSlot
                        ? eventCounts[winnerSlot] : 0u);
+            if (incumbent.scriptedObjectiveCount >
+                        CudaSearchMaximumScriptedObjectives ||
+                (winnerSlot != InvalidCandidateSlot &&
+                 (winnerSlot >= candidateCount ||
+                  winnerEventCount > eventCapacity))) {
+                result.status = CudaSearchStatus::DeviceFailure;
+                result.diagnostic =
+                        "Vulkan search returned invalid winner metadata";
+                return result;
+            }
             const std::uint32_t winnerMutationCount = useDeviceSummary
                     ? batchSummary.winnerMutationCount
                     : (winnerSlot != InvalidCandidateSlot
@@ -1091,6 +1103,15 @@ struct VulkanSearchExecutor::Impl {
                 result.best.timeMs = globalBestSample.timeMs;
                 result.best.detail0 = globalBestSample.detail0;
                 result.best.detail1 = globalBestSample.detail1;
+                result.best.scriptedObjectiveCount =
+                        globalBestSample.scriptedObjectiveCount;
+                for (std::uint32_t i = 0u;
+                     i < globalBestSample.scriptedObjectiveCount; ++i) {
+                    result.best.objectiveScores[i] =
+                            globalBestSample.objectiveScores[i];
+                    result.best.metricValues[i] =
+                            globalBestSample.metricValues[i];
+                }
                 if (configuration.captureBestState) {
                     result.best.state = globalBestState;
                 }
@@ -1373,6 +1394,15 @@ std::unique_ptr<VulkanSearchExecutor> VulkanSearchExecutor::Create(
             impl->globalBestSample.mutation = source.mutation;
             impl->globalBestSample.preciseFinish =
                     source.preciseFinish;
+            impl->globalBestSample.scriptedObjectiveCount =
+                    source.scriptedObjectiveCount;
+            for (std::uint32_t i = 0u;
+                 i < impl->globalBestSample.scriptedObjectiveCount; ++i) {
+                impl->globalBestSample.objectiveScores[i] =
+                        source.objectiveScores[i];
+                impl->globalBestSample.metricValues[i] =
+                        source.metricValues[i];
+            }
             impl->globalBestMutationCount = source.mutationCount;
             impl->globalBestInputs = configuration.baselineInputs;
             impl->baselineEvaluated = true;
