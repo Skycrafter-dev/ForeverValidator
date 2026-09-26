@@ -17,6 +17,8 @@ VulkanBackendDiagnostics QueryVulkanBackendDiagnostics() noexcept {
             simulation::vulkan::QueryRuntimeDiagnostics();
     VulkanBackendDiagnostics result;
     result.status = static_cast<VulkanBackendStatus>(source.status);
+    result.exactSearchPhysics = source.IsReady() &&
+            simulation::vulkan::SupportsExactSearchPhysics();
     result.apiVersion = source.apiVersion;
     result.driverVersion = source.driverVersion;
     result.vendorId = source.vendorId;

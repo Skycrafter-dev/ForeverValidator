@@ -59,6 +59,7 @@ enum class VulkanBackendStatus : std::uint8_t {
 
 struct VulkanBackendDiagnostics {
     VulkanBackendStatus status = VulkanBackendStatus::NotCompiled;
+    bool exactSearchPhysics = false;
     std::uint32_t apiVersion = 0u;
     std::uint32_t driverVersion = 0u;
     std::uint32_t vendorId = 0u;
@@ -71,6 +72,10 @@ struct VulkanBackendDiagnostics {
 
     bool IsReady() const noexcept {
         return status == VulkanBackendStatus::Ready;
+    }
+
+    bool IsSearchReady() const noexcept {
+        return IsReady() && exactSearchPhysics;
     }
 };
 
