@@ -86,6 +86,8 @@ enum class HipSearchConditionOpcode : std::uint32_t {
     LessOrEqual,
     Equal,
     LogicalAnd,
+    NotEqual,
+    LogicalOr,
 };
 
 enum class HipSearchConditionValue : std::uint32_t {

@@ -2025,7 +2025,9 @@ __device__ __noinline__ DeviceExpressionResult EvaluateExpression(
         case CudaSearchConditionOpcode::GreaterOrEqual: left = {left.x >= right.x ? 1.0 : 0.0}; break;
         case CudaSearchConditionOpcode::LessOrEqual: left = {left.x <= right.x ? 1.0 : 0.0}; break;
         case CudaSearchConditionOpcode::Equal: left = {left.x == right.x ? 1.0 : 0.0}; break;
+        case CudaSearchConditionOpcode::NotEqual: left = {left.x != right.x ? 1.0 : 0.0}; break;
         case CudaSearchConditionOpcode::LogicalAnd: left = {left.x != 0.0 && right.x != 0.0 ? 1.0 : 0.0}; break;
+        case CudaSearchConditionOpcode::LogicalOr: left = {left.x != 0.0 || right.x != 0.0 ? 1.0 : 0.0}; break;
         default: return {};
         }
     }

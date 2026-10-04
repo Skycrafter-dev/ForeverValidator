@@ -85,6 +85,8 @@ enum class CudaSearchConditionOpcode : std::uint32_t {
     LessOrEqual,
     Equal,
     LogicalAnd,
+    NotEqual,
+    LogicalOr,
 };
 
 enum class CudaSearchConditionValue : std::uint32_t {

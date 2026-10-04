@@ -146,6 +146,8 @@ static const uint CudaSearchConditionOpcode_GreaterOrEqual = 13u;
 static const uint CudaSearchConditionOpcode_LessOrEqual = 14u;
 static const uint CudaSearchConditionOpcode_Equal = 15u;
 static const uint CudaSearchConditionOpcode_LogicalAnd = 16u;
+static const uint CudaSearchConditionOpcode_NotEqual = 17u;
+static const uint CudaSearchConditionOpcode_LogicalOr = 18u;
 static const uint CudaSearchConditionValue_Position = 0u;
 static const uint CudaSearchConditionValue_PreviousPosition = 1u;
 static const uint CudaSearchConditionValue_Velocity = 2u;
@@ -14625,7 +14627,9 @@ struct DeviceExpressionResult {
         case CudaSearchConditionOpcode_GreaterOrEqual: (stack[size - 1u]) = {(stack[size - 1u]).x >= right.x ? 1.0 : 0.0}; break;
         case CudaSearchConditionOpcode_LessOrEqual: (stack[size - 1u]) = {(stack[size - 1u]).x <= right.x ? 1.0 : 0.0}; break;
         case CudaSearchConditionOpcode_Equal: (stack[size - 1u]) = {(stack[size - 1u]).x == right.x ? 1.0 : 0.0}; break;
+        case CudaSearchConditionOpcode_NotEqual: (stack[size - 1u]) = {(stack[size - 1u]).x != right.x ? 1.0 : 0.0}; break;
         case CudaSearchConditionOpcode_LogicalAnd: (stack[size - 1u]) = {(stack[size - 1u]).x != 0.0 && right.x != 0.0 ? 1.0 : 0.0}; break;
+        case CudaSearchConditionOpcode_LogicalOr: (stack[size - 1u]) = {(stack[size - 1u]).x != 0.0 || right.x != 0.0 ? 1.0 : 0.0}; break;
         default: return {};
         }
     }

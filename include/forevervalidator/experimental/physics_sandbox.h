@@ -491,6 +491,8 @@ enum class PhysicsSandboxCudaConditionOpcode : std::uint32_t {
     LessOrEqual,
     Equal,
     LogicalAnd,
+    NotEqual,
+    LogicalOr,
 };
 
 enum class PhysicsSandboxCudaConditionValue : std::uint32_t {

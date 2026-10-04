@@ -2028,7 +2028,9 @@ __device__ __noinline__ DeviceExpressionResult EvaluateExpression(
         case HipSearchConditionOpcode::GreaterOrEqual: left = {left.x >= right.x ? 1.0 : 0.0}; break;
         case HipSearchConditionOpcode::LessOrEqual: left = {left.x <= right.x ? 1.0 : 0.0}; break;
         case HipSearchConditionOpcode::Equal: left = {left.x == right.x ? 1.0 : 0.0}; break;
+        case HipSearchConditionOpcode::NotEqual: left = {left.x != right.x ? 1.0 : 0.0}; break;
         case HipSearchConditionOpcode::LogicalAnd: left = {left.x != 0.0 && right.x != 0.0 ? 1.0 : 0.0}; break;
+        case HipSearchConditionOpcode::LogicalOr: left = {left.x != 0.0 || right.x != 0.0 ? 1.0 : 0.0}; break;
         default: return {};
         }
     }
