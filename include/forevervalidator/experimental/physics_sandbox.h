@@ -304,6 +304,16 @@ struct PhysicsSandboxSceneView {
     std::vector<PhysicsSandboxEllipsoid> carEllipsoids;
 };
 
+struct PhysicsSandboxAcceptedCheckpointEvent {
+    std::uint32_t checkpointSlot = 0u;
+    std::uint32_t checkpointIndex = 0u;
+    std::uint64_t lap = 1u;
+    std::uint64_t eventIndex = 0u;
+    std::uint64_t tick = 0u;
+    std::uint64_t timeMs = 0u;
+    bool finish = false;
+};
+
 struct PhysicsSandboxStateView {
     std::uint64_t tick = 0u;
     std::uint64_t timeMs = 0u;
@@ -324,6 +334,9 @@ struct PhysicsSandboxStateView {
     std::optional<FinishTimeEstimate> finishTime;
     std::uint32_t respawnCount = 0u;
     std::optional<std::uint32_t> stuntsScore;
+    // Accepted CPU checkpoint/finish events from the latest tick only. GPU
+    // backends do not expose this journal; AdvanceTicks(n) exposes the last tick.
+    std::vector<PhysicsSandboxAcceptedCheckpointEvent> acceptedCheckpointEvents;
 };
 
 struct PhysicsSandboxCudaModifierWindow {

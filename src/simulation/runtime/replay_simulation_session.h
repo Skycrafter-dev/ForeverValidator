@@ -64,6 +64,7 @@ struct ReplaySimulationStateView {
     float turboBoostFactor = 0.0f;
     std::array<bool, 4> wheelSliding{{false, false, false, false}};
     std::array<std::uint16_t, 4> wheelSurface{{0u, 0u, 0u, 0u}};
+    std::vector<ReplayAcceptedCheckpointEvent> acceptedCheckpointEvents;
 };
 
 struct ReplayCudaVehiclePrefixDifferential {

@@ -1766,6 +1766,11 @@ struct PhysicsSandbox::Impl {
         view.completedLaps = state->race.completedLapCount;
         view.totalLaps = state->race.requiredLapCount;
         view.raceCompleted = state->race.raceCompleted;
+        view.acceptedCheckpointEvents.reserve(state->acceptedCheckpointEvents.size());
+        for (const auto &event : state->acceptedCheckpointEvents) {
+            view.acceptedCheckpointEvents.push_back({event.checkpointSlot, event.checkpointIndex,
+                    event.lap, event.eventIndex, view.tick, view.timeMs, event.finish});
+        }
         if (state->finishTime.has_value()) {
             const std::uint64_t prestartNs =
                     static_cast<std::uint64_t>(

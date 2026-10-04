@@ -504,6 +504,7 @@ ReplaySimulationStepExecution ReplaySimulationRuntime::Step(
         execution.result = ReplaySimulationRunResult::InvalidControlTimeline;
         return execution;
     }
+    state.race.ClearAcceptedCheckpointEvents();
     const bool finishPreCaptured =
             !state.captureFinishTransition &&
             !state.race.Progress().raceCompleted &&
@@ -574,6 +575,7 @@ ReplaySimulationStepExecution ReplaySimulationRuntime::StepOptimizedCpu(
         !state.definition->optimizedCpuStadiumSpecializationsEnabled) {
         return Step(tick);
     }
+    state.race.ClearAcceptedCheckpointEvents();
     const bool finishPreCaptured =
             !state.captureFinishTransition &&
             !state.race.Progress().raceCompleted &&
@@ -657,6 +659,7 @@ ReplaySimulationRuntime::StepOptimizedCpuNativeBinary32(
     if (!state.definition->optimizedCpuStadiumSpecializationsEnabled) {
         return StepOptimizedCpu(tick);
     }
+    state.race.ClearAcceptedCheckpointEvents();
     const bool finishPreCaptured =
             !state.captureFinishTransition &&
             !state.race.Progress().raceCompleted &&
@@ -1268,6 +1271,7 @@ bool ReplaySimulationRuntime::PrepareStepForTesting(
     if (state.phase != Phase::Idle || state.definition == nullptr) {
         return false;
     }
+    state.race.ClearAcceptedCheckpointEvents();
     if (!state.firstStep) {
         state.vehicle.PrepareStep(tick, state.body);
     }

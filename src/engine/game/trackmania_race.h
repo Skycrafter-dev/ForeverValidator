@@ -36,6 +36,14 @@ struct ReplayRaceProgress {
     bool raceCompleted = false;
 };
 
+struct ReplayAcceptedCheckpointEvent {
+    u32 checkpointSlot = 0u;
+    u32 checkpointIndex = 0u;
+    std::uint64_t lap = 1u;
+    std::uint64_t eventIndex = 0u;
+    bool finish = false;
+};
+
 enum EFigures : u32 {
     EFigures_Unknown = 0u,
 };
@@ -109,6 +117,8 @@ public:
         std::array<u32, 39u> replayStuntFigureScores{};
         u32 stuntsScore = 0u;
         std::vector<ReplayStuntEvent> stuntEvents;
+        std::vector<ReplayAcceptedCheckpointEvent> acceptedCheckpointEvents;
+        std::uint64_t acceptedCheckpointEventCount = 0u;
     };
     static float s_MasterJumpFactor;
     static unsigned long s_ReverseBonus;
@@ -136,6 +146,10 @@ public:
     bool HasRespawnLocation() const;
     const GmIso4 &RespawnLocation() const;
     const ReplayRaceProgress &Progress() const { return progress_; }
+    void ClearAcceptedCheckpointEvents() { acceptedCheckpointEvents_.clear(); }
+    const std::vector<ReplayAcceptedCheckpointEvent> &AcceptedCheckpointEvents() const {
+        return acceptedCheckpointEvents_;
+    }
 
     CTrackManiaPlayer *GetPlayerFromMobil(CSceneMobil *mobil);
     CTrackManiaPlayer *GetPlayingPlayer(void);
@@ -204,6 +218,7 @@ private:
     void StoreSpawnLocation(const GmIso4 &spawnIso);
     void EnsurePreviousSpawnLocationInitialized(const GmIso4 &spawnIso);
     void ResetCheckpointSlots();
+    void RecordAcceptedCheckpoint(u32 checkpointIndex, u32 checkpointSlot, bool finish);
     void ClearVehicleFreewheelState();
     void PushReplayStuntInputSnapshot();
     void PushReplayStuntVehicleLocation();
@@ -220,6 +235,8 @@ private:
     EChallengePlayMode replayPlayMode_ = EChallengePlayMode::Race;
     u32 replayNbLaps_ = 1u;
     ReplayRaceProgress progress_{};
+    std::vector<ReplayAcceptedCheckpointEvent> acceptedCheckpointEvents_;
+    std::uint64_t acceptedCheckpointEventCount_ = 0u;
 
     bool replayStuntsEnabled_ = false;
     bool replayStuntStateAvailable_ = false;

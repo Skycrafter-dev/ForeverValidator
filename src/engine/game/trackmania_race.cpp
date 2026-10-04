@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <limits>
 #include <new>
+#include <stdexcept>
 
 #include "engine/game/game_ctn_block_info.h"
 #include "engine/core/mw_cmd_buffer_core.h"
@@ -14,6 +15,8 @@ void CTrackManiaRace::ResetValidationSession() {
     currentSpawnLocationInitialized_ = false;
     preparedEventTimeMs_ = 0u;
     progress_ = {};
+    acceptedCheckpointEvents_.clear();
+    acceptedCheckpointEventCount_ = 0u;
     progress_.requiredLapCount = replayNbLaps_;
     vehicle = nullptr;
     checkpointCourse = nullptr;
@@ -166,6 +169,8 @@ void CTrackManiaRace::OnFinishLine(CTrackManiaPlayer *finishPlayer,
     }
 
     if (replayPlayMode_ == EChallengePlayMode::Shortcut) {
+        RecordAcceptedCheckpoint(progress_.requiredCheckpointCount,
+                                 progress_.requiredCheckpointCount, true);
         ++progress_.finishCount;
         progress_.completedLapCount = 1u;
         progress_.raceCompleted = true;
@@ -213,6 +218,10 @@ int CTrackManiaRace::InternalOnCheckpoint(
     if (checkpointSlotsPassed_[slot] != 0u) {
         return 0;
     }
+    // Record only accepted transitions, before mutating race state so an
+    // allocation failure cannot leave an unreported acceptance behind.
+    RecordAcceptedCheckpoint(static_cast<u32>(checkpointIndex), static_cast<u32>(checkpointSlot),
+                             checkpointSlot == progress_.requiredCheckpointCount);
     checkpointSlotsPassed_[slot] = 1u;
     if (checkpointIndex != progress_.requiredCheckpointCount) {
         ++progress_.currentLapCheckpointCount;
@@ -231,6 +240,16 @@ int CTrackManiaRace::InternalOnCheckpoint(
     }
     ClearVehicleFreewheelState();
     return 1;
+}
+
+void CTrackManiaRace::RecordAcceptedCheckpoint(u32 checkpointIndex, u32 checkpointSlot, bool finish) {
+    if (acceptedCheckpointEventCount_ == UINT64_MAX) {
+        throw std::overflow_error("accepted checkpoint event sequence exhausted");
+    }
+    acceptedCheckpointEvents_.push_back({checkpointSlot, checkpointIndex,
+            static_cast<std::uint64_t>(progress_.completedLapCount) + 1u,
+            acceptedCheckpointEventCount_ + 1u, finish});
+    ++acceptedCheckpointEventCount_;
 }
 
 void CTrackManiaRace::ClearVehicleFreewheelState() {
@@ -337,6 +356,8 @@ void CTrackManiaRace::CaptureRuntimeClone(RuntimeClone &clone) const {
     clone.replayStuntFigureScores = replayStuntFigureScores_;
     clone.stuntsScore = stuntsScore_;
     clone.stuntEvents = stuntEvents_;
+    clone.acceptedCheckpointEvents = acceptedCheckpointEvents_;
+    clone.acceptedCheckpointEventCount = acceptedCheckpointEventCount_;
 }
 
 bool CTrackManiaRace::PrepareRuntimeCloneRestore(
@@ -348,6 +369,7 @@ bool CTrackManiaRace::PrepareRuntimeCloneRestore(
     try {
         checkpointSlotsPassed_.reserve(clone.checkpointSlotsPassed.size());
         stuntEvents_.reserve(clone.stuntEvents.size());
+        acceptedCheckpointEvents_.reserve(clone.acceptedCheckpointEvents.size());
         return clone.replayStuntInputHistorySize <=
                        replayStuntInputHistory_.size() &&
                clone.replayStuntLocationHistorySize <=
@@ -367,6 +389,8 @@ void CTrackManiaRace::RestoreRuntimeClone(RuntimeClone clone) noexcept {
     replayPlayMode_ = clone.replayPlayMode;
     replayNbLaps_ = clone.replayNbLaps;
     progress_ = clone.progress;
+    acceptedCheckpointEvents_.swap(clone.acceptedCheckpointEvents);
+    acceptedCheckpointEventCount_ = clone.acceptedCheckpointEventCount;
     replayStuntsEnabled_ = clone.replayStuntsEnabled;
     replayStuntStateAvailable_ = clone.replayStuntStateAvailable;
     replayStuntsTimeLimitMs_ = clone.replayStuntsTimeLimitMs;

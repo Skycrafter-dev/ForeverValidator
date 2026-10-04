@@ -1772,6 +1772,11 @@ ReplaySimulationSession::CurrentState() const {
     result.frame = impl->instance.runtime->CurrentFrame();
     result.controls = impl->instance.runtime->CurrentControls();
     result.race = impl->instance.runtime->RaceProgress();
+    if (impl->backend != forevervalidator::SimulationBackend::Cuda &&
+        impl->backend != forevervalidator::SimulationBackend::Hip &&
+        impl->backend != forevervalidator::SimulationBackend::Vulkan) {
+        result.acceptedCheckpointEvents = impl->instance.race.AcceptedCheckpointEvents();
+    }
     result.finishTimeMs = impl->instance.runtime->FinishTimeMs();
     result.finishTime = impl->instance.runtime->FinishTime();
     result.stuntsScore = impl->instance.runtime->StuntsScore();
