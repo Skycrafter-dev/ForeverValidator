@@ -284,6 +284,7 @@ struct CudaSearchBatchExecution {
     std::uint32_t simulationActiveBlocksPerMultiprocessor = 0u;
     double simulationTheoreticalOccupancy = 0.0;
     std::string diagnostic;
+    std::uint64_t reservationBytesPerCandidate = 0u;
 };
 
 class CudaSearchExecutor {

@@ -3135,6 +3135,7 @@ PhysicsSandboxCudaSearchSession::Impl::Convert(
     result.bestValid = execution.best.valid;
     result.metrics.residentDeviceBytes =
             execution.residentDeviceBytes;
+    result.metrics.reservationBytesPerCandidate = execution.reservationBytesPerCandidate;
     result.metrics.mutationDeviceBytes =
             execution.mutationDeviceBytes;
     result.metrics.candidateInputDeviceBytes =

@@ -26,6 +26,8 @@ struct RuntimeDiagnostics {
     std::uint32_t vendorId = 0u;
     std::uint32_t deviceId = 0u;
     std::uint64_t deviceLocalMemoryBytes = 0u;
+    std::uint64_t availableDeviceLocalMemoryBytes = 0u;
+    bool memoryBudgetAvailable = false;
     std::uint32_t subgroupSize = 0u;
     std::string deviceName;
     std::string driverName;

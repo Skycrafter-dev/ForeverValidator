@@ -24,6 +24,8 @@ VulkanBackendDiagnostics QueryVulkanBackendDiagnostics() noexcept {
     result.vendorId = source.vendorId;
     result.deviceId = source.deviceId;
     result.deviceLocalMemoryBytes = source.deviceLocalMemoryBytes;
+    result.availableDeviceLocalMemoryBytes = source.availableDeviceLocalMemoryBytes;
+    result.memoryBudgetAvailable = source.memoryBudgetAvailable;
     result.subgroupSize = source.subgroupSize;
     result.deviceName = source.deviceName;
     result.driverName = source.driverName;

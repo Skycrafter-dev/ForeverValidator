@@ -13,6 +13,7 @@
 
 #include "simulation/backends/hip/generated/hip_search_executor.h"
 #include "simulation/backends/hip/hip_search_arch_adapter.h"
+#include "simulation/backends/gpu_memory_budget.h"
 
 #include <hip/hip_runtime.h>
 #include "simulation/backends/hip/hip_reduce_adapter.h"
@@ -180,6 +181,11 @@ public:
             return true;
         }
         if (count > std::numeric_limits<std::size_t>::max() / sizeof(T)) {
+            return false;
+        }
+        std::size_t available = 0, total = 0;
+        if (hipMemGetInfo(&available, &total) != hipSuccess ||
+            !GpuAllocationFitsBudget(count * sizeof(T), available, total)) {
             return false;
         }
         if (hipMalloc(
@@ -4304,7 +4310,7 @@ struct HipSearchExecutor::Impl {
             static_cast<void>(hipGetLastError());
             if (diagnostic != nullptr) {
                 *diagnostic =
-                        "HIP calibration could not reserve a larger real batch";
+                        "HIP could not reserve a larger batch within memory headroom or allocator limits; reduce parallel samples or use Optimized CPU";
             }
             return false;
         }
@@ -5933,7 +5939,7 @@ std::unique_ptr<HipSearchExecutor> HipSearchExecutor::Create(
             !impl->globalBestMutationCount.Allocate(1u) ||
             !impl->summary.Allocate(1u)) {
             if (diagnostic != nullptr) {
-                *diagnostic = "HIP resident search allocation failed";
+                *diagnostic = "HIP resident search allocation rejected by memory headroom or allocator limits; reduce input density or use Optimized CPU";
             }
             return {};
         }

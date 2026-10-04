@@ -69,6 +69,8 @@ struct VulkanBackendDiagnostics {
     std::string deviceName;
     std::string driverName;
     std::string diagnostic;
+    std::uint64_t availableDeviceLocalMemoryBytes = 0u;
+    bool memoryBudgetAvailable = false;
 
     bool IsReady() const noexcept {
         return status == VulkanBackendStatus::Ready;

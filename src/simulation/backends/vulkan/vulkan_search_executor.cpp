@@ -839,6 +839,28 @@ struct VulkanSearchExecutor::Impl {
             }
 
             vulkan::ComputeKernelMetrics metrics;
+            // Workspace and staging have identical region sizes. Report their
+            // scalable part separately from retained fixed storage. Tile slack
+            // and alignment are covered by the measured resident-byte allowance.
+            std::uint64_t reservation = 0;
+            for (std::size_t i = 0; i < request.regions.size(); ++i) {
+                if (!((i >= CandidateStates && i <= TimelineResults) ||
+                      (i >= Samples && i <= ActiveCandidates))) continue;
+                const auto bytes = request.regions[i].bytes;
+                const std::uint64_t perCandidate =
+                        i == CollisionStorage || i == ShapeCollisionStorage
+                        ? (bytes / collisionTileStride) * scratchMultiplier /
+                                cuda::collision::CudaCollisionSearchTileWidth
+                        : bytes / candidateCount + (bytes % candidateCount != 0u ? 1u : 0u);
+                if (reservation > UINT64_MAX / 2u ||
+                    perCandidate > UINT64_MAX / 2u - reservation) {
+                    result.status = CudaSearchStatus::DeviceFailure;
+                    result.diagnostic = "Vulkan search reservation estimate overflow";
+                    return result;
+                }
+                reservation += perCandidate;
+            }
+            result.reservationBytesPerCandidate = reservation * 2u;
             if (!vulkan::ExecuteComputeKernels(
                         request, &metrics, &result.diagnostic)) {
                 result.status = CudaSearchStatus::DeviceFailure;

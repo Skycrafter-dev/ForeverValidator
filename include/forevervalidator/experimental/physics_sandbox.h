@@ -622,6 +622,9 @@ struct PhysicsSandboxCudaSearchMetrics {
     std::uint64_t simulationLocalBytesPerThread = 0u;
     std::uint32_t simulationActiveBlocksPerMultiprocessor = 0u;
     double simulationTheoreticalOccupancy = 0.0;
+    // Conservative reservation bound, excluding fixed shared scene buffers.
+    // Zero means the backend requires measured capacity-growth estimates.
+    std::uint64_t reservationBytesPerCandidate = 0u;
 };
 
 struct PhysicsSandboxCudaSearchBatch {

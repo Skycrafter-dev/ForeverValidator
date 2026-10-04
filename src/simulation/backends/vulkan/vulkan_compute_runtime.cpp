@@ -1,4 +1,5 @@
 #include "simulation/backends/vulkan/vulkan_compute_runtime.h"
+#include "simulation/backends/gpu_memory_budget.h"
 
 #if FOREVERVALIDATOR_HAS_VULKAN
 
@@ -325,6 +326,8 @@ public:
                     &deviceExtensionCount, deviceExtensions.data());
         }
         std::vector<const char *> enabledDeviceExtensions;
+        memoryBudgetAvailable_ = HasName(deviceExtensions, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+        if (memoryBudgetAvailable_) enabledDeviceExtensions.push_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
 #ifdef VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
         if (HasName(deviceExtensions,
                     VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME)) {
@@ -524,6 +527,22 @@ public:
 
     const RuntimeDiagnostics &Diagnostics() const { return diagnostics_; }
 
+    RuntimeDiagnostics QueryMemoryDiagnostics() const {
+        auto result = diagnostics_;
+        result.memoryBudgetAvailable = memoryBudgetAvailable_;
+        if (!memoryBudgetAvailable_ || !result.IsReady()) return result;
+        VkPhysicalDeviceMemoryBudgetPropertiesEXT budget{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
+        VkPhysicalDeviceMemoryProperties2 memory{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
+        memory.pNext = &budget;
+        vkGetPhysicalDeviceMemoryProperties2(physicalDevice_, &memory);
+        for (std::uint32_t i = 0; i < memory.memoryProperties.memoryHeapCount; ++i) {
+            if (memory.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+                result.availableDeviceLocalMemoryBytes += budget.heapBudget[i] > budget.heapUsage[i]
+                        ? budget.heapBudget[i] - budget.heapUsage[i] : 0;
+        }
+        return result;
+    }
+
     bool CreateBuffer(VkDeviceSize size,
                       VkBufferUsageFlags usage,
                       VkMemoryPropertyFlags required,
@@ -567,6 +586,19 @@ public:
         allocation.pNext = deviceAddress ? &flags : nullptr;
         allocation.allocationSize = requirements.size;
         allocation.memoryTypeIndex = memoryType;
+        if (memoryBudgetAvailable_) {
+            VkPhysicalDeviceMemoryBudgetPropertiesEXT budget{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
+            VkPhysicalDeviceMemoryProperties2 memory{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
+            memory.pNext = &budget;
+            vkGetPhysicalDeviceMemoryProperties2(physicalDevice_, &memory);
+            const auto heap = memoryProperties_.memoryTypes[memoryType].heapIndex;
+            const auto available = budget.heapBudget[heap] > budget.heapUsage[heap]
+                    ? budget.heapBudget[heap] - budget.heapUsage[heap] : 0;
+            if (!GpuAllocationFitsBudget(requirements.size, available, memoryProperties_.memoryHeaps[heap].size)) {
+                if (diagnostic) *diagnostic = "Vulkan allocation rejected: required memory headroom would be consumed; reduce parallel samples or use Optimized CPU";
+                return false;
+            }
+        }
         status = vkAllocateMemory(
                 device_, &allocation, nullptr, &buffer->memory_);
         if (status != VK_SUCCESS) {
@@ -1126,6 +1158,7 @@ private:
     VkQueryPool queryPool_ = VK_NULL_HANDLE;
     std::uint32_t timestampValidBits_ = 0u;
     bool exactSearchPhysicsSupported_ = false;
+    bool memoryBudgetAvailable_ = false;
     std::mutex mutex_;
 };
 
@@ -1200,7 +1233,7 @@ Buffer::~Buffer() {
 
 RuntimeDiagnostics QueryRuntimeDiagnostics() noexcept {
     try {
-        return AcquireRuntime()->Diagnostics();
+        return AcquireRuntime()->QueryMemoryDiagnostics();
     } catch (const std::bad_alloc &) {
         RuntimeDiagnostics result;
         result.status = RuntimeStatus::InitializationFailed;

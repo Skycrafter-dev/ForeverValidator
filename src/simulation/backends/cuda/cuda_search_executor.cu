@@ -10,6 +10,7 @@
 #endif
 
 #include "simulation/backends/cuda/cuda_search_executor.h"
+#include "simulation/backends/gpu_memory_budget.h"
 
 #include <cuda_runtime.h>
 #include <cub/device/device_reduce.cuh>
@@ -177,6 +178,11 @@ public:
             return true;
         }
         if (count > std::numeric_limits<std::size_t>::max() / sizeof(T)) {
+            return false;
+        }
+        std::size_t available = 0, total = 0;
+        if (cudaMemGetInfo(&available, &total) != cudaSuccess ||
+            !GpuAllocationFitsBudget(count * sizeof(T), available, total)) {
             return false;
         }
         if (cudaMalloc(
@@ -4301,7 +4307,7 @@ struct CudaSearchExecutor::Impl {
             static_cast<void>(cudaGetLastError());
             if (diagnostic != nullptr) {
                 *diagnostic =
-                        "CUDA calibration could not reserve a larger real batch";
+                        "CUDA could not reserve a larger batch within memory headroom or allocator limits; reduce parallel samples or use Optimized CPU";
             }
             return false;
         }
@@ -5930,7 +5936,7 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
             !impl->globalBestMutationCount.Allocate(1u) ||
             !impl->summary.Allocate(1u)) {
             if (diagnostic != nullptr) {
-                *diagnostic = "CUDA resident search allocation failed";
+                *diagnostic = "CUDA resident search allocation rejected by memory headroom or allocator limits; reduce input density or use Optimized CPU";
             }
             return {};
         }

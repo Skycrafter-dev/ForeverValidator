@@ -1,4 +1,5 @@
 #include "validation/planning/search_event_capacity.h"
+#include "simulation/backends/gpu_memory_budget.h"
 
 #include <iostream>
 #include <limits>
@@ -13,6 +14,13 @@ int main() {
         if (!condition) std::cerr << message << '\n';
         okay &= condition;
     };
+    using forevervalidator::simulation::GpuAllocationFitsBudget;
+    constexpr std::uint64_t gib = 1024ull * 1024 * 1024;
+    check(GpuAllocationFitsBudget(gib, 8 * gib, 8 * gib), "ordinary GPU allocation rejected");
+    check(!GpuAllocationFitsBudget(gib, gib, 8 * gib), "low VRAM allocation accepted");
+    check(!GpuAllocationFitsBudget(7 * gib, 8 * gib, 8 * gib), "GPU headroom consumed");
+    check(!GpuAllocationFitsBudget(UINT64_MAX, UINT64_MAX, UINT64_MAX), "GPU byte arithmetic overflowed");
+    check(!GpuAllocationFitsBudget(1, 0, 8 * gib), "missing GPU budget accepted");
     const std::vector<PhysicsSandboxCudaModifier> noGrowth{
         PhysicsSandboxCudaRandomSteeringModifier{}, PhysicsSandboxCudaInputDeletionModifier{}};
     for (const auto baseline : {limit - 1, limit, limit + 1, std::numeric_limits<std::size_t>::max()}) {
