@@ -68,6 +68,7 @@ enum class CudaSearchEvaluatorKind : std::uint32_t {
     ConditionTimeEarliest,
     ConditionTimeLatest,
     CheckpointEvent,
+    CustomVolumeEntry,
 };
 
 enum class CudaSearchConditionOpcode : std::uint32_t {
@@ -149,6 +150,7 @@ struct CudaSearchConditionInstruction {
 
 inline constexpr std::uint32_t CudaSearchMaximumScriptedObjectives = 16u;
 inline constexpr std::uint32_t CudaSearchMaximumScriptedInstructions = 256u;
+inline constexpr std::uint32_t CudaSearchMaximumCustomVolumeVertices = 256u;
 
 struct CudaSearchScriptedObjective {
     std::uint32_t kind = 0u;
@@ -166,6 +168,8 @@ struct CudaSearchEvaluatorConfiguration {
             scriptedObjectives[CudaSearchMaximumScriptedObjectives]{};
     CudaSearchConditionInstruction
             scriptedInstructions[CudaSearchMaximumScriptedInstructions]{};
+    std::uint32_t customVolumeVertexCount = 0u;
+    double customVolumeVertices[CudaSearchMaximumCustomVolumeVertices][2]{};
 };
 
 struct CudaSearchConditionConfiguration {
@@ -196,6 +200,11 @@ struct CudaSearchIncumbent {
     double metricValues[CudaSearchMaximumScriptedObjectives]{};
 };
 
+struct CudaSearchMutationSegment {
+    std::int64_t minimumTimeMs = 0;
+    std::int64_t maximumTimeMs = 0;
+};
+
 struct CudaSearchExecutorConfiguration {
     const void *deviceScene = nullptr;
     const void *deviceStaticConfiguration = nullptr;
@@ -203,6 +212,8 @@ struct CudaSearchExecutorConfiguration {
     std::vector<CudaControlTick> baselineTicks;
     std::vector<CudaSearchInputEvent> baselineInputs;
     std::vector<CudaSearchModifierConfiguration> modifiers;
+    std::vector<CudaSearchMutationSegment> mutationSegments;
+    std::uint32_t changedSegmentCount = 1u;
     std::vector<double> smoothWeights;
     CudaSearchEvaluatorConfiguration evaluator{};
     std::optional<CudaSearchConditionConfiguration> condition;
@@ -318,6 +329,8 @@ public:
     bool UpdateConditionTimes(
             double lastImprovementTimeSeconds,
             double lastRestartTimeSeconds) noexcept;
+    bool UpdateChangedSegmentCount(
+            std::uint32_t changedSegmentCount) noexcept;
     std::uint32_t BatchCapacity() const noexcept;
 
 private:

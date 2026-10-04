@@ -33,6 +33,7 @@
 #include <utility>
 
 #include "simulation/backends/hip/generated/hip_candidate_events.cuh"
+#include "simulation/backends/hip/generated/hip_custom_volume.cuh"
 #include "simulation/backends/hip/generated/hip_sparse_candidate_events.cuh"
 #include "simulation/backends/hip/generated/hip_exact_math.cuh"
 #include "simulation/backends/hip/generated/hip_finish_time_refinement.cuh"
@@ -42,6 +43,7 @@
 #include "simulation/backends/hip/generated/hip_scene_layout.h"
 #include "simulation/backends/hip/generated/hip_session_specialization.h"
 #include "simulation/backends/hip/generated/hip_search_branch_state.cuh"
+#include "simulation/backends/hip/generated/hip_search_segments.cuh"
 #include "simulation/backends/hip/generated/hip_search_winner_selection.cuh"
 #include "simulation/backends/hip/generated/hip_stunts.cuh"
 #include "simulation/backends/hip/generated/hip_vehicle_transitions.cuh"
@@ -2239,6 +2241,22 @@ __device__ DeviceSample EvaluateState(
             result.valid = true;
         }
         break;
+    case HipSearchEvaluatorKind::CustomVolumeEntry: {
+        using namespace hip::custom_volume;
+        if (*reported || Contains(evaluator, Project(evaluator,
+                    previousPosition.x, previousPosition.y, previousPosition.z))) {
+            return result;
+        }
+        double fraction = 0.0;
+        if (!hip::custom_volume::SegmentEntry(evaluator,
+                    previousPosition.x, previousPosition.y, previousPosition.z,
+                    position.x, position.y, position.z, &fraction)) return result;
+        *reported = true;
+        result.timeMs = previousTimeMs + fraction * (currentTimeMs - previousTimeMs);
+        result.score = result.timeMs;
+        result.valid = true;
+        break;
+    }
     case HipSearchEvaluatorKind::StuntPoints:
         result.score = static_cast<double>(stuntsScore);
         result.valid = true;
@@ -2410,6 +2428,9 @@ __global__ void GenerateSearchCandidatesKernel(
         std::uint32_t immutableTailInputCount,
         const HipSearchModifierConfiguration *modifiers,
         std::uint32_t modifierCount,
+        const HipSearchMutationSegment *segments,
+        std::uint32_t segmentCount,
+        std::uint32_t changedSegmentCount,
         const double *smoothWeights,
         const DeviceControlState *mutableBoundaryControls,
         std::uint32_t tickDurationMs,
@@ -2813,51 +2834,98 @@ __global__ void GenerateSearchCandidatesKernel(
             return;
         }
         bool normalized = baselineInputsCanonical;
-        for (std::uint32_t pass = 0u; pass < modifierCount; ++pass) {
-            if (!ApplyModifier(
-                        modifiers[pass], pass, candidateId,
-                        random,
-                        tickDurationMs, 0,
-                        *mutableBoundaryControls,
-                        baselineInputs, baselineInputCount,
-                        events, &eventCount, eventCapacity,
-                        temporary,
-                        passBaseline, eligible,
-                        smoothWeights, legacyMutationPipeline,
-                        &normalized)) {
-                statuses[slot] =
-                        DeviceCandidateStatus::CapacityExceeded;
-                activeCandidates[slot] = false;
-                eventCounts[slot] = eventCount;
-                mutationCounts[slot] = 0u;
-                return;
+        const hip_search_detail::SegmentSelection selection{
+                candidateId ^
+                        (static_cast<std::uint64_t>(modifiers[0].window.seed)
+                         << 32u),
+                segmentCount, changedSegmentCount};
+        for (std::uint32_t segmentIndex = 0u;
+             segmentIndex < (segmentCount == 0u ? 1u : segmentCount);
+             ++segmentIndex) {
+            if (segmentCount != 0u && !selection.Selected(segmentIndex))
+                continue;
+            for (std::uint32_t pass = 0u; pass < modifierCount; ++pass) {
+                HipSearchModifierConfiguration modifier = modifiers[pass];
+                if (segmentCount != 0u) {
+                    const auto segment = segments[segmentIndex];
+                    modifier.window.minimumTimeMs =
+                            max(modifier.window.minimumTimeMs,
+                                segment.minimumTimeMs);
+                    modifier.window.maximumTimeMs =
+                            min(modifier.window.maximumTimeMs,
+                                segment.maximumTimeMs);
+                    if (modifier.window.minimumTimeMs >
+                        modifier.window.maximumTimeMs)
+                        continue;
+                }
+                if (!ApplyModifier(modifier,
+                                   pass + segmentIndex * modifierCount,
+                                   candidateId, random, tickDurationMs, 0,
+                                   *mutableBoundaryControls, baselineInputs,
+                                   baselineInputCount, events, &eventCount,
+                                   eventCapacity, temporary, passBaseline,
+                                   eligible, smoothWeights,
+                                   legacyMutationPipeline, &normalized)) {
+                    statuses[slot] = DeviceCandidateStatus::CapacityExceeded;
+                    activeCandidates[slot] = false;
+                    eventCounts[slot] = eventCount;
+                    mutationCounts[slot] = 0u;
+                    return;
+                }
             }
-        }
-        if (legacyMutationPipeline || !normalized) {
-            for (std::uint32_t index = 0u;
-                 index < baselineInputCount; ++index) {
-                passBaseline[index] = baselineInputs[index];
+            if (segmentCount != 0u) {
+                if (!normalized) {
+                    eventCount = NormalizeEvents(
+                            events, eventCount, temporary, baselineInputs,
+                            baselineInputCount, 0, legacyMutationPipeline,
+                            eventCapacity);
+                    if (eventCount == UINT32_MAX) {
+                        statuses[slot] =
+                                DeviceCandidateStatus::CapacityExceeded;
+                        activeCandidates[slot] = false;
+                        eventCounts[slot] = eventCapacity;
+                        mutationCounts[slot] = 0u;
+                        return;
+                    }
+                }
+                const std::int64_t end = segments[segmentIndex].maximumTimeMs;
+                if (!selection.Contains(segments, end + tickDurationMs) &&
+                    !hip_search_detail::RestoreSegmentControls(
+                            baselineInputs, baselineInputCount, events,
+                            &eventCount, eventCapacity,
+                            *mutableBoundaryControls, end)) {
+                    statuses[slot] = DeviceCandidateStatus::CapacityExceeded;
+                    activeCandidates[slot] = false;
+                    eventCounts[slot] = eventCount;
+                    mutationCounts[slot] = 0u;
+                    return;
+                }
+                normalized = false;
             }
-            eventCount = NormalizeEvents(
-                    events, eventCount, temporary,
-                    passBaseline, baselineInputCount,
-                    0,
-                    legacyMutationPipeline, eventCapacity);
-            if (eventCount == UINT32_MAX) {
-                statuses[slot] =
-                        DeviceCandidateStatus::CapacityExceeded;
-                activeCandidates[slot] = false;
-                eventCounts[slot] = eventCapacity;
-                mutationCounts[slot] = 0u;
-                return;
+            if (legacyMutationPipeline || !normalized) {
+                for (std::uint32_t index = 0u; index < baselineInputCount;
+                     ++index) {
+                    passBaseline[index] = baselineInputs[index];
+                }
+                eventCount =
+                        NormalizeEvents(events, eventCount, temporary,
+                                        passBaseline, baselineInputCount, 0,
+                                        legacyMutationPipeline, eventCapacity);
+                if (eventCount == UINT32_MAX) {
+                    statuses[slot] = DeviceCandidateStatus::CapacityExceeded;
+                    activeCandidates[slot] = false;
+                    eventCounts[slot] = eventCapacity;
+                    mutationCounts[slot] = 0u;
+                    return;
+                }
+                normalized = true;
             }
         }
     }
-    std::uint32_t mutationCount = baseline
-            ? 0u
-            : EffectiveChangeCount(
-                      baselineInputs, baselineInputCount,
-                      events, eventCount);
+    std::uint32_t mutationCount =
+            baseline ? 0u
+                     : EffectiveChangeCount(baselineInputs, baselineInputCount,
+                                            events, eventCount);
     if (!baseline && eventCount != baselineInputCount) {
         mutationCount += immutableTailInputCount;
     }
@@ -3250,6 +3318,8 @@ __global__ FOREVERVALIDATOR_HIP_SEARCH_LAUNCH_BOUNDS(
         if (evaluatorReported &&
             (configuredEvaluator.kind ==
                      HipSearchEvaluatorKind::VolumeEntry ||
+             configuredEvaluator.kind ==
+                     HipSearchEvaluatorKind::CustomVolumeEntry ||
              configuredEvaluator.kind ==
                      HipSearchEvaluatorKind::ConditionTimeEarliest ||
              configuredEvaluator.kind ==
@@ -3868,6 +3938,7 @@ struct HipSearchExecutor::Impl {
     DeviceAllocation<HipControlTick> baselineTicks;
     DeviceAllocation<HipSearchInputEvent> baselineInputs;
     DeviceAllocation<HipSearchModifierConfiguration> modifiers;
+    DeviceAllocation<HipSearchMutationSegment> mutationSegments;
     DeviceAllocation<double> smoothWeights;
     DeviceAllocation<HipSearchEvaluatorConfiguration> evaluator;
     DeviceAllocation<HipSearchConditionInstruction> condition;
@@ -3924,6 +3995,7 @@ struct HipSearchExecutor::Impl {
         ADD_BYTES(baselineTicks);
         ADD_BYTES(baselineInputs);
         ADD_BYTES(modifiers);
+        ADD_BYTES(mutationSegments);
         ADD_BYTES(smoothWeights);
         ADD_BYTES(evaluator);
         ADD_BYTES(condition);
@@ -4676,6 +4748,9 @@ struct HipSearchExecutor::Impl {
                 modifiers.Get(),
                 static_cast<std::uint32_t>(
                         configuration.modifiers.size()),
+                mutationSegments.Get(),
+                static_cast<std::uint32_t>(configuration.mutationSegments.size()),
+                configuration.changedSegmentCount,
                 smoothWeights.Get(),
                 mutableBoundaryControls.Get(),
                 configuration.tickDurationMs,
@@ -5630,6 +5705,28 @@ std::unique_ptr<HipSearchExecutor> HipSearchExecutor::Create(
         }
         HipSearchExecutorConfiguration preparedConfiguration =
                 configuration;
+        if (!preparedConfiguration.mutationSegments.empty()) {
+            if (configuration.tickDurationMs < 3u ||
+                configuration.changedSegmentCount == 0u ||
+                configuration.changedSegmentCount > configuration.mutationSegments.size()) {
+                if (diagnostic) *diagnostic = "HIP mutation segment count or tick duration is invalid";
+                return {};
+            }
+            std::int64_t previousEnd = mutableFromTimeMs - 1;
+            for (auto &segment : preparedConfiguration.mutationSegments) {
+                if (segment.minimumTimeMs <= previousEnd ||
+                    segment.maximumTimeMs < segment.minimumTimeMs ||
+                    segment.maximumTimeMs > INT32_MAX - configuration.tickDurationMs ||
+                    segment.minimumTimeMs % configuration.tickDurationMs != 0 ||
+                    segment.maximumTimeMs % configuration.tickDurationMs != 0) {
+                    if (diagnostic) *diagnostic = "HIP mutation segments must be ordered, disjoint, mutable tick ranges";
+                    return {};
+                }
+                previousEnd = segment.maximumTimeMs;
+                segment.minimumTimeMs -= mutableFromTimeMs;
+                segment.maximumTimeMs -= mutableFromTimeMs;
+            }
+        }
         preparedConfiguration.baselineInputs =
                 inputPartition.mutableSuffix;
         preparedConfiguration.maximumEventCount -=
@@ -5665,6 +5762,11 @@ std::unique_ptr<HipSearchExecutor> HipSearchExecutor::Create(
                 materializationEndTimeMs = std::max(
                         materializationEndTimeMs,
                         modifier.window.maximumTimeMs);
+            }
+            for (const auto &segment : preparedConfiguration.mutationSegments) {
+                materializationEndTimeMs = std::max(
+                        materializationEndTimeMs,
+                        segment.maximumTimeMs + configuration.tickDurationMs);
             }
             hip_search_detail::SearchInputWindow inputWindow;
             if (!hip_search_detail::PartitionSearchInputWindow(
@@ -5799,7 +5901,13 @@ std::unique_ptr<HipSearchExecutor> HipSearchExecutor::Create(
         impl->baselineInputsCanonical = CanonicalBaselineInputs(
                 preparedConfiguration.baselineInputs,
                 0);
+        if (!preparedConfiguration.mutationSegments.empty() &&
+            !impl->baselineInputsCanonical) {
+            if (diagnostic) *diagnostic = "HIP segmented mutation requires canonical baseline inputs";
+            return {};
+        }
         impl->compactRandomSteeringPipeline =
+                preparedConfiguration.mutationSegments.empty() &&
                 !preparedConfiguration.useLegacyMutationPipelineForTesting &&
                 impl->baselineInputsCanonical &&
                 std::all_of(
@@ -5852,11 +5960,13 @@ std::unique_ptr<HipSearchExecutor> HipSearchExecutor::Create(
                 static_cast<std::uint32_t>(
                         compactInputIndices.size());
         impl->sparseMutationPipeline =
+                preparedConfiguration.mutationSegments.empty() &&
                 !preparedConfiguration.
                          useLegacyMutationPipelineForTesting &&
                 impl->baselineInputsCanonical &&
                 !impl->compactRandomSteeringPipeline;
         impl->compactEditPipeline =
+                preparedConfiguration.mutationSegments.empty() &&
                 !preparedConfiguration.
                          useLegacyMutationPipelineForTesting &&
                 !impl->compactRandomSteeringPipeline &&
@@ -5876,6 +5986,7 @@ std::unique_ptr<HipSearchExecutor> HipSearchExecutor::Create(
                 preparedConfiguration.modifiers[0].
                                 timeParameterMs == 0;
         impl->materializesCandidateEvents =
+                !preparedConfiguration.mutationSegments.empty() ||
                 preparedConfiguration.
                         useLegacyMutationPipelineForTesting ||
                 (impl->compactEditPipeline &&
@@ -5904,7 +6015,8 @@ std::unique_ptr<HipSearchExecutor> HipSearchExecutor::Create(
                 impl->materializesCandidateEvents;
         impl->needsPassBaselineEvents =
                 !impl->sparseMutationPipeline &&
-                (preparedConfiguration.useLegacyMutationPipelineForTesting ||
+                (!preparedConfiguration.mutationSegments.empty() ||
+                 preparedConfiguration.useLegacyMutationPipelineForTesting ||
                  !impl->baselineInputsCanonical ||
                  std::any_of(
                         preparedConfiguration.modifiers.begin(),
@@ -6056,6 +6168,8 @@ std::unique_ptr<HipSearchExecutor> HipSearchExecutor::Create(
                     preparedConfiguration.baselineInputs.size()) ||
             !impl->modifiers.Allocate(
                     preparedConfiguration.modifiers.size()) ||
+            !impl->mutationSegments.Allocate(
+                    preparedConfiguration.mutationSegments.size()) ||
             !impl->smoothWeights.Allocate(
                     preparedConfiguration.smoothWeights.size()) ||
             !impl->evaluator.Allocate(1u) ||
@@ -6209,6 +6323,9 @@ std::unique_ptr<HipSearchExecutor> HipSearchExecutor::Create(
         UPLOAD(impl->baselineInputs,
                preparedConfiguration.baselineInputs,
                "uploading HIP baseline inputs");
+        UPLOAD(impl->mutationSegments,
+               preparedConfiguration.mutationSegments,
+               "copying HIP mutation segments");
         UPLOAD(impl->modifiers,
                preparedConfiguration.modifiers,
                "uploading HIP modifier configuration");
@@ -6422,6 +6539,16 @@ bool HipSearchExecutor::ReserveBatchCapacity(
         }
         return false;
     }
+}
+
+bool HipSearchExecutor::UpdateChangedSegmentCount(
+        std::uint32_t changedSegmentCount) noexcept {
+    if (!impl_ || changedSegmentCount == 0u ||
+        changedSegmentCount > impl_->configuration.mutationSegments.size()) {
+        return false;
+    }
+    impl_->configuration.changedSegmentCount = changedSegmentCount;
+    return true;
 }
 
 bool HipSearchExecutor::UpdateConditionTimes(

@@ -30,6 +30,7 @@
 #include <utility>
 
 #include "simulation/backends/cuda/cuda_candidate_events.cuh"
+#include "simulation/backends/cuda/cuda_custom_volume.cuh"
 #include "simulation/backends/cuda/cuda_sparse_candidate_events.cuh"
 #include "simulation/backends/cuda/cuda_exact_math.cuh"
 #include "simulation/backends/cuda/cuda_finish_time_refinement.cuh"
@@ -39,6 +40,7 @@
 #include "simulation/backends/cuda/cuda_scene_layout.h"
 #include "simulation/backends/cuda/cuda_session_specialization.h"
 #include "simulation/backends/cuda/cuda_search_branch_state.cuh"
+#include "simulation/backends/cuda/cuda_search_segments.cuh"
 #include "simulation/backends/cuda/cuda_search_winner_selection.cuh"
 #include "simulation/backends/cuda/cuda_stunts.cuh"
 #include "simulation/backends/cuda/cuda_vehicle_transitions.cuh"
@@ -2236,6 +2238,22 @@ __device__ DeviceSample EvaluateState(
             result.valid = true;
         }
         break;
+    case CudaSearchEvaluatorKind::CustomVolumeEntry: {
+        using namespace cuda::custom_volume;
+        if (*reported || Contains(evaluator, Project(evaluator,
+                    previousPosition.x, previousPosition.y, previousPosition.z))) {
+            return result;
+        }
+        double fraction = 0.0;
+        if (!cuda::custom_volume::SegmentEntry(evaluator,
+                    previousPosition.x, previousPosition.y, previousPosition.z,
+                    position.x, position.y, position.z, &fraction)) return result;
+        *reported = true;
+        result.timeMs = previousTimeMs + fraction * (currentTimeMs - previousTimeMs);
+        result.score = result.timeMs;
+        result.valid = true;
+        break;
+    }
     case CudaSearchEvaluatorKind::StuntPoints:
         result.score = static_cast<double>(stuntsScore);
         result.valid = true;
@@ -2407,6 +2425,9 @@ __global__ void GenerateSearchCandidatesKernel(
         std::uint32_t immutableTailInputCount,
         const CudaSearchModifierConfiguration *modifiers,
         std::uint32_t modifierCount,
+        const CudaSearchMutationSegment *segments,
+        std::uint32_t segmentCount,
+        std::uint32_t changedSegmentCount,
         const double *smoothWeights,
         const DeviceControlState *mutableBoundaryControls,
         std::uint32_t tickDurationMs,
@@ -2810,51 +2831,98 @@ __global__ void GenerateSearchCandidatesKernel(
             return;
         }
         bool normalized = baselineInputsCanonical;
-        for (std::uint32_t pass = 0u; pass < modifierCount; ++pass) {
-            if (!ApplyModifier(
-                        modifiers[pass], pass, candidateId,
-                        random,
-                        tickDurationMs, 0,
-                        *mutableBoundaryControls,
-                        baselineInputs, baselineInputCount,
-                        events, &eventCount, eventCapacity,
-                        temporary,
-                        passBaseline, eligible,
-                        smoothWeights, legacyMutationPipeline,
-                        &normalized)) {
-                statuses[slot] =
-                        DeviceCandidateStatus::CapacityExceeded;
-                activeCandidates[slot] = false;
-                eventCounts[slot] = eventCount;
-                mutationCounts[slot] = 0u;
-                return;
+        const cuda_search_detail::SegmentSelection selection{
+                candidateId ^
+                        (static_cast<std::uint64_t>(modifiers[0].window.seed)
+                         << 32u),
+                segmentCount, changedSegmentCount};
+        for (std::uint32_t segmentIndex = 0u;
+             segmentIndex < (segmentCount == 0u ? 1u : segmentCount);
+             ++segmentIndex) {
+            if (segmentCount != 0u && !selection.Selected(segmentIndex))
+                continue;
+            for (std::uint32_t pass = 0u; pass < modifierCount; ++pass) {
+                CudaSearchModifierConfiguration modifier = modifiers[pass];
+                if (segmentCount != 0u) {
+                    const auto segment = segments[segmentIndex];
+                    modifier.window.minimumTimeMs =
+                            max(modifier.window.minimumTimeMs,
+                                segment.minimumTimeMs);
+                    modifier.window.maximumTimeMs =
+                            min(modifier.window.maximumTimeMs,
+                                segment.maximumTimeMs);
+                    if (modifier.window.minimumTimeMs >
+                        modifier.window.maximumTimeMs)
+                        continue;
+                }
+                if (!ApplyModifier(modifier,
+                                   pass + segmentIndex * modifierCount,
+                                   candidateId, random, tickDurationMs, 0,
+                                   *mutableBoundaryControls, baselineInputs,
+                                   baselineInputCount, events, &eventCount,
+                                   eventCapacity, temporary, passBaseline,
+                                   eligible, smoothWeights,
+                                   legacyMutationPipeline, &normalized)) {
+                    statuses[slot] = DeviceCandidateStatus::CapacityExceeded;
+                    activeCandidates[slot] = false;
+                    eventCounts[slot] = eventCount;
+                    mutationCounts[slot] = 0u;
+                    return;
+                }
             }
-        }
-        if (legacyMutationPipeline || !normalized) {
-            for (std::uint32_t index = 0u;
-                 index < baselineInputCount; ++index) {
-                passBaseline[index] = baselineInputs[index];
+            if (segmentCount != 0u) {
+                if (!normalized) {
+                    eventCount = NormalizeEvents(
+                            events, eventCount, temporary, baselineInputs,
+                            baselineInputCount, 0, legacyMutationPipeline,
+                            eventCapacity);
+                    if (eventCount == UINT32_MAX) {
+                        statuses[slot] =
+                                DeviceCandidateStatus::CapacityExceeded;
+                        activeCandidates[slot] = false;
+                        eventCounts[slot] = eventCapacity;
+                        mutationCounts[slot] = 0u;
+                        return;
+                    }
+                }
+                const std::int64_t end = segments[segmentIndex].maximumTimeMs;
+                if (!selection.Contains(segments, end + tickDurationMs) &&
+                    !cuda_search_detail::RestoreSegmentControls(
+                            baselineInputs, baselineInputCount, events,
+                            &eventCount, eventCapacity,
+                            *mutableBoundaryControls, end)) {
+                    statuses[slot] = DeviceCandidateStatus::CapacityExceeded;
+                    activeCandidates[slot] = false;
+                    eventCounts[slot] = eventCount;
+                    mutationCounts[slot] = 0u;
+                    return;
+                }
+                normalized = false;
             }
-            eventCount = NormalizeEvents(
-                    events, eventCount, temporary,
-                    passBaseline, baselineInputCount,
-                    0,
-                    legacyMutationPipeline, eventCapacity);
-            if (eventCount == UINT32_MAX) {
-                statuses[slot] =
-                        DeviceCandidateStatus::CapacityExceeded;
-                activeCandidates[slot] = false;
-                eventCounts[slot] = eventCapacity;
-                mutationCounts[slot] = 0u;
-                return;
+            if (legacyMutationPipeline || !normalized) {
+                for (std::uint32_t index = 0u; index < baselineInputCount;
+                     ++index) {
+                    passBaseline[index] = baselineInputs[index];
+                }
+                eventCount =
+                        NormalizeEvents(events, eventCount, temporary,
+                                        passBaseline, baselineInputCount, 0,
+                                        legacyMutationPipeline, eventCapacity);
+                if (eventCount == UINT32_MAX) {
+                    statuses[slot] = DeviceCandidateStatus::CapacityExceeded;
+                    activeCandidates[slot] = false;
+                    eventCounts[slot] = eventCapacity;
+                    mutationCounts[slot] = 0u;
+                    return;
+                }
+                normalized = true;
             }
         }
     }
-    std::uint32_t mutationCount = baseline
-            ? 0u
-            : EffectiveChangeCount(
-                      baselineInputs, baselineInputCount,
-                      events, eventCount);
+    std::uint32_t mutationCount =
+            baseline ? 0u
+                     : EffectiveChangeCount(baselineInputs, baselineInputCount,
+                                            events, eventCount);
     if (!baseline && eventCount != baselineInputCount) {
         mutationCount += immutableTailInputCount;
     }
@@ -3247,6 +3315,8 @@ __global__ __launch_bounds__(
         if (evaluatorReported &&
             (configuredEvaluator.kind ==
                      CudaSearchEvaluatorKind::VolumeEntry ||
+             configuredEvaluator.kind ==
+                     CudaSearchEvaluatorKind::CustomVolumeEntry ||
              configuredEvaluator.kind ==
                      CudaSearchEvaluatorKind::ConditionTimeEarliest ||
              configuredEvaluator.kind ==
@@ -3865,6 +3935,7 @@ struct CudaSearchExecutor::Impl {
     DeviceAllocation<CudaControlTick> baselineTicks;
     DeviceAllocation<CudaSearchInputEvent> baselineInputs;
     DeviceAllocation<CudaSearchModifierConfiguration> modifiers;
+    DeviceAllocation<CudaSearchMutationSegment> mutationSegments;
     DeviceAllocation<double> smoothWeights;
     DeviceAllocation<CudaSearchEvaluatorConfiguration> evaluator;
     DeviceAllocation<CudaSearchConditionInstruction> condition;
@@ -3921,6 +3992,7 @@ struct CudaSearchExecutor::Impl {
         ADD_BYTES(baselineTicks);
         ADD_BYTES(baselineInputs);
         ADD_BYTES(modifiers);
+        ADD_BYTES(mutationSegments);
         ADD_BYTES(smoothWeights);
         ADD_BYTES(evaluator);
         ADD_BYTES(condition);
@@ -4673,6 +4745,9 @@ struct CudaSearchExecutor::Impl {
                 modifiers.Get(),
                 static_cast<std::uint32_t>(
                         configuration.modifiers.size()),
+                mutationSegments.Get(),
+                static_cast<std::uint32_t>(configuration.mutationSegments.size()),
+                configuration.changedSegmentCount,
                 smoothWeights.Get(),
                 mutableBoundaryControls.Get(),
                 configuration.tickDurationMs,
@@ -5627,6 +5702,28 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
         }
         CudaSearchExecutorConfiguration preparedConfiguration =
                 configuration;
+        if (!preparedConfiguration.mutationSegments.empty()) {
+            if (configuration.tickDurationMs < 3u ||
+                configuration.changedSegmentCount == 0u ||
+                configuration.changedSegmentCount > configuration.mutationSegments.size()) {
+                if (diagnostic) *diagnostic = "CUDA mutation segment count or tick duration is invalid";
+                return {};
+            }
+            std::int64_t previousEnd = mutableFromTimeMs - 1;
+            for (auto &segment : preparedConfiguration.mutationSegments) {
+                if (segment.minimumTimeMs <= previousEnd ||
+                    segment.maximumTimeMs < segment.minimumTimeMs ||
+                    segment.maximumTimeMs > INT32_MAX - configuration.tickDurationMs ||
+                    segment.minimumTimeMs % configuration.tickDurationMs != 0 ||
+                    segment.maximumTimeMs % configuration.tickDurationMs != 0) {
+                    if (diagnostic) *diagnostic = "CUDA mutation segments must be ordered, disjoint, mutable tick ranges";
+                    return {};
+                }
+                previousEnd = segment.maximumTimeMs;
+                segment.minimumTimeMs -= mutableFromTimeMs;
+                segment.maximumTimeMs -= mutableFromTimeMs;
+            }
+        }
         preparedConfiguration.baselineInputs =
                 inputPartition.mutableSuffix;
         preparedConfiguration.maximumEventCount -=
@@ -5662,6 +5759,11 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
                 materializationEndTimeMs = std::max(
                         materializationEndTimeMs,
                         modifier.window.maximumTimeMs);
+            }
+            for (const auto &segment : preparedConfiguration.mutationSegments) {
+                materializationEndTimeMs = std::max(
+                        materializationEndTimeMs,
+                        segment.maximumTimeMs + configuration.tickDurationMs);
             }
             cuda_search_detail::SearchInputWindow inputWindow;
             if (!cuda_search_detail::PartitionSearchInputWindow(
@@ -5796,7 +5898,13 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
         impl->baselineInputsCanonical = CanonicalBaselineInputs(
                 preparedConfiguration.baselineInputs,
                 0);
+        if (!preparedConfiguration.mutationSegments.empty() &&
+            !impl->baselineInputsCanonical) {
+            if (diagnostic) *diagnostic = "CUDA segmented mutation requires canonical baseline inputs";
+            return {};
+        }
         impl->compactRandomSteeringPipeline =
+                preparedConfiguration.mutationSegments.empty() &&
                 !preparedConfiguration.useLegacyMutationPipelineForTesting &&
                 impl->baselineInputsCanonical &&
                 std::all_of(
@@ -5849,11 +5957,13 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
                 static_cast<std::uint32_t>(
                         compactInputIndices.size());
         impl->sparseMutationPipeline =
+                preparedConfiguration.mutationSegments.empty() &&
                 !preparedConfiguration.
                          useLegacyMutationPipelineForTesting &&
                 impl->baselineInputsCanonical &&
                 !impl->compactRandomSteeringPipeline;
         impl->compactEditPipeline =
+                preparedConfiguration.mutationSegments.empty() &&
                 !preparedConfiguration.
                          useLegacyMutationPipelineForTesting &&
                 !impl->compactRandomSteeringPipeline &&
@@ -5873,6 +5983,7 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
                 preparedConfiguration.modifiers[0].
                                 timeParameterMs == 0;
         impl->materializesCandidateEvents =
+                !preparedConfiguration.mutationSegments.empty() ||
                 preparedConfiguration.
                         useLegacyMutationPipelineForTesting ||
                 (impl->compactEditPipeline &&
@@ -5901,7 +6012,8 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
                 impl->materializesCandidateEvents;
         impl->needsPassBaselineEvents =
                 !impl->sparseMutationPipeline &&
-                (preparedConfiguration.useLegacyMutationPipelineForTesting ||
+                (!preparedConfiguration.mutationSegments.empty() ||
+                 preparedConfiguration.useLegacyMutationPipelineForTesting ||
                  !impl->baselineInputsCanonical ||
                  std::any_of(
                         preparedConfiguration.modifiers.begin(),
@@ -6053,6 +6165,8 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
                     preparedConfiguration.baselineInputs.size()) ||
             !impl->modifiers.Allocate(
                     preparedConfiguration.modifiers.size()) ||
+            !impl->mutationSegments.Allocate(
+                    preparedConfiguration.mutationSegments.size()) ||
             !impl->smoothWeights.Allocate(
                     preparedConfiguration.smoothWeights.size()) ||
             !impl->evaluator.Allocate(1u) ||
@@ -6206,6 +6320,9 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
         UPLOAD(impl->baselineInputs,
                preparedConfiguration.baselineInputs,
                "uploading CUDA baseline inputs");
+        UPLOAD(impl->mutationSegments,
+               preparedConfiguration.mutationSegments,
+               "copying CUDA mutation segments");
         UPLOAD(impl->modifiers,
                preparedConfiguration.modifiers,
                "uploading CUDA modifier configuration");
@@ -6419,6 +6536,16 @@ bool CudaSearchExecutor::ReserveBatchCapacity(
         }
         return false;
     }
+}
+
+bool CudaSearchExecutor::UpdateChangedSegmentCount(
+        std::uint32_t changedSegmentCount) noexcept {
+    if (!impl_ || changedSegmentCount == 0u ||
+        changedSegmentCount > impl_->configuration.mutationSegments.size()) {
+        return false;
+    }
+    impl_->configuration.changedSegmentCount = changedSegmentCount;
+    return true;
 }
 
 bool CudaSearchExecutor::UpdateConditionTimes(

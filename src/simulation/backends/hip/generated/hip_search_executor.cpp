@@ -83,6 +83,10 @@ bool HipSearchExecutor::ReserveBatchCapacity(
     return false;
 }
 
+bool HipSearchExecutor::UpdateChangedSegmentCount(std::uint32_t) noexcept {
+    return false;
+}
+
 bool HipSearchExecutor::UpdateConditionTimes(double, double) noexcept {
     return false;
 }

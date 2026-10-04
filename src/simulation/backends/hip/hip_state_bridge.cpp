@@ -49,6 +49,11 @@ HipSearchExecutorConfiguration ToHipConfiguration(
         result.modifiers.push_back(
                 BitCopy<HipSearchModifierConfiguration>(modifier));
     }
+    result.changedSegmentCount = source.changedSegmentCount;
+    for (const CudaSearchMutationSegment &segment : source.mutationSegments) {
+        result.mutationSegments.push_back(
+                {segment.minimumTimeMs, segment.maximumTimeMs});
+    }
     result.smoothWeights = source.smoothWeights;
     result.evaluator = BitCopy<HipSearchEvaluatorConfiguration>(
             source.evaluator);

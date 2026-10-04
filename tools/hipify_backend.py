@@ -152,6 +152,7 @@ def main() -> int:
         "cuda_timeline_executor_tests.cpp",
         "cuda_search_branch_state_tests.cu",
         "cuda_search_winner_reduction_tests.cu",
+        "cuda_custom_volume_tests.cpp",
         "cuda_modifier_event_ops_tests.cpp",
         "cuda_candidate_events_tests.cpp",
         "cuda_state_layout_tests.cpp",

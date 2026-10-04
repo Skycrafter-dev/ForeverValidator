@@ -1894,6 +1894,13 @@ struct PhysicsSandboxCudaSearchSession::Impl {
                 : executor->BatchCapacity();
     }
 
+    bool UpdateChangedSegmentCount(std::uint32_t count) noexcept {
+#if FOREVERVALIDATOR_HAS_HIP
+        if (hipExecutor) return hipExecutor->UpdateChangedSegmentCount(count);
+#endif
+        return !vulkanExecutor && executor->UpdateChangedSegmentCount(count);
+    }
+
     bool UpdateConditionTimes(
             double lastImprovementTimeSeconds,
             double lastRestartTimeSeconds) noexcept {
@@ -2061,6 +2068,20 @@ simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
                     result.values[3] = evaluator.maximum.x;
                     result.values[4] = evaluator.maximum.y;
                     result.values[5] = evaluator.maximum.z;
+                } else if constexpr (std::is_same_v<
+                                             T,
+                                             PhysicsSandboxCudaCustomVolumeEntryEvaluator>) {
+                    result.kind = simulation::CudaSearchEvaluatorKind::CustomVolumeEntry;
+                    result.optionFlags = static_cast<std::uint32_t>(evaluator.plane);
+                    result.values[0] = evaluator.origin.x;
+                    result.values[1] = evaluator.origin.y;
+                    result.values[2] = evaluator.origin.z;
+                    result.values[3] = evaluator.depth;
+                    result.customVolumeVertexCount = static_cast<std::uint32_t>(evaluator.polygon.size());
+                    for (std::size_t i = 0u; i < evaluator.polygon.size(); ++i) {
+                        result.customVolumeVertices[i][0] = evaluator.polygon[i].x;
+                        result.customVolumeVertices[i][1] = evaluator.polygon[i].y;
+                    }
                 } else if constexpr (std::is_same_v<
                                              T,
                                              PhysicsSandboxCudaStuntPointsEvaluator>) {
@@ -3443,6 +3464,18 @@ PhysicsSandboxCudaSearchSession::ReserveBatchCapacity(
 }
 
 PhysicsSandboxResult<bool>
+PhysicsSandboxCudaSearchSession::UpdateChangedSegmentCount(
+        std::uint32_t changedSegmentCount) noexcept {
+    if (!impl_ || !impl_->HasExecutor() ||
+        !impl_->UpdateChangedSegmentCount(changedSegmentCount)) {
+        return PhysicsSandboxResult<bool>::Failure(SearchError(
+                PhysicsSandboxErrorCode::InvalidRequest,
+                "GPU mutation segment count is unavailable or invalid"));
+    }
+    return PhysicsSandboxResult<bool>::Success(true);
+}
+
+PhysicsSandboxResult<bool>
 PhysicsSandboxCudaSearchSession::UpdateConditionTimes(
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds) noexcept {
@@ -3486,6 +3519,11 @@ CreatePhysicsSandboxCudaSearchSession(
                 source.options.backend == SimulationBackend::Vulkan;
         const bool useHip =
                 source.options.backend == SimulationBackend::Hip;
+        if (useVulkan && !configuration.mutationSegments.empty()) {
+            return PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>::Failure(
+                    SearchError(PhysicsSandboxErrorCode::InvalidRequest,
+                            "Vulkan does not support segmented GPU mutation"));
+        }
         const std::uint32_t tickDurationMs =
                 source.options.tickDurationMs;
         const PhysicsSandboxResult<PhysicsSandboxStateView> current =
@@ -3573,7 +3611,24 @@ CreatePhysicsSandboxCudaSearchSession(
                             "reduce input density, insertion counts or deformation radius/count"));
         }
 
+        if (!configuration.mutationSegments.empty()) {
+            const std::size_t segments = configuration.mutationSegments.size();
+            const std::size_t perSegmentGrowth =
+                    maximumEventCount - sourceInputs.size() + 6u;
+            if (segments > kMaximumSearchInputEvents ||
+                perSegmentGrowth > (kMaximumSearchInputEvents - sourceInputs.size()) / segments) {
+                return PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>::Failure(
+                        SearchError(PhysicsSandboxErrorCode::InvalidRequest,
+                                "Segmented GPU mutation exceeds the input event limit"));
+            }
+            maximumEventCount = sourceInputs.size() + segments * perSegmentGrowth;
+        }
         simulation::CudaSearchExecutorConfiguration internal;
+        internal.changedSegmentCount = configuration.changedSegmentCount;
+        for (const auto &segment : configuration.mutationSegments) {
+            internal.mutationSegments.push_back(
+                    {segment.minimumTimeMs, segment.maximumTimeMs});
+        }
         internal.maximumBatchSize = configuration.maximumBatchSize;
         internal.tickDurationMs = tickDurationMs;
         internal.prestartDurationMs =
@@ -3722,6 +3777,25 @@ CreatePhysicsSandboxCudaSearchSession(
                     PhysicsSandboxCudaSearchSession>::Failure(
                     SearchError(PhysicsSandboxErrorCode::InvalidRequest,
                                 "checkpoint events are not available on Vulkan"));
+        }
+        if (const auto *volume = std::get_if<
+                    PhysicsSandboxCudaCustomVolumeEntryEvaluator>(
+                            &configuration.evaluator)) {
+            if (useVulkan || volume->polygon.size() < 3u ||
+                volume->polygon.size() > simulation::CudaSearchMaximumCustomVolumeVertices ||
+                static_cast<std::uint32_t>(volume->plane) > 2u ||
+                !std::isfinite(volume->depth) || volume->depth <= 0.0 ||
+                !std::isfinite(volume->origin.x) ||
+                !std::isfinite(volume->origin.y) ||
+                !std::isfinite(volume->origin.z) ||
+                std::any_of(volume->polygon.begin(), volume->polygon.end(),
+                            [](const auto &point) {
+                                return !std::isfinite(point.x) || !std::isfinite(point.y);
+                            })) {
+                return PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>::Failure(
+                        SearchError(PhysicsSandboxErrorCode::InvalidRequest,
+                                    "custom volume requires CUDA or HIP and 3 to 256 finite vertices, a valid plane, finite origin and positive depth"));
+            }
         }
         if (const auto *scripted = std::get_if<
                     PhysicsSandboxCudaScriptedEvaluator>(

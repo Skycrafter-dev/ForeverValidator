@@ -69,6 +69,7 @@ enum class HipSearchEvaluatorKind : std::uint32_t {
     ConditionTimeEarliest,
     ConditionTimeLatest,
     CheckpointEvent,
+    CustomVolumeEntry,
 };
 
 enum class HipSearchConditionOpcode : std::uint32_t {
@@ -150,6 +151,7 @@ struct HipSearchConditionInstruction {
 
 inline constexpr std::uint32_t HipSearchMaximumScriptedObjectives = 16u;
 inline constexpr std::uint32_t HipSearchMaximumScriptedInstructions = 256u;
+inline constexpr std::uint32_t HipSearchMaximumCustomVolumeVertices = 256u;
 
 struct HipSearchScriptedObjective {
     std::uint32_t kind = 0u;
@@ -167,6 +169,8 @@ struct HipSearchEvaluatorConfiguration {
             scriptedObjectives[HipSearchMaximumScriptedObjectives]{};
     HipSearchConditionInstruction
             scriptedInstructions[HipSearchMaximumScriptedInstructions]{};
+    std::uint32_t customVolumeVertexCount = 0u;
+    double customVolumeVertices[HipSearchMaximumCustomVolumeVertices][2]{};
 };
 
 struct HipSearchConditionConfiguration {
@@ -197,6 +201,11 @@ struct HipSearchIncumbent {
     double metricValues[HipSearchMaximumScriptedObjectives]{};
 };
 
+struct HipSearchMutationSegment {
+    std::int64_t minimumTimeMs = 0;
+    std::int64_t maximumTimeMs = 0;
+};
+
 struct HipSearchExecutorConfiguration {
     const void *deviceScene = nullptr;
     const void *deviceStaticConfiguration = nullptr;
@@ -204,6 +213,8 @@ struct HipSearchExecutorConfiguration {
     std::vector<HipControlTick> baselineTicks;
     std::vector<HipSearchInputEvent> baselineInputs;
     std::vector<HipSearchModifierConfiguration> modifiers;
+    std::vector<HipSearchMutationSegment> mutationSegments;
+    std::uint32_t changedSegmentCount = 1u;
     std::vector<double> smoothWeights;
     HipSearchEvaluatorConfiguration evaluator{};
     std::optional<HipSearchConditionConfiguration> condition;
@@ -319,6 +330,8 @@ public:
     bool UpdateConditionTimes(
             double lastImprovementTimeSeconds,
             double lastRestartTimeSeconds) noexcept;
+    bool UpdateChangedSegmentCount(
+            std::uint32_t changedSegmentCount) noexcept;
     std::uint32_t BatchCapacity() const noexcept;
 
 private:

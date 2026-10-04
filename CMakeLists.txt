@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(ForeverValidator VERSION 0.2.3 LANGUAGES CXX)
+project(ForeverValidator VERSION 0.2.4 LANGUAGES CXX)
 
 option(FOREVERVALIDATOR_BUILD_CLI "Build the ForeverValidator CLI"
        ${PROJECT_IS_TOP_LEVEL})
@@ -829,8 +829,22 @@ endif()
 if(FOREVERVALIDATOR_BUILD_TESTS)
     enable_testing()
 
+    add_executable(forevervalidator-custom-volume-tests tests/cuda_custom_volume_tests.cpp)
+    target_include_directories(forevervalidator-custom-volume-tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    forevervalidator_configure_target(forevervalidator-custom-volume-tests)
+    add_test(NAME forevervalidator-custom-volume COMMAND forevervalidator-custom-volume-tests)
+
     add_executable(forevervalidator-search-event-capacity-tests
         tests/search_event_capacity_tests.cpp)
+    add_executable(forevervalidator-search-segments-tests
+        tests/cuda_search_segments_tests.cpp)
+    target_include_directories(forevervalidator-search-segments-tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    forevervalidator_configure_target(forevervalidator-search-segments-tests)
+    add_test(NAME forevervalidator-search-segments
+             COMMAND forevervalidator-search-segments-tests)
     target_include_directories(forevervalidator-search-event-capacity-tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
         "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -982,6 +996,7 @@ if(FOREVERVALIDATOR_BUILD_TESTS)
         foreach(hip_test IN ITEMS
                 search_branch_state
                 search_winner_reduction
+                custom_volume
                 modifier_event_ops
                 candidate_events
                 state_layout

@@ -82,6 +82,10 @@ bool CudaSearchExecutor::ReserveBatchCapacity(
     return false;
 }
 
+bool CudaSearchExecutor::UpdateChangedSegmentCount(std::uint32_t) noexcept {
+    return false;
+}
+
 bool CudaSearchExecutor::UpdateConditionTimes(double, double) noexcept {
     return false;
 }

@@ -440,6 +440,16 @@ struct PhysicsSandboxCudaVolumeEntryEvaluator {
     PhysicsSandboxCudaVector3 maximum{};
 };
 
+// A simple polygon extruded along the selected plane's positive normal.
+// Polygon points use x/y as plane coordinates; z is unused.
+struct PhysicsSandboxCudaCustomVolumeEntryEvaluator {
+    enum class Plane : std::uint32_t { XY, XZ, YZ };
+    Plane plane = Plane::XZ;
+    PhysicsSandboxCudaVector3 origin{};
+    double depth = 1.0;
+    std::vector<PhysicsSandboxCudaVector3> polygon;
+};
+
 struct PhysicsSandboxCudaStuntPointsEvaluator {};
 
 struct PhysicsSandboxCudaFinishTimeEvaluator {};
@@ -454,7 +464,7 @@ struct PhysicsSandboxCudaConditionTimeEvaluator {
 // Minimizes the tick at which the selected checkpoint or finish is accepted,
 // using the same selectors as acceptedCheckpointEvents. checkpointIndex is
 // the zero-based ordinal within the lap (ignored for the finish), lap is
-// one-based, and eventIndex 0 means any. CUDA only. When several ordinary
+// one-based, and eventIndex 0 means any. CUDA and HIP. When several ordinary
 // checkpoints are accepted in one tick, only the last one's map slot is
 // known, so a slot-restricted selector does not match the earlier ones.
 struct PhysicsSandboxCudaCheckpointEvaluator {
@@ -493,7 +503,8 @@ using PhysicsSandboxCudaEvaluator = std::variant<
         PhysicsSandboxCudaFinishTimeEvaluator,
         PhysicsSandboxCudaScriptedEvaluator,
         PhysicsSandboxCudaConditionTimeEvaluator,
-        PhysicsSandboxCudaCheckpointEvaluator>;
+        PhysicsSandboxCudaCheckpointEvaluator,
+        PhysicsSandboxCudaCustomVolumeEntryEvaluator>;
 
 struct PhysicsSandboxCudaSearchIncumbent {
     bool mutation = false;
@@ -594,6 +605,11 @@ struct PhysicsSandboxCudaConditionProgram {
     double lastRestartTimeSeconds = 0.0;
 };
 
+struct PhysicsSandboxCudaMutationSegment {
+    std::int64_t minimumTimeMs = 0;
+    std::int64_t maximumTimeMs = 0;
+};
+
 struct PhysicsSandboxCudaSearchConfiguration {
     std::uint32_t maximumBatchSize = 1u;
     std::int64_t earliestMutationTimeMs = 0;
@@ -612,6 +628,9 @@ struct PhysicsSandboxCudaSearchConfiguration {
     bool captureBestState = true;
     // Seeds a recreated session with an already verified baseline incumbent.
     std::optional<PhysicsSandboxCudaSearchIncumbent> incumbent;
+    // Inclusive, ordered, non-overlapping tick ranges. Empty keeps flat search.
+    std::vector<PhysicsSandboxCudaMutationSegment> mutationSegments;
+    std::uint32_t changedSegmentCount = 1u;
 };
 
 // An opaque in-process runtime clone. States are not serializable and are not
@@ -785,6 +804,8 @@ public:
     PhysicsSandboxResult<bool> UpdateConditionTimes(
             double lastImprovementTimeSeconds,
             double lastRestartTimeSeconds) noexcept;
+    PhysicsSandboxResult<bool> UpdateChangedSegmentCount(
+            std::uint32_t changedSegmentCount) noexcept;
 
 private:
     struct Impl;
