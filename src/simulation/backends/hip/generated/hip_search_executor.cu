@@ -1912,8 +1912,7 @@ __device__ DeviceConditionValue ConditionSource(
         std::uint64_t iterationCount,
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds,
-        double currentTimeSeconds,
-        double simulationTimeMs) {
+        double currentTimeSeconds) {
     const CHmsDyna::CHmsStateDyna &current = state.body.current;
     const CHmsDyna::CHmsStateDyna &previous = state.body.temporary;
     const GmVec3 currentLocal =
@@ -1965,7 +1964,6 @@ __device__ DeviceConditionValue ConditionSource(
     case HipSearchConditionValue::LastImprovementTime: return {lastImprovementTimeSeconds};
     case HipSearchConditionValue::LastRestartTime: return {lastRestartTimeSeconds};
     case HipSearchConditionValue::CurrentTime: return {currentTimeSeconds};
-    case HipSearchConditionValue::SimulationTimeMilliseconds: return {simulationTimeMs};
     case HipSearchConditionValue::CompletedLaps:
         return {static_cast<double>(state.race.progress.completedLapCount)};
     case HipSearchConditionValue::CheckpointCount:
@@ -2011,8 +2009,7 @@ __device__ __noinline__ DeviceExpressionResult EvaluateExpression(
         std::uint64_t iterationCount,
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds,
-        double currentTimeSeconds,
-        double simulationTimeMs) {
+        double currentTimeSeconds) {
     if (instructionCount == 0u) {
         return {1.0, true};
     }
@@ -2036,7 +2033,7 @@ __device__ __noinline__ DeviceExpressionResult EvaluateExpression(
             DeviceConditionValue value = ConditionSource(
                     instruction.value, state, iterationCount,
                     lastImprovementTimeSeconds,
-                    lastRestartTimeSeconds, currentTimeSeconds, simulationTimeMs);
+                    lastRestartTimeSeconds, currentTimeSeconds);
             if (instruction.opcode == HipSearchConditionOpcode::Scalar &&
                 value.vector) {
                 const int component = static_cast<int>(instruction.x);
@@ -2095,12 +2092,11 @@ __device__ bool EvaluateCondition(
         std::uint64_t iterationCount,
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds,
-        double currentTimeSeconds,
-        double simulationTimeMs) {
+        double currentTimeSeconds) {
     const DeviceExpressionResult result = EvaluateExpression(
             instructions, instructionCount, state, iterationCount,
             lastImprovementTimeSeconds, lastRestartTimeSeconds,
-            currentTimeSeconds, simulationTimeMs);
+            currentTimeSeconds);
     return result.valid && result.value != 0.0;
 }
 
@@ -2124,7 +2120,7 @@ __device__ bool UpdateScriptedSample(
                         objective.firstInstruction],
                 objective.instructionCount, state, iterationCount,
                 lastImprovementTimeSeconds,
-                lastRestartTimeSeconds, currentTimeSeconds, currentTimeMs);
+                lastRestartTimeSeconds, currentTimeSeconds);
         values[i] = expression.value;
         if (!expression.valid || !isfinite(values[i])) return false;
         scores[i] = objective.kind == 0u
@@ -2257,6 +2253,18 @@ __device__ DeviceSample EvaluateState(
         result.score = result.timeMs;
         result.valid = true;
         break;
+    case HipSearchEvaluatorKind::ConditionTimeEarliest:
+    case HipSearchEvaluatorKind::ConditionTimeLatest:
+        // Only reached once the search conditions hold; the first such tick
+        // is the candidate's score.
+        if (*reported) {
+            return result;
+        }
+        *reported = true;
+        result.timeMs = currentTimeMs;
+        result.score = currentTimeMs;
+        result.valid = true;
+        break;
     }
     return result;
 }
@@ -2264,7 +2272,8 @@ __device__ DeviceSample EvaluateState(
 __host__ __device__ bool MaximizesScore(
         HipSearchEvaluatorKind kind) {
     return kind == HipSearchEvaluatorKind::Velocity ||
-            kind == HipSearchEvaluatorKind::StuntPoints;
+            kind == HipSearchEvaluatorKind::StuntPoints ||
+            kind == HipSearchEvaluatorKind::ConditionTimeLatest;
 }
 
 __global__ void SeedCandidateBestSamplesKernel(
@@ -3053,8 +3062,7 @@ __global__ FOREVERVALIDATOR_HIP_SEARCH_LAUNCH_BOUNDS(
                     condition, conditionInstructionCount, state,
                     baseline ? 0u : candidateId + 1u,
                     lastImprovementTimeSeconds,
-                    lastRestartTimeSeconds, currentTimeSeconds,
-                    static_cast<double>(publicTime))) {
+                    lastRestartTimeSeconds, currentTimeSeconds)) {
             ++evaluationIndex;
             if (state.race.progress.raceCompleted) break;
             continue;
@@ -3104,8 +3112,13 @@ __global__ FOREVERVALIDATOR_HIP_SEARCH_LAUNCH_BOUNDS(
             localBest = sample;
         }
         ++evaluationIndex;
-        if (evaluatorReported && configuredEvaluator.kind ==
-                HipSearchEvaluatorKind::VolumeEntry) {
+        if (evaluatorReported &&
+            (configuredEvaluator.kind ==
+                     HipSearchEvaluatorKind::VolumeEntry ||
+             configuredEvaluator.kind ==
+                     HipSearchEvaluatorKind::ConditionTimeEarliest ||
+             configuredEvaluator.kind ==
+                     HipSearchEvaluatorKind::ConditionTimeLatest)) {
             candidateBestSamples[slot + 1u] = localBest;
             return;
         }

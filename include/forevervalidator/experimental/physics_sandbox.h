@@ -444,6 +444,13 @@ struct PhysicsSandboxCudaStuntPointsEvaluator {};
 
 struct PhysicsSandboxCudaFinishTimeEvaluator {};
 
+// Scores the first evaluated tick on which the search conditions hold (its
+// public simulation time) and stops that candidate there. Earlier is better
+// unless maximize is set.
+struct PhysicsSandboxCudaConditionTimeEvaluator {
+    bool maximize = false;
+};
+
 struct PhysicsSandboxCudaConditionInstruction;
 
 enum class PhysicsSandboxCudaScriptedObjectiveKind : std::uint32_t {
@@ -470,7 +477,8 @@ using PhysicsSandboxCudaEvaluator = std::variant<
         PhysicsSandboxCudaVolumeEntryEvaluator,
         PhysicsSandboxCudaStuntPointsEvaluator,
         PhysicsSandboxCudaFinishTimeEvaluator,
-        PhysicsSandboxCudaScriptedEvaluator>;
+        PhysicsSandboxCudaScriptedEvaluator,
+        PhysicsSandboxCudaConditionTimeEvaluator>;
 
 struct PhysicsSandboxCudaSearchIncumbent {
     bool mutation = false;
@@ -552,7 +560,6 @@ enum class PhysicsSandboxCudaConditionValue : std::uint32_t {
     LastRestartTime,
     CurrentTime,
     CheckpointCount,
-    SimulationTimeMilliseconds,
     CompletedLaps,
 };
 

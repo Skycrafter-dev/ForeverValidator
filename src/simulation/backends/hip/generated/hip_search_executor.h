@@ -66,6 +66,8 @@ enum class HipSearchEvaluatorKind : std::uint32_t {
     StuntPoints,
     FinishTime,
     Scripted,
+    ConditionTimeEarliest,
+    ConditionTimeLatest,
 };
 
 enum class HipSearchConditionOpcode : std::uint32_t {
@@ -134,7 +136,6 @@ enum class HipSearchConditionValue : std::uint32_t {
     LastRestartTime,
     CurrentTime,
     CheckpointCount,
-    SimulationTimeMilliseconds,
     CompletedLaps,
 };
 

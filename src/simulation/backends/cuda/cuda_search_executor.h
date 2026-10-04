@@ -65,6 +65,8 @@ enum class CudaSearchEvaluatorKind : std::uint32_t {
     StuntPoints,
     FinishTime,
     Scripted,
+    ConditionTimeEarliest,
+    ConditionTimeLatest,
 };
 
 enum class CudaSearchConditionOpcode : std::uint32_t {
@@ -133,7 +135,6 @@ enum class CudaSearchConditionValue : std::uint32_t {
     LastRestartTime,
     CurrentTime,
     CheckpointCount,
-    SimulationTimeMilliseconds,
     CompletedLaps,
 };
 

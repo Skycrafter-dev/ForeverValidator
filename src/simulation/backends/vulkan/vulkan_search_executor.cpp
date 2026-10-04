@@ -1002,7 +1002,9 @@ struct VulkanSearchExecutor::Impl {
                     configuration.evaluator.kind ==
                             CudaSearchEvaluatorKind::Velocity ||
                     configuration.evaluator.kind ==
-                            CudaSearchEvaluatorKind::StuntPoints;
+                            CudaSearchEvaluatorKind::StuntPoints ||
+                    configuration.evaluator.kind ==
+                            CudaSearchEvaluatorKind::ConditionTimeLatest;
             DeviceSample incumbent = useDeviceSummary
                     ? batchSummary.winner
                     : samples[0];

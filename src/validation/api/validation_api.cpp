@@ -2068,6 +2068,12 @@ simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
                             simulation::CudaSearchEvaluatorKind::StuntPoints;
                 } else if constexpr (std::is_same_v<
                                              T,
+                                             PhysicsSandboxCudaConditionTimeEvaluator>) {
+                    result.kind = evaluator.maximize
+                            ? simulation::CudaSearchEvaluatorKind::ConditionTimeLatest
+                            : simulation::CudaSearchEvaluatorKind::ConditionTimeEarliest;
+                } else if constexpr (std::is_same_v<
+                                             T,
                                              PhysicsSandboxCudaScriptedEvaluator>) {
                     result.kind =
                             simulation::CudaSearchEvaluatorKind::Scripted;

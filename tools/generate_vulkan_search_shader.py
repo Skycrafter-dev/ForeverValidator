@@ -475,7 +475,7 @@ def specialize_steady_velocity(text: str, handling: str) -> str:
     new = '        }\n\n        uint stuntsScore = 0u;\n        if (false)\n        {\n            CudaCandidateState* fullState =\n                reinterpret<CudaCandidateState*>(deviceState);\n            stuntsScore = fullState->stunts.stuntsScore;\n        }\n        cuda_search_detail__DeviceSample sample = EvaluateVelocityState(\n            localState, double(publicTime));\n        sample.candidateId = candidateId;\n        sample.candidateSlot = slot;\n        sample.evaluationTick = evaluationIndex;\n'
     text = replace_specialization_fragment(text, old, new, "fragment 19")
     # @@ -15814,13 +15832,13 @@
-    old = '            localBest = sample;\n        ++evaluationIndex;\n\n        if ((evaluator->kind == CudaSearchEvaluatorKind_FinishTime ||\n             evaluator->kind == CudaSearchEvaluatorKind_VolumeEntry) &&\n            evaluatorReported)\n        {\n            completed = true;\n            break;\n        }\n        if (evaluator->kind == CudaSearchEvaluatorKind_FinishTime &&\n            incumbent.preciseFinish != 0u &&\n            double(publicTime) >= incumbent.timeMs)\n        {\n'
+    old = '            localBest = sample;\n        ++evaluationIndex;\n\n        if ((evaluator->kind == CudaSearchEvaluatorKind_FinishTime ||\n             evaluator->kind == CudaSearchEvaluatorKind_VolumeEntry ||\n             evaluator->kind == CudaSearchEvaluatorKind_ConditionTimeEarliest ||\n             evaluator->kind == CudaSearchEvaluatorKind_ConditionTimeLatest) &&\n            evaluatorReported)\n        {\n            completed = true;\n            break;\n        }\n        if (evaluator->kind == CudaSearchEvaluatorKind_FinishTime &&\n            incumbent.preciseFinish != 0u &&\n            double(publicTime) >= incumbent.timeMs)\n        {\n'
     new = '            localBest = sample;\n        ++evaluationIndex;\n\n        if (false &&\n            evaluatorReported)\n        {\n            completed = true;\n            break;\n        }\n        if (false &&\n            incumbent.preciseFinish != 0u &&\n            double(publicTime) >= incumbent.timeMs)\n        {\n'
     text = replace_specialization_fragment(text, old, new, "fragment 20")
     patch_path = Path(__file__).with_name(
@@ -1095,7 +1095,7 @@ void SimulateVulkanSearchCandidates(
                 parameters->baseline != 0u ? 0u : candidateId + 1u,
                 parameters->lastImprovementTimeSeconds,
                 parameters->lastRestartTimeSeconds,
-                parameters->currentTimeSeconds, double(publicTime)))
+                parameters->currentTimeSeconds))
         {
             ++evaluationIndex;
             if (states[slot].race.progress.raceCompleted != 0u) break;
@@ -1144,7 +1144,9 @@ void SimulateVulkanSearchCandidates(
         }
         ++evaluationIndex;
         if ((evaluator->kind == CudaSearchEvaluatorKind_FinishTime ||
-             evaluator->kind == CudaSearchEvaluatorKind_VolumeEntry) &&
+             evaluator->kind == CudaSearchEvaluatorKind_VolumeEntry ||
+             evaluator->kind == CudaSearchEvaluatorKind_ConditionTimeEarliest ||
+             evaluator->kind == CudaSearchEvaluatorKind_ConditionTimeLatest) &&
             evaluatorReported)
             break;
         if (evaluator->kind == CudaSearchEvaluatorKind_FinishTime &&
@@ -1386,7 +1388,7 @@ void EvaluateVulkanSearchTick(
             parameters->baseline != 0u ? 0u : candidateId + 1u,
             parameters->lastImprovementTimeSeconds,
             parameters->lastRestartTimeSeconds,
-            parameters->currentTimeSeconds, double(publicTime)))
+            parameters->currentTimeSeconds))
     {
         evaluationIndices[slot] = evaluationIndex + 1u;
         if (state->race.progress.raceCompleted != 0u)
@@ -1454,7 +1456,9 @@ void EvaluateVulkanSearchTick(
     evaluationIndices[slot] = evaluationIndex + 1u;
 
     if ((evaluator->kind == CudaSearchEvaluatorKind_FinishTime ||
-         evaluator->kind == CudaSearchEvaluatorKind_VolumeEntry) &&
+         evaluator->kind == CudaSearchEvaluatorKind_VolumeEntry ||
+         evaluator->kind == CudaSearchEvaluatorKind_ConditionTimeEarliest ||
+         evaluator->kind == CudaSearchEvaluatorKind_ConditionTimeLatest) &&
         evaluatorReported)
     {
         simulationActive[slot] = 0u;
@@ -2096,7 +2100,7 @@ void ExecuteVulkanSearchCandidates(
                 parameters->baseline != 0u ? 0u : candidateId + 1u,
                 parameters->lastImprovementTimeSeconds,
                 parameters->lastRestartTimeSeconds,
-                parameters->currentTimeSeconds, double(publicTime)))
+                parameters->currentTimeSeconds))
         {
             ++evaluationIndex;
             if (localState.race.progress.raceCompleted != 0u)
@@ -2157,7 +2161,9 @@ void ExecuteVulkanSearchCandidates(
         ++evaluationIndex;
 
         if ((evaluator->kind == CudaSearchEvaluatorKind_FinishTime ||
-             evaluator->kind == CudaSearchEvaluatorKind_VolumeEntry) &&
+             evaluator->kind == CudaSearchEvaluatorKind_VolumeEntry ||
+             evaluator->kind == CudaSearchEvaluatorKind_ConditionTimeEarliest ||
+             evaluator->kind == CudaSearchEvaluatorKind_ConditionTimeLatest) &&
             evaluatorReported)
         {
             completed = true;

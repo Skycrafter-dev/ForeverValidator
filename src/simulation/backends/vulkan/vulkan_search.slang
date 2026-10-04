@@ -129,6 +129,8 @@ static const uint CudaSearchEvaluatorKind_VolumeEntry = 3u;
 static const uint CudaSearchEvaluatorKind_StuntPoints = 4u;
 static const uint CudaSearchEvaluatorKind_FinishTime = 5u;
 static const uint CudaSearchEvaluatorKind_Scripted = 6u;
+static const uint CudaSearchEvaluatorKind_ConditionTimeEarliest = 7u;
+static const uint CudaSearchEvaluatorKind_ConditionTimeLatest = 8u;
 static const uint CudaSearchConditionOpcode_Constant = 0u;
 static const uint CudaSearchConditionOpcode_ConstantVector = 1u;
 static const uint CudaSearchConditionOpcode_Scalar = 2u;
@@ -191,8 +193,7 @@ static const uint CudaSearchConditionValue_LastImprovementTime = 39u;
 static const uint CudaSearchConditionValue_LastRestartTime = 40u;
 static const uint CudaSearchConditionValue_CurrentTime = 41u;
 static const uint CudaSearchConditionValue_CheckpointCount = 42u;
-static const uint CudaSearchConditionValue_SimulationTimeMilliseconds = 43u;
-static const uint CudaSearchConditionValue_CompletedLaps = 44u;
+static const uint CudaSearchConditionValue_CompletedLaps = 43u;
 static const uint8_t CudaHandlingSpecialization_Generic = 0u;
 static const uint8_t CudaHandlingSpecialization_Legacy = 1u;
 static const uint8_t CudaHandlingSpecialization_GearedDriveDry = 2u;
@@ -14486,8 +14487,7 @@ struct DeviceConditionValue {
         uint64_t iterationCount,
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds,
-        double currentTimeSeconds,
-        double simulationTimeMs) {
+        double currentTimeSeconds) {
     CHmsDyna__CHmsStateDyna current = state.body.current;
     CHmsDyna__CHmsStateDyna previous = state.body.temporary;
     const GmVec3 currentLocal =
@@ -14536,7 +14536,6 @@ struct DeviceConditionValue {
     case CudaSearchConditionValue_LastImprovementTime: return {lastImprovementTimeSeconds};
     case CudaSearchConditionValue_LastRestartTime: return {lastRestartTimeSeconds};
     case CudaSearchConditionValue_CurrentTime: return {currentTimeSeconds};
-    case CudaSearchConditionValue_SimulationTimeMilliseconds: return {simulationTimeMs};
     case CudaSearchConditionValue_CompletedLaps:
         return {double(state.race.progress.completedLapCount)};
     case CudaSearchConditionValue_CheckpointCount:
@@ -14582,8 +14581,7 @@ struct DeviceExpressionResult {
         uint64_t iterationCount,
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds,
-        double currentTimeSeconds,
-        double simulationTimeMs) {
+        double currentTimeSeconds) {
     if (instructionCount == 0u) {
         return {1.0, true};
     }
@@ -14607,7 +14605,7 @@ struct DeviceExpressionResult {
             DeviceConditionValue value = ConditionSource(
                     instruction.value, state, iterationCount,
                     lastImprovementTimeSeconds,
-                    lastRestartTimeSeconds, currentTimeSeconds, simulationTimeMs);
+                    lastRestartTimeSeconds, currentTimeSeconds);
             if (instruction.opcode == CudaSearchConditionOpcode_Scalar &&
                 value.vector) {
                 const int component = int(instruction.x);
@@ -14666,12 +14664,11 @@ struct DeviceExpressionResult {
         uint64_t iterationCount,
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds,
-        double currentTimeSeconds,
-        double simulationTimeMs) {
+        double currentTimeSeconds) {
     const DeviceExpressionResult result = EvaluateExpression(
             instructions, instructionCount, state, iterationCount,
             lastImprovementTimeSeconds, lastRestartTimeSeconds,
-            currentTimeSeconds, simulationTimeMs);
+            currentTimeSeconds);
     return result.valid && result.value != 0.0;
 }
 
@@ -14695,7 +14692,7 @@ struct DeviceExpressionResult {
                         objective.firstInstruction],
                 objective.instructionCount, state, iterationCount,
                 lastImprovementTimeSeconds,
-                lastRestartTimeSeconds, currentTimeSeconds, currentTimeMs);
+                lastRestartTimeSeconds, currentTimeSeconds);
         values[i] = expression.value;
         if (!expression.valid || !isfinite_portable(values[i])) return false;
         scores[i] = objective.kind == 0u
@@ -14841,6 +14838,18 @@ struct DeviceExpressionResult {
         result.score = result.timeMs;
         result.valid = true;
         break;
+    case CudaSearchEvaluatorKind_ConditionTimeEarliest:
+    case CudaSearchEvaluatorKind_ConditionTimeLatest:
+        // Only reached once the search conditions hold; the first such tick
+        // is the candidate's score.
+        if (*reported) {
+            return result;
+        }
+        *reported = true;
+        result.timeMs = currentTimeMs;
+        result.score = currentTimeMs;
+        result.valid = true;
+        break;
     }
     return result;
 }
@@ -14848,7 +14857,8 @@ struct DeviceExpressionResult {
   bool MaximizesScore(
         uint kind) {
     return kind == CudaSearchEvaluatorKind_Velocity ||
-            kind == CudaSearchEvaluatorKind_StuntPoints;
+            kind == CudaSearchEvaluatorKind_StuntPoints ||
+            kind == CudaSearchEvaluatorKind_ConditionTimeLatest;
 }
 
 
@@ -15307,7 +15317,7 @@ void EvaluateVulkanSearchTick(
             parameters->baseline != 0u ? 0u : candidateId + 1u,
             parameters->lastImprovementTimeSeconds,
             parameters->lastRestartTimeSeconds,
-            parameters->currentTimeSeconds, double(publicTime)))
+            parameters->currentTimeSeconds))
     {
         evaluationIndices[slot] = evaluationIndex + 1u;
         if (state->race.progress.raceCompleted != 0u)
@@ -15375,7 +15385,9 @@ void EvaluateVulkanSearchTick(
     evaluationIndices[slot] = evaluationIndex + 1u;
 
     if ((evaluator->kind == CudaSearchEvaluatorKind_FinishTime ||
-         evaluator->kind == CudaSearchEvaluatorKind_VolumeEntry) &&
+         evaluator->kind == CudaSearchEvaluatorKind_VolumeEntry ||
+         evaluator->kind == CudaSearchEvaluatorKind_ConditionTimeEarliest ||
+         evaluator->kind == CudaSearchEvaluatorKind_ConditionTimeLatest) &&
         evaluatorReported)
     {
         simulationActive[slot] = 0u;
@@ -15956,7 +15968,7 @@ void ExecuteVulkanSearchCandidates(
                 parameters->baseline != 0u ? 0u : candidateId + 1u,
                 parameters->lastImprovementTimeSeconds,
                 parameters->lastRestartTimeSeconds,
-                parameters->currentTimeSeconds, double(publicTime)))
+                parameters->currentTimeSeconds))
         {
             ++evaluationIndex;
             if (localState.race.progress.raceCompleted != 0u)
@@ -16017,7 +16029,9 @@ void ExecuteVulkanSearchCandidates(
         ++evaluationIndex;
 
         if ((evaluator->kind == CudaSearchEvaluatorKind_FinishTime ||
-             evaluator->kind == CudaSearchEvaluatorKind_VolumeEntry) &&
+             evaluator->kind == CudaSearchEvaluatorKind_VolumeEntry ||
+             evaluator->kind == CudaSearchEvaluatorKind_ConditionTimeEarliest ||
+             evaluator->kind == CudaSearchEvaluatorKind_ConditionTimeLatest) &&
             evaluatorReported)
         {
             completed = true;
