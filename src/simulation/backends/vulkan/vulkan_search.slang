@@ -14049,6 +14049,8 @@ bool ApplyModifier(
     const bool needsPassSnapshot =
             legacyMutationPipeline ||
             insertionRestoresHeldState ||
+            (modifier.kind == CudaSearchModifierKind_InputInsertion &&
+             (modifier.optionFlags & 2u) != 0u) ||
             modifier.window.minimumTimeMs < mutableFromTimeMs;
     if (needsPassSnapshot) {
         for (uint index = 0u;
@@ -14305,6 +14307,26 @@ bool ApplyModifier(
                 eventCapacity);
         if (*eventCount == UINT32_MAX) {
             return false;
+        }
+        if ((modifier.optionFlags & 2u) != 0u && passBaselineCanonical) {
+            int held = initialControls.steerValue;
+            uint source = 0u;
+            uint retained = 0u;
+            for (uint index = 0u; index < *eventCount; ++index) {
+                const CudaSearchInputEvent event = events[index];
+                while (source < passBaselineCount && passBaseline[source].timeMs < event.timeMs) ++source;
+                bool originalEvent = false;
+                for (uint match = source; match < passBaselineCount &&
+                     passBaseline[match].timeMs == event.timeMs; ++match) {
+                    originalEvent = originalEvent || SameEvent(passBaseline[match], event);
+                }
+                if (event.action == 4u && IsAnalog(event)) {
+                    if (!originalEvent && event.value == held) continue;
+                    held = event.value;
+                }
+                events[retained++] = event;
+            }
+            *eventCount = retained;
         }
         *normalized = true;
         break;

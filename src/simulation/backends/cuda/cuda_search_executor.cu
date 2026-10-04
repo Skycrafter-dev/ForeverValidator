@@ -940,6 +940,8 @@ __device__ bool ApplyModifier(
     const bool needsPassSnapshot =
             legacyMutationPipeline ||
             insertionRestoresHeldState ||
+            (modifier.kind == CudaSearchModifierKind::InputInsertion &&
+             (modifier.optionFlags & 2u) != 0u) ||
             modifier.window.minimumTimeMs < mutableFromTimeMs;
     if (needsPassSnapshot) {
         for (std::uint32_t index = 0u;
@@ -1262,6 +1264,26 @@ __device__ bool ApplyModifier(
                 eventCapacity);
         if (*eventCount == UINT32_MAX) {
             return false;
+        }
+        if ((modifier.optionFlags & 2u) != 0u && passBaselineCanonical) {
+            std::int32_t held = initialControls.steerValue;
+            std::uint32_t source = 0u;
+            std::uint32_t retained = 0u;
+            for (std::uint32_t index = 0u; index < *eventCount; ++index) {
+                const CudaSearchInputEvent event = events[index];
+                while (source < passBaselineCount && passBaseline[source].timeMs < event.timeMs) ++source;
+                bool originalEvent = false;
+                for (std::uint32_t match = source; match < passBaselineCount &&
+                     passBaseline[match].timeMs == event.timeMs; ++match) {
+                    originalEvent = originalEvent || SameEvent(passBaseline[match], event);
+                }
+                if (event.action == 4u && IsAnalog(event)) {
+                    if (!originalEvent && event.value == held) continue;
+                    held = event.value;
+                }
+                events[retained++] = event;
+            }
+            *eventCount = retained;
         }
         *normalized = true;
         break;
@@ -1669,6 +1691,28 @@ __device__ bool ApplySparseModifier(
                     accelerateOperationCount,
                     brakeOperationCount)) {
             return false;
+        }
+        if ((modifier.optionFlags & 2u) != 0u) {
+            std::int32_t held = initialControls.steerValue;
+            std::uint32_t source = 0u;
+            std::uint32_t removed = 0u;
+            for (std::uint32_t index = 0u; index < candidate->Count(); ++index) {
+                const CudaSearchInputEvent event = candidate->EventAt(index);
+                while (source < snapshotCount && candidate->SnapshotEventAt(source).timeMs < event.timeMs) ++source;
+                bool originalEvent = false;
+                for (std::uint32_t match = source; match < snapshotCount &&
+                     candidate->SnapshotEventAt(match).timeMs == event.timeMs; ++match) {
+                    originalEvent = originalEvent || SameEvent(candidate->SnapshotEventAt(match), event);
+                }
+                if (event.action == 4u && IsAnalog(event)) {
+                    if (!originalEvent && event.value == held) {
+                        eligible[removed++] = index;
+                        continue;
+                    }
+                    held = event.value;
+                }
+            }
+            candidate->EraseSortedOrdinals(eligible, removed);
         }
         break;
     }
@@ -5726,6 +5770,8 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
                                      (modifier.brake.enabled != 0u &&
                                       modifier.brake.maximumHoldMs > 0));
                             return heldInsertion ||
+                                    (modifier.kind == CudaSearchModifierKind::InputInsertion &&
+                                     (modifier.optionFlags & 2u) != 0u) ||
                                     modifier.window.minimumTimeMs <
                                             0;
                         }));

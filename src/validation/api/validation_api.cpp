@@ -3635,10 +3635,19 @@ CreatePhysicsSandboxCudaSearchSession(
             internal.baselineInputs.push_back(CudaInput(input));
         }
         internal.modifiers.reserve(configuration.modifiers.size());
+        const bool pruneRedundantAnalogInsertions = !current.Value().stuntsScore &&
+                std::none_of(allSourceInputs.begin(), allSourceInputs.end(), [](const auto &event) {
+                    return event.action == PhysicsSandboxInputAction::SteerLeft ||
+                            event.action == PhysicsSandboxInputAction::SteerRight;
+                });
         for (const PhysicsSandboxCudaModifier &modifier :
              configuration.modifiers) {
             simulation::CudaSearchModifierConfiguration converted =
                     CudaModifier(modifier);
+            if (pruneRedundantAnalogInsertions &&
+                converted.kind == simulation::CudaSearchModifierKind::InputInsertion) {
+                converted.optionFlags |= 2u;
+            }
             if (const auto *smooth = std::get_if<
                         PhysicsSandboxCudaSmoothSteeringModifier>(
                         &modifier)) {
