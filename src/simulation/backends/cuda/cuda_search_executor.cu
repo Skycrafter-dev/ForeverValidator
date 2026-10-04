@@ -1859,7 +1859,8 @@ __device__ DeviceConditionValue ConditionSource(
         std::uint64_t iterationCount,
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds,
-        double currentTimeSeconds) {
+        double currentTimeSeconds,
+        double simulationTimeMs) {
     const CHmsDyna::CHmsStateDyna &current = state.body.current;
     const CHmsDyna::CHmsStateDyna &previous = state.body.temporary;
     const GmVec3 currentLocal =
@@ -1911,6 +1912,7 @@ __device__ DeviceConditionValue ConditionSource(
     case CudaSearchConditionValue::LastImprovementTime: return {lastImprovementTimeSeconds};
     case CudaSearchConditionValue::LastRestartTime: return {lastRestartTimeSeconds};
     case CudaSearchConditionValue::CurrentTime: return {currentTimeSeconds};
+    case CudaSearchConditionValue::SimulationTimeMilliseconds: return {simulationTimeMs};
     case CudaSearchConditionValue::CheckpointCount:
         return {static_cast<double>(state.race.progress.checkpointCount)};
     default: break;
@@ -1954,7 +1956,8 @@ __device__ __noinline__ DeviceExpressionResult EvaluateExpression(
         std::uint64_t iterationCount,
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds,
-        double currentTimeSeconds) {
+        double currentTimeSeconds,
+        double simulationTimeMs) {
     if (instructionCount == 0u) {
         return {1.0, true};
     }
@@ -1978,7 +1981,7 @@ __device__ __noinline__ DeviceExpressionResult EvaluateExpression(
             DeviceConditionValue value = ConditionSource(
                     instruction.value, state, iterationCount,
                     lastImprovementTimeSeconds,
-                    lastRestartTimeSeconds, currentTimeSeconds);
+                    lastRestartTimeSeconds, currentTimeSeconds, simulationTimeMs);
             if (instruction.opcode == CudaSearchConditionOpcode::Scalar &&
                 value.vector) {
                 const int component = static_cast<int>(instruction.x);
@@ -2035,11 +2038,12 @@ __device__ bool EvaluateCondition(
         std::uint64_t iterationCount,
         double lastImprovementTimeSeconds,
         double lastRestartTimeSeconds,
-        double currentTimeSeconds) {
+        double currentTimeSeconds,
+        double simulationTimeMs) {
     const DeviceExpressionResult result = EvaluateExpression(
             instructions, instructionCount, state, iterationCount,
             lastImprovementTimeSeconds, lastRestartTimeSeconds,
-            currentTimeSeconds);
+            currentTimeSeconds, simulationTimeMs);
     return result.valid && result.value != 0.0;
 }
 
@@ -2063,7 +2067,7 @@ __device__ bool UpdateScriptedSample(
                         objective.firstInstruction],
                 objective.instructionCount, state, iterationCount,
                 lastImprovementTimeSeconds,
-                lastRestartTimeSeconds, currentTimeSeconds);
+                lastRestartTimeSeconds, currentTimeSeconds, currentTimeMs);
         values[i] = expression.value;
         if (!expression.valid || !isfinite(values[i])) return false;
         scores[i] = objective.kind == 0u
@@ -2992,7 +2996,8 @@ __global__ __launch_bounds__(
                     condition, conditionInstructionCount, state,
                     baseline ? 0u : candidateId + 1u,
                     lastImprovementTimeSeconds,
-                    lastRestartTimeSeconds, currentTimeSeconds)) {
+                    lastRestartTimeSeconds, currentTimeSeconds,
+                    static_cast<double>(publicTime))) {
             ++evaluationIndex;
             if (state.race.progress.raceCompleted) break;
             continue;

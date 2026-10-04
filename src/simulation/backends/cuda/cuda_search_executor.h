@@ -131,6 +131,7 @@ enum class CudaSearchConditionValue : std::uint32_t {
     LastRestartTime,
     CurrentTime,
     CheckpointCount,
+    SimulationTimeMilliseconds,
 };
 
 struct CudaSearchConditionInstruction {

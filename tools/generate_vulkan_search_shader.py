@@ -1095,7 +1095,7 @@ void SimulateVulkanSearchCandidates(
                 parameters->baseline != 0u ? 0u : candidateId + 1u,
                 parameters->lastImprovementTimeSeconds,
                 parameters->lastRestartTimeSeconds,
-                parameters->currentTimeSeconds))
+                parameters->currentTimeSeconds, double(publicTime)))
         {
             ++evaluationIndex;
             if (states[slot].race.progress.raceCompleted != 0u) break;
@@ -1385,7 +1385,7 @@ void EvaluateVulkanSearchTick(
             parameters->baseline != 0u ? 0u : candidateId + 1u,
             parameters->lastImprovementTimeSeconds,
             parameters->lastRestartTimeSeconds,
-            parameters->currentTimeSeconds))
+            parameters->currentTimeSeconds, double(publicTime)))
     {
         evaluationIndices[slot] = evaluationIndex + 1u;
         if (state->race.progress.raceCompleted != 0u)
@@ -2094,7 +2094,7 @@ void ExecuteVulkanSearchCandidates(
                 parameters->baseline != 0u ? 0u : candidateId + 1u,
                 parameters->lastImprovementTimeSeconds,
                 parameters->lastRestartTimeSeconds,
-                parameters->currentTimeSeconds))
+                parameters->currentTimeSeconds, double(publicTime)))
         {
             ++evaluationIndex;
             if (localState.race.progress.raceCompleted != 0u)

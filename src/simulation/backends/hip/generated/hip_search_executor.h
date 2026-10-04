@@ -132,6 +132,7 @@ enum class HipSearchConditionValue : std::uint32_t {
     LastRestartTime,
     CurrentTime,
     CheckpointCount,
+    SimulationTimeMilliseconds,
 };
 
 struct HipSearchConditionInstruction {

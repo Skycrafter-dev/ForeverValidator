@@ -537,6 +537,7 @@ enum class PhysicsSandboxCudaConditionValue : std::uint32_t {
     LastRestartTime,
     CurrentTime,
     CheckpointCount,
+    SimulationTimeMilliseconds,
 };
 
 struct PhysicsSandboxCudaConditionInstruction {
