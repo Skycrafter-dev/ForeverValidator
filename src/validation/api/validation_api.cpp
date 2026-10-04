@@ -2830,22 +2830,22 @@ PhysicsSandboxResult<PhysicsSandboxState> PhysicsSandbox::CaptureState()
 PhysicsSandboxResult<PhysicsSandboxStateView> PhysicsSandbox::RestoreState(
         const PhysicsSandboxState &state) noexcept {
     try {
-        if (!impl_ || !impl_->loaded || !state.impl_ ||
-            state.impl_->runtimeCloneSchema != SandboxRuntimeCloneSchema ||
-            state.impl_->scenarioFingerprint != impl_->scenarioFingerprint ||
-            state.impl_->validationSeed != impl_->inputMetadata.validationSeed ||
-            state.impl_->backend != impl_->options.backend ||
-            state.impl_->tickDurationMs != impl_->options.tickDurationMs ||
-            state.impl_->prestartDurationMs !=
-                    impl_->options.prestartDurationMs ||
-            (state.impl_->simulationHorizonMs !=
-                     impl_->simulationHorizonMs &&
-             impl_->options.timelineMode !=
-                     PhysicsSandboxTimelineMode::Canonical) ||
-            state.impl_->timelineMode != impl_->options.timelineMode) {
+        const char *mismatch = nullptr;
+        if (!impl_ || !impl_->loaded) mismatch = "destination is not loaded";
+        else if (!state.impl_) mismatch = "source state is empty";
+        else if (state.impl_->runtimeCloneSchema != SandboxRuntimeCloneSchema) mismatch = "runtime clone schema";
+        else if (state.impl_->scenarioFingerprint != impl_->scenarioFingerprint) mismatch = "scenario fingerprint";
+        else if (state.impl_->validationSeed != impl_->inputMetadata.validationSeed) mismatch = "validation seed";
+        else if (state.impl_->backend != impl_->options.backend) mismatch = "backend";
+        else if (state.impl_->tickDurationMs != impl_->options.tickDurationMs) mismatch = "tick duration";
+        else if (state.impl_->prestartDurationMs != impl_->options.prestartDurationMs) mismatch = "prestart duration";
+        else if (state.impl_->simulationHorizonMs != impl_->simulationHorizonMs &&
+                 impl_->options.timelineMode != PhysicsSandboxTimelineMode::Canonical) mismatch = "simulation horizon";
+        else if (state.impl_->timelineMode != impl_->options.timelineMode) mismatch = "timeline mode";
+        if (mismatch) {
             return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
                     SandboxError(PhysicsSandboxErrorCode::IncompatibleState,
-                                 "sandbox state is incompatible"));
+                                 (std::string("sandbox state is incompatible: ") + mismatch).c_str()));
         }
         if (!state.impl_->runtimeClone) {
             return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
