@@ -15348,7 +15348,8 @@ void EvaluateVulkanSearchTick(
         samples[slot + 1u] = sample;
     evaluationIndices[slot] = evaluationIndex + 1u;
 
-    if (evaluator->kind == CudaSearchEvaluatorKind_FinishTime &&
+    if ((evaluator->kind == CudaSearchEvaluatorKind_FinishTime ||
+         evaluator->kind == CudaSearchEvaluatorKind_VolumeEntry) &&
         evaluatorReported)
     {
         simulationActive[slot] = 0u;
@@ -15989,7 +15990,8 @@ void ExecuteVulkanSearchCandidates(
             localBest = sample;
         ++evaluationIndex;
 
-        if (evaluator->kind == CudaSearchEvaluatorKind_FinishTime &&
+        if ((evaluator->kind == CudaSearchEvaluatorKind_FinishTime ||
+             evaluator->kind == CudaSearchEvaluatorKind_VolumeEntry) &&
             evaluatorReported)
         {
             completed = true;

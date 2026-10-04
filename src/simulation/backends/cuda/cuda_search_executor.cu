@@ -3049,6 +3049,11 @@ __global__ __launch_bounds__(
             localBest = sample;
         }
         ++evaluationIndex;
+        if (evaluatorReported && configuredEvaluator.kind ==
+                CudaSearchEvaluatorKind::VolumeEntry) {
+            candidateBestSamples[slot + 1u] = localBest;
+            return;
+        }
         if (configuredEvaluator.kind ==
             CudaSearchEvaluatorKind::FinishTime) {
             if (evaluatorReported) {

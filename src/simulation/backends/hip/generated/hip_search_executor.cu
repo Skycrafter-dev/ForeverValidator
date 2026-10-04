@@ -3052,6 +3052,11 @@ __global__ FOREVERVALIDATOR_HIP_SEARCH_LAUNCH_BOUNDS(
             localBest = sample;
         }
         ++evaluationIndex;
+        if (evaluatorReported && configuredEvaluator.kind ==
+                HipSearchEvaluatorKind::VolumeEntry) {
+            candidateBestSamples[slot + 1u] = localBest;
+            return;
+        }
         if (configuredEvaluator.kind ==
             HipSearchEvaluatorKind::FinishTime) {
             if (evaluatorReported) {
