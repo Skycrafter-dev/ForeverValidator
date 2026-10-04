@@ -102,10 +102,43 @@ bool TestParityBackendRouting() {
     return okay;
 }
 
+bool TestLapCountersRemainSeparate() {
+    bool okay = true;
+    for (const unsigned checkpoints : {0u, 2u}) {
+        CTrackManiaRace race;
+        auto setup = race.CaptureRuntimeClone();
+        setup.progress.requiredCheckpointCount = checkpoints;
+        setup.progress.requiredLapCount = 2u;
+        setup.checkpointSlotsPassed.assign(checkpoints + 1u, 0u);
+        race.RestoreRuntimeClone(setup);
+        for (unsigned lap = 0; lap < 2u; ++lap) {
+            for (unsigned checkpoint = 0; checkpoint < checkpoints; ++checkpoint) {
+                okay &= Check(race.InternalOnCheckpoint(10, 0, checkpoint, checkpoint,
+                        &race.GetPlayingPlayer()->Info(), nullptr, nullptr, 0) == 1,
+                        "ordinary checkpoint was not accepted");
+                okay &= Check(race.InternalOnCheckpoint(10, 0, checkpoint, checkpoint,
+                        &race.GetPlayingPlayer()->Info(), nullptr, nullptr, 0) == 0,
+                        "duplicate ordinary checkpoint was accepted");
+            }
+            race.OnFinishLine(nullptr, nullptr);
+            const auto saved = race.CaptureRuntimeClone();
+            race.RestoreRuntimeClone(saved);
+            okay &= Check(race.Progress().completedLapCount == lap + 1u &&
+                          race.Progress().checkpointCount == checkpoints * (lap + 1u) &&
+                          race.Progress().raceCompleted == (lap == 1u),
+                          "finish passage changed ordinary counts or snapshot lost laps");
+        }
+        race.OnFinishLine(nullptr, nullptr);
+        okay &= Check(race.Progress().completedLapCount == 2u,
+                      "completed race counted another finish passage");
+    }
+    return okay;
+}
+
 }  // namespace
 
 int main() {
     const bool contact = TestCurrentTransformCheckpointContactClearsFreewheel();
     const bool routing = TestParityBackendRouting();
-    return contact && routing ? 0 : 1;
+    return contact && routing && TestLapCountersRemainSeparate() ? 0 : 1;
 }

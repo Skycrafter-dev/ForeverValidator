@@ -1913,6 +1913,8 @@ __device__ DeviceConditionValue ConditionSource(
     case CudaSearchConditionValue::LastRestartTime: return {lastRestartTimeSeconds};
     case CudaSearchConditionValue::CurrentTime: return {currentTimeSeconds};
     case CudaSearchConditionValue::SimulationTimeMilliseconds: return {simulationTimeMs};
+    case CudaSearchConditionValue::CompletedLaps:
+        return {static_cast<double>(state.race.progress.completedLapCount)};
     case CudaSearchConditionValue::CheckpointCount:
         return {static_cast<double>(state.race.progress.checkpointCount)};
     default: break;

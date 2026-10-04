@@ -1916,6 +1916,8 @@ __device__ DeviceConditionValue ConditionSource(
     case HipSearchConditionValue::LastRestartTime: return {lastRestartTimeSeconds};
     case HipSearchConditionValue::CurrentTime: return {currentTimeSeconds};
     case HipSearchConditionValue::SimulationTimeMilliseconds: return {simulationTimeMs};
+    case HipSearchConditionValue::CompletedLaps:
+        return {static_cast<double>(state.race.progress.completedLapCount)};
     case HipSearchConditionValue::CheckpointCount:
         return {static_cast<double>(state.race.progress.checkpointCount)};
     default: break;

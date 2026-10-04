@@ -190,6 +190,7 @@ static const uint CudaSearchConditionValue_LastRestartTime = 40u;
 static const uint CudaSearchConditionValue_CurrentTime = 41u;
 static const uint CudaSearchConditionValue_CheckpointCount = 42u;
 static const uint CudaSearchConditionValue_SimulationTimeMilliseconds = 43u;
+static const uint CudaSearchConditionValue_CompletedLaps = 44u;
 static const uint8_t CudaHandlingSpecialization_Generic = 0u;
 static const uint8_t CudaHandlingSpecialization_Legacy = 1u;
 static const uint8_t CudaHandlingSpecialization_GearedDriveDry = 2u;
@@ -14512,6 +14513,8 @@ struct DeviceConditionValue {
     case CudaSearchConditionValue_LastRestartTime: return {lastRestartTimeSeconds};
     case CudaSearchConditionValue_CurrentTime: return {currentTimeSeconds};
     case CudaSearchConditionValue_SimulationTimeMilliseconds: return {simulationTimeMs};
+    case CudaSearchConditionValue_CompletedLaps:
+        return {double(state.race.progress.completedLapCount)};
     case CudaSearchConditionValue_CheckpointCount:
         return {double(state.race.progress.checkpointCount)};
     default: break;
