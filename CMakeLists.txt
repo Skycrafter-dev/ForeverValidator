@@ -829,6 +829,15 @@ endif()
 if(FOREVERVALIDATOR_BUILD_TESTS)
     enable_testing()
 
+    add_executable(forevervalidator-search-event-capacity-tests
+        tests/search_event_capacity_tests.cpp)
+    target_include_directories(forevervalidator-search-event-capacity-tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    forevervalidator_configure_target(forevervalidator-search-event-capacity-tests)
+    add_test(NAME forevervalidator-search-event-capacity
+             COMMAND forevervalidator-search-event-capacity-tests)
+
     add_executable(forevervalidator-race-camera-tests
         tests/race_camera_tests.cpp)
     target_include_directories(forevervalidator-race-camera-tests PRIVATE

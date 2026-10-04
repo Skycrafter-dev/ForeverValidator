@@ -32,6 +32,7 @@
 #include "validation/api/physics_sandbox_cuda_test_access.h"
 #include "validation/planning/replay_asset_route.h"
 #include "validation/planning/replay_challenge_map_preload.h"
+#include "validation/planning/search_event_capacity.h"
 
 namespace forevervalidator {
 
@@ -2127,83 +2128,6 @@ PhysicsSandboxInputEvent PublicInput(
     return result;
 }
 
-bool AddEventCapacity(std::size_t amount, std::size_t *capacity) {
-    constexpr std::size_t MaximumSearchEvents = 1024u * 1024u;
-    if (amount > MaximumSearchEvents - *capacity) {
-        return false;
-    }
-    *capacity += amount;
-    return true;
-}
-
-bool MaximumEventCapacity(
-        std::size_t baselineCount,
-        const std::vector<PhysicsSandboxCudaModifier> &modifiers,
-        std::uint32_t tickDurationMs,
-        std::size_t *capacity) {
-    *capacity = baselineCount;
-    for (const PhysicsSandboxCudaModifier &modifier : modifiers) {
-        bool valid = std::visit(
-                [&](const auto &value) {
-                    using T = std::decay_t<decltype(value)>;
-                    if constexpr (std::is_same_v<
-                                          T,
-                                          PhysicsSandboxCudaSmoothSteeringModifier>) {
-                        if (value.radiusMs < 0 ||
-                            value.radiusMs %
-                                            static_cast<std::int64_t>(
-                                                    tickDurationMs) !=
-                                    0) {
-                            return false;
-                        }
-                        const std::uint64_t perDeformation =
-                                static_cast<std::uint64_t>(
-                                        value.radiusMs /
-                                        tickDurationMs) *
-                                        2u +
-                                2u;
-                        if (value.deformationCount != 0u &&
-                            perDeformation >
-                                    std::numeric_limits<std::size_t>::max() /
-                                            value.deformationCount) {
-                            return false;
-                        }
-                        return AddEventCapacity(
-                                static_cast<std::size_t>(
-                                        perDeformation *
-                                        value.deformationCount),
-                                capacity);
-                    } else if constexpr (std::is_same_v<
-                                                 T,
-                                                 PhysicsSandboxCudaInputInsertionModifier>) {
-                        const std::uint64_t operations =
-                                (value.steering.enabled
-                                         ? value.steering.maximumCount
-                                         : 0u) +
-                                (value.accelerate.enabled
-                                         ? value.accelerate.maximumCount
-                                         : 0u) +
-                                (value.brake.enabled
-                                         ? value.brake.maximumCount
-                                         : 0u);
-                        if (operations >
-                            std::numeric_limits<std::size_t>::max() / 2u) {
-                            return false;
-                        }
-                        return AddEventCapacity(
-                                static_cast<std::size_t>(operations * 2u),
-                                capacity);
-                    } else {
-                        return true;
-                    }
-                },
-                modifier);
-        if (!valid) {
-            return false;
-        }
-    }
-    return true;
-}
 
 PhysicsSandboxError SearchError(
         PhysicsSandboxErrorCode code,
@@ -3591,6 +3515,11 @@ CreatePhysicsSandboxCudaSearchSession(
                             "CUDA search timeline exceeds the Simulation horizon"));
         }
 
+        if (source.inputs->Size() > kMaximumSearchInputEvents) {
+            return PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>::Failure(
+                    SearchError(PhysicsSandboxErrorCode::InvalidRequest,
+                            "Search baseline exceeds the 1048576-event limit; reduce input density"));
+        }
         const std::vector<PhysicsSandboxInputEvent> allSourceInputs =
                 source.inputs->Materialize();
         const auto lateBegin = std::upper_bound(
@@ -3604,7 +3533,7 @@ CreatePhysicsSandboxCudaSearchSession(
         const std::vector<PhysicsSandboxInputEvent> sourceInputs(
                 allSourceInputs.begin(), lateBegin);
         std::size_t maximumEventCount = 0u;
-        if (!MaximumEventCapacity(
+        if (!search_limits::MaximumEventCapacity(
                     sourceInputs.size(),
                     configuration.modifiers,
                     tickDurationMs,
@@ -3613,7 +3542,8 @@ CreatePhysicsSandboxCudaSearchSession(
                     PhysicsSandboxCudaSearchSession>::Failure(
                     SearchError(
                             PhysicsSandboxErrorCode::InvalidRequest,
-                            "CUDA modifier pipeline event capacity is unsupported"));
+                            "Search input pipeline exceeds the 1048576-event limit; "
+                            "reduce input density, insertion counts or deformation radius/count"));
         }
 
         simulation::CudaSearchExecutorConfiguration internal;
