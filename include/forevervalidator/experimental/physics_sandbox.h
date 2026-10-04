@@ -451,6 +451,20 @@ struct PhysicsSandboxCudaConditionTimeEvaluator {
     bool maximize = false;
 };
 
+// Minimizes the tick at which the selected checkpoint or finish is accepted,
+// using the same selectors as acceptedCheckpointEvents. checkpointIndex is
+// the zero-based ordinal within the lap (ignored for the finish), lap is
+// one-based, and eventIndex 0 means any. CUDA only. When several ordinary
+// checkpoints are accepted in one tick, only the last one's map slot is
+// known, so a slot-restricted selector does not match the earlier ones.
+struct PhysicsSandboxCudaCheckpointEvaluator {
+    bool finish = false;
+    std::uint32_t checkpointIndex = 0u;
+    std::uint32_t lap = 1u;
+    std::optional<std::uint32_t> checkpointSlot;
+    std::uint64_t eventIndex = 0u;
+};
+
 struct PhysicsSandboxCudaConditionInstruction;
 
 enum class PhysicsSandboxCudaScriptedObjectiveKind : std::uint32_t {
@@ -478,7 +492,8 @@ using PhysicsSandboxCudaEvaluator = std::variant<
         PhysicsSandboxCudaStuntPointsEvaluator,
         PhysicsSandboxCudaFinishTimeEvaluator,
         PhysicsSandboxCudaScriptedEvaluator,
-        PhysicsSandboxCudaConditionTimeEvaluator>;
+        PhysicsSandboxCudaConditionTimeEvaluator,
+        PhysicsSandboxCudaCheckpointEvaluator>;
 
 struct PhysicsSandboxCudaSearchIncumbent {
     bool mutation = false;

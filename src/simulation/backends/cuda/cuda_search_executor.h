@@ -67,6 +67,7 @@ enum class CudaSearchEvaluatorKind : std::uint32_t {
     Scripted,
     ConditionTimeEarliest,
     ConditionTimeLatest,
+    CheckpointEvent,
 };
 
 enum class CudaSearchConditionOpcode : std::uint32_t {

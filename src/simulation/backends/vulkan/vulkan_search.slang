@@ -131,6 +131,7 @@ static const uint CudaSearchEvaluatorKind_FinishTime = 5u;
 static const uint CudaSearchEvaluatorKind_Scripted = 6u;
 static const uint CudaSearchEvaluatorKind_ConditionTimeEarliest = 7u;
 static const uint CudaSearchEvaluatorKind_ConditionTimeLatest = 8u;
+static const uint CudaSearchEvaluatorKind_CheckpointEvent = 9u;
 static const uint CudaSearchConditionOpcode_Constant = 0u;
 static const uint CudaSearchConditionOpcode_ConstantVector = 1u;
 static const uint CudaSearchConditionOpcode_Scalar = 2u;
@@ -14852,6 +14853,109 @@ struct DeviceExpressionResult {
         break;
     }
     return result;
+}
+
+// Race counters captured before a tick, enough to name every checkpoint and
+// finish the tick accepts.
+struct CheckpointProgressBefore {
+    uint lapCheckpoints = 0u;
+    uint events = 0u;
+    uint laps = 0u;
+    uint finishes = 0u;
+};
+
+ uint CheckpointSlotOfBlock(
+        CudaPackedSceneHeader *scene,
+        uint raceBlockId) {
+    CudaSceneActor *actors =
+            forevervalidator::simulation::cuda::collision::detail::SceneSection<CudaSceneActor>(
+                    scene, scene->actors);
+    for (uint index = 0u; index < scene->actors.count; ++index) {
+        if (actors[index].raceBlockId == raceBlockId &&
+            actors[index].checkpointSlot != UINT32_MAX) {
+            return actors[index].checkpointSlot;
+        }
+    }
+    return UINT32_MAX;
+}
+
+// Whether this tick accepted the configured checkpoint or finish. Events in a
+// tick are accepted in order: the rest of the current lap's checkpoints, at
+// most one finish, then the next lap's checkpoints. Ordinals, laps and global
+// event indices follow from the counters; a map slot is known for the finish
+// and for the tick's last accepted checkpoint (its block).
+ bool CheckpointEventAccepted(
+        __constref CudaSearchEvaluatorConfiguration evaluator,
+        __constref CudaCandidatePhysicsState state,
+        __constref CheckpointProgressBefore before,
+        CudaPackedSceneHeader *scene) {
+    ReplayRaceProgress after = state.race.progress;
+    if (after.totalCheckpointEventCount == before.events &&
+        after.finishCount == before.finishes) {
+        return false;
+    }
+    const bool finishTarget = evaluator.values[0] != 0.0;
+    const uint ordinal =
+            uint(evaluator.values[1]);
+    const uint lap = uint(evaluator.values[2]);
+    const bool anySlot = evaluator.values[3] < 0.0;
+    const uint slot =
+            anySlot ? 0u : uint(evaluator.values[3]);
+    const uint64_t eventIndex =
+            uint64_t(evaluator.values[4]) |
+            (uint64_t(evaluator.values[5]) << 32u);
+    const uint required = after.requiredCheckpointCount;
+    const uint finishes = after.finishCount - before.finishes;
+    if (finishes > 1u) {
+        return false;
+    }
+    const bool shortcut =
+            state.race.replayPlayMode ==
+            uint(EChallengePlayMode_Shortcut);
+    const uint lapA = before.laps + 1u;
+    const uint endA =
+            finishes != 0u ? required : after.currentLapCheckpointCount;
+    if (endA < before.lapCheckpoints) {
+        return false;
+    }
+    const uint countA = endA - before.lapCheckpoints;
+    const uint countB =
+            finishes != 0u && !after.raceCompleted
+            ? after.currentLapCheckpointCount : 0u;
+    const uint finishEvents = finishes != 0u && !shortcut ? 1u : 0u;
+    if (after.totalCheckpointEventCount - before.events !=
+        countA + finishEvents + countB) {
+        return false;
+    }
+    uint64_t index = 0u;
+    bool lastCheckpoint = false;
+    if (finishTarget) {
+        if (finishes == 0u || lap != lapA ||
+            (!anySlot && slot != required)) {
+            return false;
+        }
+        index = uint64_t(before.events) + countA + 1u;
+        return eventIndex == 0u || eventIndex == index;
+    }
+    if (lap == lapA && ordinal >= before.lapCheckpoints && ordinal < endA) {
+        index = uint64_t(before.events) + 1u +
+                (ordinal - before.lapCheckpoints);
+        lastCheckpoint = countB == 0u && ordinal + 1u == endA;
+    } else if (countB != 0u && lap == lapA + 1u && ordinal < countB) {
+        index = uint64_t(before.events) + countA + 2u +
+                ordinal;
+        lastCheckpoint = ordinal + 1u == countB;
+    } else {
+        return false;
+    }
+    if (eventIndex != 0u && eventIndex != index) {
+        return false;
+    }
+    if (anySlot) {
+        return true;
+    }
+    return lastCheckpoint &&
+            CheckpointSlotOfBlock(scene, after.lastAcceptedBlockId) == slot;
 }
 
   bool MaximizesScore(

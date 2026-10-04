@@ -131,6 +131,7 @@ static const uint CudaSearchEvaluatorKind_FinishTime = 5u;
 static const uint CudaSearchEvaluatorKind_Scripted = 6u;
 static const uint CudaSearchEvaluatorKind_ConditionTimeEarliest = 7u;
 static const uint CudaSearchEvaluatorKind_ConditionTimeLatest = 8u;
+static const uint CudaSearchEvaluatorKind_CheckpointEvent = 9u;
 static const uint CudaSearchConditionOpcode_Constant = 0u;
 static const uint CudaSearchConditionOpcode_ConstantVector = 1u;
 static const uint CudaSearchConditionOpcode_Scalar = 2u;

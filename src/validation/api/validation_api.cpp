@@ -2068,6 +2068,21 @@ simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
                             simulation::CudaSearchEvaluatorKind::StuntPoints;
                 } else if constexpr (std::is_same_v<
                                              T,
+                                             PhysicsSandboxCudaCheckpointEvaluator>) {
+                    result.kind =
+                            simulation::CudaSearchEvaluatorKind::CheckpointEvent;
+                    result.values[0] = evaluator.finish ? 1.0 : 0.0;
+                    result.values[1] = evaluator.checkpointIndex;
+                    result.values[2] = evaluator.lap;
+                    result.values[3] = evaluator.checkpointSlot
+                            ? static_cast<double>(*evaluator.checkpointSlot)
+                            : -1.0;
+                    result.values[4] = static_cast<double>(
+                            evaluator.eventIndex & 0xffffffffull);
+                    result.values[5] = static_cast<double>(
+                            evaluator.eventIndex >> 32u);
+                } else if constexpr (std::is_same_v<
+                                             T,
                                              PhysicsSandboxCudaConditionTimeEvaluator>) {
                     result.kind = evaluator.maximize
                             ? simulation::CudaSearchEvaluatorKind::ConditionTimeLatest
@@ -3697,6 +3712,16 @@ CreatePhysicsSandboxCudaSearchSession(
                 }
             }
             internal.modifiers.push_back(converted);
+        }
+        // Accepted checkpoint events are reconstructed by the CUDA kernel
+        // (and its generated HIP twin); the Vulkan kernels do not track them.
+        if (useVulkan &&
+            std::holds_alternative<PhysicsSandboxCudaCheckpointEvaluator>(
+                    configuration.evaluator)) {
+            return PhysicsSandboxResult<
+                    PhysicsSandboxCudaSearchSession>::Failure(
+                    SearchError(PhysicsSandboxErrorCode::InvalidRequest,
+                                "checkpoint events are not available on Vulkan"));
         }
         if (const auto *scripted = std::get_if<
                     PhysicsSandboxCudaScriptedEvaluator>(

@@ -68,6 +68,7 @@ enum class HipSearchEvaluatorKind : std::uint32_t {
     Scripted,
     ConditionTimeEarliest,
     ConditionTimeLatest,
+    CheckpointEvent,
 };
 
 enum class HipSearchConditionOpcode : std::uint32_t {
