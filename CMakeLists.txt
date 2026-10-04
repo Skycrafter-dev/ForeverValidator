@@ -1088,6 +1088,15 @@ if(FOREVERVALIDATOR_BUILD_TESTS)
         add_test(NAME forevervalidator-cuda-arithmetic
                  COMMAND forevervalidator-cuda-arithmetic-tests)
 
+        add_executable(forevervalidator-cuda-driver-shim-tests
+            src/simulation/backends/cuda/cuda_driver_shim.cpp
+            tests/cuda_driver_shim_tests.cpp)
+        target_include_directories(forevervalidator-cuda-driver-shim-tests PRIVATE
+            ${CUDAToolkit_INCLUDE_DIRS})
+        forevervalidator_configure_target(forevervalidator-cuda-driver-shim-tests)
+        add_test(NAME forevervalidator-cuda-driver-shim
+            COMMAND forevervalidator-cuda-driver-shim-tests)
+
         add_executable(forevervalidator-cuda-dynamics-tests
             tests/cuda_dynamics_tests.cpp)
         target_include_directories(
