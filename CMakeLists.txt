@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(ForeverValidator VERSION 0.2.4 LANGUAGES CXX)
+project(ForeverValidator VERSION 0.2.5 LANGUAGES CXX)
 
 option(FOREVERVALIDATOR_BUILD_CLI "Build the ForeverValidator CLI"
        ${PROJECT_IS_TOP_LEVEL})

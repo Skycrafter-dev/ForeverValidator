@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.5
+
+- Fix CUDA/HIP segmented search returning out-of-order inputs after a winner
+  is promoted or when the baseline has inputs just beyond the search horizon.
+  Keep boundary restoration inputs visible to mutation; CPU behavior and GPU
+  kernels are unchanged.
+
 ## 0.2.4
 
 - Add CUDA/HIP candidate mutation restricted to randomly selected segments,

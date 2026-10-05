@@ -33,6 +33,7 @@
 #include "validation/planning/replay_asset_route.h"
 #include "validation/planning/replay_challenge_map_preload.h"
 #include "validation/planning/search_event_capacity.h"
+#include "validation/planning/search_input_boundary.h"
 
 namespace forevervalidator {
 
@@ -3587,14 +3588,9 @@ CreatePhysicsSandboxCudaSearchSession(
         }
         const std::vector<PhysicsSandboxInputEvent> allSourceInputs =
                 source.inputs->Materialize();
-        const auto lateBegin = std::upper_bound(
-                allSourceInputs.begin(),
-                allSourceInputs.end(),
-                source.simulationHorizonMs,
-                [](std::int64_t timeMs,
-                   const PhysicsSandboxInputEvent &event) {
-                    return timeMs < event.timeMs;
-                });
+        const auto lateBegin = search_limits::SearchInputBaselineEnd(
+                allSourceInputs, source.simulationHorizonMs,
+                configuration.mutationSegments);
         const std::vector<PhysicsSandboxInputEvent> sourceInputs(
                 allSourceInputs.begin(), lateBegin);
         std::size_t maximumEventCount = 0u;
