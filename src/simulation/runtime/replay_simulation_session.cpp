@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "engine/core/binary32_math.h"
+#include "engine/game/block_race_role.h"
 #include "engine/physics/geometry/gm_surface.h"
 #include "engine/physics/geometry/plug_surface.h"
 #include "engine/scene/plug_solid.h"
@@ -230,6 +231,51 @@ bool BuildStaticCollisionTriangles(
 }
 
 namespace sandbox = forevervalidator::experimental;
+
+// Checkpoint slots count the checkpoint triggers in model order, as
+// ReplayStaticCorpusCollection::CheckpointSlotForBlock does.
+bool BuildCheckpointTriggerSurfaces(
+        const StaticSceneModelCollection &models,
+        std::vector<ReplayCheckpointTriggerSurface> &triggers) {
+    try {
+        std::uint32_t slot = 0u;
+        for (const StaticSceneModel &model : models.Models()) {
+            if (model.Purpose() != StaticScenePurpose::CheckpointTrigger ||
+                !model.CheckpointIdentity().has_value()) {
+                continue;
+            }
+            ReplayCheckpointTriggerSurface trigger;
+            switch (model.CheckpointIdentity()->raceRole) {
+            case BlockRaceRole::Checkpoint:
+                trigger.role =
+                        sandbox::PhysicsSandboxCheckpointTriggerRole::Checkpoint;
+                trigger.checkpointSlot = slot++;
+                break;
+            case BlockRaceRole::FinishLine:
+                trigger.role =
+                        sandbox::PhysicsSandboxCheckpointTriggerRole::Finish;
+                break;
+            case BlockRaceRole::StartFinishLine:
+                trigger.role = sandbox::PhysicsSandboxCheckpointTriggerRole::
+                        StartFinish;
+                break;
+            default:
+                continue;
+            }
+            CPlugSolid *solid = model.Prototype().SourceSolid();
+            CPlugTree *tree =
+                    solid != nullptr ? solid->CollisionTree() : nullptr;
+            if (tree != nullptr) {
+                AppendTree(trigger.triangles, *tree, model.WorldIso());
+            }
+            triggers.push_back(std::move(trigger));
+        }
+    } catch (const std::bad_alloc &) {
+        triggers.clear();
+        return false;
+    }
+    return true;
+}
 
 sandbox::PhysicsSandboxScenePurpose PublicPurpose(
         StaticScenePurpose purpose) {
@@ -890,6 +936,8 @@ struct ReplaySimulationSession::Impl {
     ReplaySimulationInstance instance;
     std::shared_ptr<const std::vector<ReplayStaticCollisionTriangle>>
             staticCollisionTriangles;
+    std::shared_ptr<const std::vector<ReplayCheckpointTriggerSurface>>
+            checkpointTriggerSurfaces;
     sandbox::PhysicsSandboxRenderSceneHandle staticRenderScene;
     forevervalidator::simulation::CudaHostScene cudaHostScene;
     forevervalidator::simulation::CudaDeviceScene cudaDeviceScene;
@@ -1297,6 +1345,8 @@ ReplaySimulationSession::ClonePrepared() const {
         }
         clone->impl->staticCollisionTriangles =
                 impl->staticCollisionTriangles;
+        clone->impl->checkpointTriggerSurfaces =
+                impl->checkpointTriggerSurfaces;
         clone->impl->staticRenderScene = impl->staticRenderScene;
         clone->impl->incrementalValidationSeed =
                 impl->incrementalValidationSeed;
@@ -1310,6 +1360,7 @@ void ReplaySimulationSession::Reset() {
     impl->ResetRuntime();
     impl->mapScene.Reset(impl->instance.race);
     impl->staticCollisionTriangles.reset();
+    impl->checkpointTriggerSurfaces.reset();
     impl->staticRenderScene.reset();
     impl->cudaSearchSpecialization.reset();
     impl->cudaSearchSpecializationDiagnostic.clear();
@@ -1377,8 +1428,10 @@ bool ReplaySimulationSession::InstallStaticScene(
         }
     }
 #endif
+    std::vector<ReplayCheckpointTriggerSurface> triggers;
     if (!renderScene ||
         !BuildStaticCollisionTriangles(models, triangles) ||
+        !BuildCheckpointTriggerSurfaces(models, triggers) ||
         impl->mapScene.InstallModels(std::move(models)) !=
                 ReplayMapSceneResult::Ready) {
         return false;
@@ -1388,6 +1441,10 @@ bool ReplaySimulationSession::InstallStaticScene(
                 std::make_shared<const std::vector<
                         ReplayStaticCollisionTriangle>>(
                         std::move(triangles));
+        impl->checkpointTriggerSurfaces =
+                std::make_shared<const std::vector<
+                        ReplayCheckpointTriggerSurface>>(
+                        std::move(triggers));
     } catch (const std::bad_alloc &) {
         return false;
     }
@@ -1436,6 +1493,14 @@ ReplaySimulationSession::StaticCollisionTriangles() const noexcept {
     static const std::vector<ReplayStaticCollisionTriangle> empty;
     return impl->staticCollisionTriangles
             ? *impl->staticCollisionTriangles
+            : empty;
+}
+
+const std::vector<ReplayCheckpointTriggerSurface> &
+ReplaySimulationSession::CheckpointTriggerSurfaces() const noexcept {
+    static const std::vector<ReplayCheckpointTriggerSurface> empty;
+    return impl->checkpointTriggerSurfaces
+            ? *impl->checkpointTriggerSurfaces
             : empty;
 }
 
@@ -1776,6 +1841,9 @@ ReplaySimulationSession::CurrentState() const {
         impl->backend != forevervalidator::SimulationBackend::Hip &&
         impl->backend != forevervalidator::SimulationBackend::Vulkan) {
         result.acceptedCheckpointEvents = impl->instance.race.AcceptedCheckpointEvents();
+        impl->instance.race.PassedCheckpointSlotBits(
+                result.passedCheckpointSlots.data(),
+                result.passedCheckpointSlots.size());
     }
     result.finishTimeMs = impl->instance.runtime->FinishTimeMs();
     result.finishTime = impl->instance.runtime->FinishTime();

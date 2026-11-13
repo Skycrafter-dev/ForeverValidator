@@ -1268,6 +1268,21 @@ PhysicsSandboxSceneView BuildSandboxScene(
                 ToPublicVector(triangle.c)});
     }
 
+    for (const ReplayCheckpointTriggerSurface &surface :
+         session.CheckpointTriggerSurfaces()) {
+        PhysicsSandboxCheckpointTrigger trigger;
+        trigger.role = surface.role;
+        trigger.checkpointSlot = surface.checkpointSlot;
+        trigger.triangles.reserve(surface.triangles.size());
+        for (const ReplayStaticCollisionTriangle &triangle :
+             surface.triangles) {
+            trigger.triangles.push_back({ToPublicVector(triangle.a),
+                                         ToPublicVector(triangle.b),
+                                         ToPublicVector(triangle.c)});
+        }
+        scene.checkpointTriggers.push_back(std::move(trigger));
+    }
+
     const std::vector<VehicleCollisionShapeEntry> &shapes =
             definition.vehicle.collisionModel.ShapesInArchiveOrder();
     std::vector<GmIso4> absolutePoses;
@@ -1764,6 +1779,8 @@ struct PhysicsSandbox::Impl {
         view.steering = state->controls.steering;
         view.checkpointsCollected = state->race.checkpointCount;
         view.checkpointsTotal = state->race.requiredCheckpointCount;
+        view.currentLapCheckpoints = state->race.currentLapCheckpointCount;
+        view.passedCheckpointSlots = state->passedCheckpointSlots;
         view.completedLaps = state->race.completedLapCount;
         view.totalLaps = state->race.requiredLapCount;
         view.raceCompleted = state->race.raceCompleted;
@@ -2019,6 +2036,102 @@ simulation::CudaSearchModifierConfiguration CudaModifier(
             source);
 }
 
+// The Distance evaluator's triggers, their triangles and the car shapes,
+// from the loaded map. False when the target is missing or too large for
+// the GPU.
+bool FillDistanceGeometry(
+        const ReplaySimulationSession &session,
+        const ReplaySimulationDefinition &definition,
+        simulation::CudaSearchEvaluatorConfiguration *configuration,
+        std::string *error) {
+    const bool finish = configuration->values[0] != 0.0;
+    const bool anySlot = configuration->values[3] < 0.0;
+    const auto slot = static_cast<std::uint32_t>(
+            anySlot ? 0.0 : configuration->values[3]);
+    std::uint32_t triggers = 0u;
+    std::uint32_t count = 0u;
+    for (const ReplayCheckpointTriggerSurface &surface :
+         session.CheckpointTriggerSurfaces()) {
+        const bool finishLine = surface.role !=
+                PhysicsSandboxCheckpointTriggerRole::Checkpoint;
+        if (finish != finishLine ||
+            (!finish && !anySlot && surface.checkpointSlot != slot)) {
+            continue;
+        }
+        if (triggers == simulation::CudaSearchMaximumDistanceTriggers) {
+            *error = "the target has too many triggers for the GPU";
+            return false;
+        }
+        double *trigger = configuration->distanceTriggers[triggers++];
+        trigger[0] = finishLine ? -1.0 : static_cast<double>(surface.checkpointSlot);
+        trigger[1] = count;
+        double minimum[3] = {1e300, 1e300, 1e300};
+        double maximum[3] = {-1e300, -1e300, -1e300};
+        for (const ReplayStaticCollisionTriangle &triangle :
+             surface.triangles) {
+            if (count == simulation::CudaSearchMaximumDistanceTriangles) {
+                *error = "the target's triggers have too many triangles for the GPU";
+                return false;
+            }
+            const GmVec3 *corners[3] = {&triangle.a, &triangle.b, &triangle.c};
+            for (std::size_t corner = 0u; corner < 3u; ++corner) {
+                const double point[3] = {corners[corner]->x, corners[corner]->y,
+                                         corners[corner]->z};
+                for (std::size_t axis = 0u; axis < 3u; ++axis) {
+                    configuration->distanceTriangles[count][corner * 3u + axis] =
+                            point[axis];
+                    minimum[axis] = std::min(minimum[axis], point[axis]);
+                    maximum[axis] = std::max(maximum[axis], point[axis]);
+                }
+            }
+            ++count;
+        }
+        trigger[2] = count - trigger[1];
+        for (std::size_t axis = 0u; axis < 3u; ++axis) {
+            trigger[3u + axis] = minimum[axis];
+            trigger[6u + axis] = maximum[axis];
+        }
+    }
+    if (count == 0u) {
+        *error = finish ? "this map has no finish"
+                        : "this map has no checkpoint at that map slot";
+        return false;
+    }
+    configuration->distanceTriggerCount = triggers;
+    configuration->distanceTriangleCount = count;
+    const PhysicsSandboxSceneView scene = BuildSandboxScene(session, definition);
+    double radius = 0.0;
+    std::uint32_t shapes = 0u;
+    for (const PhysicsSandboxEllipsoid &ellipsoid : scene.carEllipsoids) {
+        if (!(ellipsoid.radii.x > 0.0f) || !(ellipsoid.radii.y > 0.0f) ||
+            !(ellipsoid.radii.z > 0.0f)) {
+            continue;
+        }
+        if (shapes == simulation::CudaSearchMaximumDistanceShapes) {
+            *error = "the car has too many collision shapes for the GPU";
+            return false;
+        }
+        double *shape = configuration->distanceShapes[shapes++];
+        shape[0] = ellipsoid.position.x;
+        shape[1] = ellipsoid.position.y;
+        shape[2] = ellipsoid.position.z;
+        shape[3] = ellipsoid.rotationX;
+        shape[4] = ellipsoid.rotationY;
+        shape[5] = ellipsoid.rotationZ;
+        shape[6] = ellipsoid.rotationW;
+        shape[7] = ellipsoid.radii.x;
+        shape[8] = ellipsoid.radii.y;
+        shape[9] = ellipsoid.radii.z;
+        radius = std::max(radius,
+                          std::sqrt(shape[0] * shape[0] + shape[1] * shape[1] +
+                                    shape[2] * shape[2]) +
+                                  std::max({shape[7], shape[8], shape[9]}));
+    }
+    configuration->distanceShapeCount = shapes;
+    configuration->values[6] = radius;
+    return true;
+}
+
 simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
         const PhysicsSandboxCudaEvaluator &source) {
     return std::visit(
@@ -2032,11 +2145,17 @@ simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
                             simulation::CudaSearchEvaluatorKind::Velocity;
                     result.optionFlags =
                             (evaluator.projected ? 1u : 0u) |
-                            (evaluator.alignmentEnabled ? 2u : 0u);
+                            (evaluator.alignmentEnabled ? 2u : 0u) |
+                            (evaluator.towardsPoint
+                                     ? simulation::CudaSearchVelocityTowardsPoint
+                                     : 0u);
                     result.values[0] = evaluator.direction.x;
                     result.values[1] = evaluator.direction.y;
                     result.values[2] = evaluator.direction.z;
                     result.values[3] = evaluator.minimumAlignment;
+                    result.values[4] = evaluator.point.x;
+                    result.values[5] = evaluator.point.y;
+                    result.values[6] = evaluator.point.z;
                 } else if constexpr (std::is_same_v<
                                              T,
                                              PhysicsSandboxCudaPointEvaluator>) {
@@ -2058,6 +2177,9 @@ simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
                     result.values[5] = evaluator.targetRotationZ;
                     result.values[6] = evaluator.targetRotationW;
                     result.values[7] = evaluator.rotationWeight;
+                    for (std::size_t axis = 0u; axis < 6u; ++axis) {
+                        result.values[8u + axis] = evaluator.axisWeights[axis];
+                    }
                 } else if constexpr (std::is_same_v<
                                              T,
                                              PhysicsSandboxCudaVolumeEntryEvaluator>) {
@@ -2069,11 +2191,18 @@ simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
                     result.values[3] = evaluator.maximum.x;
                     result.values[4] = evaluator.maximum.y;
                     result.values[5] = evaluator.maximum.z;
+                    result.optionFlags = evaluator.entrySpeed
+                            ? simulation::CudaSearchEntrySpeed
+                            : 0u;
                 } else if constexpr (std::is_same_v<
                                              T,
                                              PhysicsSandboxCudaCustomVolumeEntryEvaluator>) {
                     result.kind = simulation::CudaSearchEvaluatorKind::CustomVolumeEntry;
-                    result.optionFlags = static_cast<std::uint32_t>(evaluator.plane);
+                    result.optionFlags =
+                            static_cast<std::uint32_t>(evaluator.plane) |
+                            (evaluator.entrySpeed
+                                     ? simulation::CudaSearchEntrySpeed
+                                     : 0u);
                     result.values[0] = evaluator.origin.x;
                     result.values[1] = evaluator.origin.y;
                     result.values[2] = evaluator.origin.z;
@@ -2083,6 +2212,23 @@ simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
                         result.customVolumeVertices[i][0] = evaluator.polygon[i].x;
                         result.customVolumeVertices[i][1] = evaluator.polygon[i].y;
                     }
+                } else if constexpr (std::is_same_v<
+                                             T,
+                                             PhysicsSandboxCudaDistanceEvaluator>) {
+                    // The geometry comes from the session; see
+                    // FillDistanceGeometry.
+                    result.kind = simulation::CudaSearchEvaluatorKind::Distance;
+                    // The CheckpointEvent layout, so its matching applies.
+                    result.values[0] = evaluator.finish ? 1.0 : 0.0;
+                    result.values[1] = evaluator.checkpointIndex;
+                    result.values[2] = evaluator.lap;
+                    result.values[3] = evaluator.checkpointSlot
+                            ? static_cast<double>(*evaluator.checkpointSlot)
+                            : -1.0;
+                    result.values[4] = static_cast<double>(
+                            evaluator.eventIndex & 0xffffffffull);
+                    result.values[5] = static_cast<double>(
+                            evaluator.eventIndex >> 32u);
                 } else if constexpr (std::is_same_v<
                                              T,
                                              PhysicsSandboxCudaStuntPointsEvaluator>) {
@@ -3293,6 +3439,7 @@ PhysicsSandboxCudaSearchSession::Impl::Convert(
     const ReplayRaceProgress &race = best.state.race.progress;
     view.checkpointsCollected = race.checkpointCount;
     view.checkpointsTotal = race.requiredCheckpointCount;
+    view.currentLapCheckpoints = race.currentLapCheckpointCount;
     view.completedLaps = race.completedLapCount;
     view.totalLaps = race.requiredLapCount;
     view.raceCompleted = race.raceCompleted;
@@ -3830,6 +3977,47 @@ CreatePhysicsSandboxCudaSearchSession(
             }
         }
         internal.evaluator = CudaEvaluator(configuration.evaluator);
+        // The Vulkan shaders are generated from the CUDA sources and have not
+        // been regenerated for these options yet.
+        if (useVulkan) {
+            bool unsupported = false;
+            if (const auto *velocity = std::get_if<
+                        PhysicsSandboxCudaVelocityEvaluator>(
+                                &configuration.evaluator)) {
+                unsupported = velocity->towardsPoint;
+            } else if (const auto *pose = std::get_if<
+                               PhysicsSandboxCudaPoseEvaluator>(
+                                       &configuration.evaluator)) {
+                for (const double weight : pose->axisWeights) {
+                    unsupported |= weight != 1.0;
+                }
+            } else if (const auto *volume = std::get_if<
+                               PhysicsSandboxCudaVolumeEntryEvaluator>(
+                                       &configuration.evaluator)) {
+                unsupported = volume->entrySpeed;
+            }
+            if (unsupported) {
+                return PhysicsSandboxResult<
+                        PhysicsSandboxCudaSearchSession>::Failure(
+                        SearchError(PhysicsSandboxErrorCode::InvalidRequest,
+                                    "this target option is not available on Vulkan yet"));
+            }
+        }
+        if (std::holds_alternative<PhysicsSandboxCudaDistanceEvaluator>(
+                    configuration.evaluator)) {
+            std::string distanceError;
+            if (useVulkan) {
+                distanceError = "distance targets are not available on Vulkan";
+            }
+            if (!distanceError.empty() ||
+                !FillDistanceGeometry(*source.session, source.definition,
+                                      &internal.evaluator, &distanceError)) {
+                return PhysicsSandboxResult<
+                        PhysicsSandboxCudaSearchSession>::Failure(
+                        SearchError(PhysicsSandboxErrorCode::InvalidRequest,
+                                    distanceError));
+            }
+        }
         if (configuration.condition) {
             if (configuration.condition->instructions.empty() ||
                 configuration.condition->instructions.size() > 256u) {

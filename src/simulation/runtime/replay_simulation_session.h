@@ -65,6 +65,7 @@ struct ReplaySimulationStateView {
     std::array<bool, 4> wheelSliding{{false, false, false, false}};
     std::array<std::uint16_t, 4> wheelSurface{{0u, 0u, 0u, 0u}};
     std::vector<ReplayAcceptedCheckpointEvent> acceptedCheckpointEvents;
+    std::array<std::uint32_t, 32> passedCheckpointSlots{};
 };
 
 struct ReplayCudaVehiclePrefixDifferential {
@@ -80,6 +81,16 @@ struct ReplayStaticCollisionTriangle {
     GmVec3 a{};
     GmVec3 b{};
     GmVec3 c{};
+};
+
+// A checkpoint or finish trigger surface (see
+// PhysicsSandboxCheckpointTrigger).
+struct ReplayCheckpointTriggerSurface {
+    forevervalidator::experimental::PhysicsSandboxCheckpointTriggerRole role =
+            forevervalidator::experimental::
+                    PhysicsSandboxCheckpointTriggerRole::Checkpoint;
+    std::uint32_t checkpointSlot = 0u;
+    std::vector<ReplayStaticCollisionTriangle> triangles;
 };
 
 struct ReplaySimulationInstanceClone {
@@ -179,6 +190,8 @@ public:
     bool StageCudaPreCollisionForTesting(float dt = 0.0f);
     const std::vector<ReplayStaticCollisionTriangle> &
             StaticCollisionTriangles() const noexcept;
+    const std::vector<ReplayCheckpointTriggerSurface> &
+            CheckpointTriggerSurfaces() const noexcept;
     forevervalidator::experimental::PhysicsSandboxRenderSceneHandle
             StaticRenderScene() const noexcept;
     std::optional<std::uint32_t> ApplyReplayStuntTimePenalty(

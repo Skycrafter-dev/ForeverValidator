@@ -299,9 +299,27 @@ struct PhysicsSandboxRenderScene {
 using PhysicsSandboxRenderSceneHandle =
         std::shared_ptr<const PhysicsSandboxRenderScene>;
 
+enum class PhysicsSandboxCheckpointTriggerRole : std::uint8_t {
+    Checkpoint,
+    Finish,
+    StartFinish,
+};
+
+// A checkpoint or finish trigger: the collision surface the car touches to
+// pass it, in world space. checkpointSlot is a checkpoint's map slot, as in
+// PhysicsSandboxAcceptedCheckpointEvent (unused for finishes).
+struct PhysicsSandboxCheckpointTrigger {
+    PhysicsSandboxCheckpointTriggerRole role =
+            PhysicsSandboxCheckpointTriggerRole::Checkpoint;
+    std::uint32_t checkpointSlot = 0u;
+    std::vector<PhysicsSandboxCollisionTriangle> triangles;
+};
+
 struct PhysicsSandboxSceneView {
     std::vector<PhysicsSandboxCollisionTriangle> collisionTriangles;
+    // Car-local: the car's collision shapes at rest.
     std::vector<PhysicsSandboxEllipsoid> carEllipsoids;
+    std::vector<PhysicsSandboxCheckpointTrigger> checkpointTriggers;
 };
 
 struct PhysicsSandboxAcceptedCheckpointEvent {
@@ -327,6 +345,10 @@ struct PhysicsSandboxStateView {
     float steering = 0.0f;
     std::uint32_t checkpointsCollected = 0u;
     std::uint32_t checkpointsTotal = 0u;
+    // Checkpoints taken in the current lap: their count, and their map slots
+    // as bits (slot n is bit n % 32 of word n / 32). CPU backends.
+    std::uint32_t currentLapCheckpoints = 0u;
+    std::array<std::uint32_t, 32> passedCheckpointSlots{};
     std::uint32_t completedLaps = 0u;
     std::uint32_t totalLaps = 1u;
     bool raceCompleted = false;
@@ -420,6 +442,9 @@ struct PhysicsSandboxCudaVelocityEvaluator {
     bool alignmentEnabled = false;
     PhysicsSandboxCudaVector3 direction{};
     double minimumAlignment = -1.0;
+    // The direction from the car towards point, every tick, instead.
+    bool towardsPoint = false;
+    PhysicsSandboxCudaVector3 point{};
 };
 
 struct PhysicsSandboxCudaPointEvaluator {
@@ -433,11 +458,16 @@ struct PhysicsSandboxCudaPoseEvaluator {
     double targetRotationZ = 0.0;
     double targetRotationW = 1.0;
     double rotationWeight = 0.5;
+    // World x, y, z; then yaw, pitch, roll (a rotation vector in the
+    // target's axes). 1 counts an axis fully.
+    std::array<double, 6> axisWeights{{1.0, 1.0, 1.0, 1.0, 1.0, 1.0}};
 };
 
 struct PhysicsSandboxCudaVolumeEntryEvaluator {
     PhysicsSandboxCudaVector3 minimum{};
     PhysicsSandboxCudaVector3 maximum{};
+    // Scores the speed at entry (higher is better) instead of its time.
+    bool entrySpeed = false;
 };
 
 // A simple polygon extruded along the selected plane's positive normal.
@@ -448,6 +478,21 @@ struct PhysicsSandboxCudaCustomVolumeEntryEvaluator {
     PhysicsSandboxCudaVector3 origin{};
     double depth = 1.0;
     std::vector<PhysicsSandboxCudaVector3> polygon;
+    bool entrySpeed = false;
+};
+
+// Distance from the car's collision shapes to a checkpoint or the finish,
+// picked with the selectors of PhysicsSandboxCudaCheckpointEvaluator. A
+// candidate that reaches it scores the tick time it does; one that does not
+// scores 1e12 + 1e6 per checkpoint still to come before it + its closest
+// distance in metres (to the slot's trigger, or with any slot to the
+// nearest checkpoint not taken yet this lap). Lower is better. CUDA, HIP.
+struct PhysicsSandboxCudaDistanceEvaluator {
+    bool finish = false;
+    std::uint32_t checkpointIndex = 0u;
+    std::uint32_t lap = 1u;
+    std::optional<std::uint32_t> checkpointSlot;
+    std::uint64_t eventIndex = 0u;
 };
 
 struct PhysicsSandboxCudaStuntPointsEvaluator {};
@@ -504,7 +549,8 @@ using PhysicsSandboxCudaEvaluator = std::variant<
         PhysicsSandboxCudaScriptedEvaluator,
         PhysicsSandboxCudaConditionTimeEvaluator,
         PhysicsSandboxCudaCheckpointEvaluator,
-        PhysicsSandboxCudaCustomVolumeEntryEvaluator>;
+        PhysicsSandboxCudaCustomVolumeEntryEvaluator,
+        PhysicsSandboxCudaDistanceEvaluator>;
 
 struct PhysicsSandboxCudaSearchIncumbent {
     bool mutation = false;

@@ -2148,10 +2148,167 @@ __device__ bool UpdateScriptedSample(
     return true;
 }
 
+// Speed at a fraction of the tick, as the interpolated entry time is.
+__device__ inline double EntrySpeed(const GmVec3 &previous,
+                                    const GmVec3 &current,
+                                    double fraction) {
+    const double x = previous.x + (current.x - previous.x) * fraction;
+    const double y = previous.y + (current.y - previous.y) * fraction;
+    const double z = previous.z + (current.z - previous.z) * fraction;
+    return sqrt((x * x + y * y) + z * z);
+}
+
+namespace distance_target {
+
+struct Vec {
+    double x;
+    double y;
+    double z;
+};
+
+__device__ inline Vec Add(Vec a, Vec b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+__device__ inline Vec Sub(Vec a, Vec b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+__device__ inline Vec Mul(Vec a, double s) { return {a.x * s, a.y * s, a.z * s}; }
+__device__ inline double Dot(Vec a, Vec b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+__device__ inline Vec Cross(Vec a, Vec b) {
+    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+
+// q * v * conjugate(q), q = (x, y, z, w).
+__device__ inline Vec Rotate(double qx, double qy, double qz, double qw, Vec v) {
+    const Vec axis{qx, qy, qz};
+    const Vec t = Mul(Cross(axis, v), 2.0);
+    return Add(Add(v, Mul(t, qw)), Cross(axis, t));
+}
+
+// Closest point of triangle abc to the origin (Ericson 5.1.5).
+__device__ inline Vec ClosestToOrigin(Vec a, Vec b, Vec c) {
+    const Vec ab = Sub(b, a);
+    const Vec ac = Sub(c, a);
+    const double d1 = -Dot(ab, a);
+    const double d2 = -Dot(ac, a);
+    if (d1 <= 0.0 && d2 <= 0.0) return a;
+    const double d3 = -Dot(ab, b);
+    const double d4 = -Dot(ac, b);
+    if (d3 >= 0.0 && d4 <= d3) return b;
+    const double vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0) return Add(a, Mul(ab, d1 / (d1 - d3)));
+    const double d5 = -Dot(ab, c);
+    const double d6 = -Dot(ac, c);
+    if (d6 >= 0.0 && d5 <= d6) return c;
+    const double vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0) return Add(a, Mul(ac, d2 / (d2 - d6)));
+    const double va = d3 * d6 - d5 * d4;
+    if (va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0) {
+        return Add(b, Mul(Sub(c, b), (d4 - d3) / ((d4 - d3) + (d5 - d6))));
+    }
+    const double denominator = 1.0 / (va + vb + vc);
+    return Add(a, Add(Mul(ab, vb * denominator), Mul(ac, vc * denominator)));
+}
+
+// One trigger's triangles against the car's collision shapes, each shape a
+// unit sphere once the triangles are moved into its frame and scaled by its
+// radii (distance_target_evaluator.cpp in ForeverTAS).
+__device__ inline double TriggerDistance(
+        const HipSearchEvaluatorConfiguration &evaluator,
+        const double *trigger,
+        const Vec &p,
+        const GmQuat &rotation) {
+    double best = 1e300;
+    const std::uint32_t first = static_cast<std::uint32_t>(trigger[1]);
+    const std::uint32_t count = static_cast<std::uint32_t>(trigger[2]);
+    for (std::uint32_t s = 0u; s < evaluator.distanceShapeCount; ++s) {
+        const double *shape = evaluator.distanceShapes[s];
+        const Vec center = Add(p, Rotate(rotation.x, rotation.y, rotation.z,
+                                         rotation.w, {shape[0], shape[1], shape[2]}));
+        // orientation = rotation * shape rotation
+        const double ax = rotation.x, ay = rotation.y, az = rotation.z, aw = rotation.w;
+        const double bx = shape[3], by = shape[4], bz = shape[5], bw = shape[6];
+        const double ox = aw * bx + ax * bw + ay * bz - az * by;
+        const double oy = aw * by - ax * bz + ay * bw + az * bx;
+        const double oz = aw * bz + ax * by - ay * bx + az * bw;
+        const double ow = aw * bw - ax * bx - ay * by - az * bz;
+        const Vec inverseRadii{1.0 / shape[7], 1.0 / shape[8], 1.0 / shape[9]};
+        for (std::uint32_t t = first; t < first + count; ++t) {
+            const double *triangle = evaluator.distanceTriangles[t];
+            Vec corners[3];
+            for (int c = 0; c < 3; ++c) {
+                const Vec local = Rotate(-ox, -oy, -oz, ow,
+                        Sub({triangle[c * 3], triangle[c * 3 + 1], triangle[c * 3 + 2]},
+                            center));
+                corners[c] = {local.x * inverseRadii.x, local.y * inverseRadii.y,
+                              local.z * inverseRadii.z};
+            }
+            const Vec closest = ClosestToOrigin(corners[0], corners[1], corners[2]);
+            const double length = sqrt(Dot(closest, closest));
+            if (length <= 1.0) return 0.0;
+            const Vec gap = Sub(closest, Mul(closest, 1.0 / length));
+            const Vec metres{gap.x * shape[7], gap.y * shape[8], gap.z * shape[9]};
+            best = fmin(best, sqrt(Dot(metres, metres)));
+        }
+    }
+    return best;
+}
+
+__device__ inline bool SlotPassed(const HipCheckpointSlots &slots,
+                                  std::uint32_t slot) {
+    return slot / 32u < HipCheckpointSlots::WordCount &&
+            ((slots.words[slot / 32u] >> (slot % 32u)) & 1u) != 0u;
+}
+
+// The closest the car is to the target's triggers: the slot's, or with any
+// slot the checkpoints not taken yet this lap (all once every one is).
+// Far from a trigger its box stands in.
+__device__ inline double CarDistance(
+        const HipSearchEvaluatorConfiguration &evaluator,
+        const HipCheckpointSlots &passed,
+        const GmVec3 &position,
+        const GmQuat &rotation) {
+    const Vec p{position.x, position.y, position.z};
+    const bool anySlot = evaluator.values[0] == 0.0 && evaluator.values[3] < 0.0;
+    bool anyOpen = false;
+    for (std::uint32_t i = 0u; i < evaluator.distanceTriggerCount; ++i) {
+        const double slot = evaluator.distanceTriggers[i][0];
+        anyOpen |= slot < 0.0 || !SlotPassed(passed, static_cast<std::uint32_t>(slot));
+    }
+    double best = 1e300;
+    for (std::uint32_t i = 0u; i < evaluator.distanceTriggerCount; ++i) {
+        const double *trigger = evaluator.distanceTriggers[i];
+        if (anySlot && anyOpen && trigger[0] >= 0.0 &&
+            SlotPassed(passed, static_cast<std::uint32_t>(trigger[0]))) {
+            continue;
+        }
+        const double dx = fmax(fmax(trigger[3] - p.x, 0.0), p.x - trigger[6]);
+        const double dy = fmax(fmax(trigger[4] - p.y, 0.0), p.y - trigger[7]);
+        const double dz = fmax(fmax(trigger[5] - p.z, 0.0), p.z - trigger[8]);
+        const double coarse = sqrt(dx * dx + dy * dy + dz * dz) - evaluator.values[6];
+        best = fmin(best, coarse > 4.0 ? coarse
+                                       : TriggerDistance(evaluator, trigger, p, rotation));
+    }
+    return best;
+}
+
+// Checkpoints (and finishes) still to come before the target.
+__device__ inline double EventsBeforeTarget(
+        const HipSearchEvaluatorConfiguration &evaluator,
+        const ReplayRaceProgress &progress) {
+    const double perLap = static_cast<double>(progress.requiredCheckpointCount) + 1.0;
+    const double target = (evaluator.values[2] - 1.0) * perLap +
+            (evaluator.values[0] != 0.0
+                     ? static_cast<double>(progress.requiredCheckpointCount)
+                     : evaluator.values[1]);
+    const double done = static_cast<double>(progress.completedLapCount) * perLap +
+            static_cast<double>(progress.currentLapCheckpointCount);
+    return fmax(target - done, 0.0);
+}
+
+}  // namespace distance_target
+
 __device__ DeviceSample EvaluateState(
         const HipSearchEvaluatorConfiguration &evaluator,
         const HipCandidatePhysicsState &state,
         const GmVec3 &previousPosition,
+        const GmVec3 &previousVelocity,
         double previousTimeMs,
         double currentTimeMs,
         std::uint32_t stuntsScore,
@@ -2166,22 +2323,35 @@ __device__ DeviceSample EvaluateState(
         const double y = velocity.y;
         const double z = velocity.z;
         const double speed = sqrt((x * x + y * y) + z * z);
+        double ax = evaluator.values[0];
+        double ay = evaluator.values[1];
+        double az = evaluator.values[2];
+        if ((evaluator.optionFlags & HipSearchVelocityTowardsPoint) != 0u) {
+            ax = evaluator.values[4] - static_cast<double>(position.x);
+            ay = evaluator.values[5] - static_cast<double>(position.y);
+            az = evaluator.values[6] - static_cast<double>(position.z);
+            const double length = sqrt((ax * ax + ay * ay) + az * az);
+            if (length <= 1e-12) {
+                ax = 0.0;
+                ay = 0.0;
+                az = 0.0;
+            } else {
+                ax /= length;
+                ay /= length;
+                az /= length;
+            }
+        }
         double alignment = 1.0;
         if ((evaluator.optionFlags & 3u) != 0u) {
             alignment = speed <= 1e-12
                     ? 0.0
-                    : (x * evaluator.values[0] +
-                       y * evaluator.values[1] +
-                       z * evaluator.values[2]) /
-                              speed;
+                    : (x * ax + y * ay + z * az) / speed;
             if (alignment < evaluator.values[3]) {
                 return result;
             }
         }
         result.score = (evaluator.optionFlags & 1u) != 0u
-                ? x * evaluator.values[0] +
-                          y * evaluator.values[1] +
-                          z * evaluator.values[2]
+                ? x * ax + y * ay + z * az
                 : speed;
         result.detail0 = speed;
         result.detail1 = alignment;
@@ -2207,15 +2377,37 @@ __device__ DeviceSample EvaluateState(
         const double z = static_cast<double>(position.z) -
                 evaluator.values[2];
         const double positionError =
-                sqrt((x * x + y * y) + z * z);
+                sqrt((evaluator.values[8] * x * x +
+                      evaluator.values[9] * y * y) +
+                     evaluator.values[10] * z * z);
+        // conjugate(target) * car, as a rotation vector in the target's
+        // axes: x pitch, y yaw, z roll (pose_target_evaluator.cpp).
         const GmQuat &rotation = state.body.current.rotationQuat;
-        double dot = fabs(
-                evaluator.values[3] * rotation.x +
-                evaluator.values[4] * rotation.y +
-                evaluator.values[5] * rotation.z +
-                evaluator.values[6] * rotation.w);
-        dot = dot < 0.0 ? 0.0 : (dot > 1.0 ? 1.0 : dot);
-        const double rotationError = 2.0 * acos(dot);
+        const double tx = -evaluator.values[3];
+        const double ty = -evaluator.values[4];
+        const double tz = -evaluator.values[5];
+        const double tw = evaluator.values[6];
+        double rx = tw * rotation.x + tx * rotation.w + ty * rotation.z - tz * rotation.y;
+        double ry = tw * rotation.y - tx * rotation.z + ty * rotation.w + tz * rotation.x;
+        double rz = tw * rotation.z + tx * rotation.y - ty * rotation.x + tz * rotation.w;
+        double rw = tw * rotation.w - tx * rotation.x - ty * rotation.y - tz * rotation.z;
+        if (rw < 0.0) {
+            rx = -rx;
+            ry = -ry;
+            rz = -rz;
+            rw = -rw;
+        }
+        const double sine = sqrt((rx * rx + ry * ry) + rz * rz);
+        double rotationError = 0.0;
+        if (sine > 1e-12) {
+            const double scale = 2.0 * atan2(sine, rw) / sine;
+            rx *= scale;
+            ry *= scale;
+            rz *= scale;
+            rotationError = sqrt((evaluator.values[12] * rx * rx +
+                                  evaluator.values[11] * ry * ry) +
+                                 evaluator.values[13] * rz * rz);
+        }
         result.score =
                 (1.0 - evaluator.values[7]) * positionError +
                 evaluator.values[7] * rotationError;
@@ -2237,7 +2429,10 @@ __device__ DeviceSample EvaluateState(
             *reported = true;
             result.timeMs = previousTimeMs +
                     fraction * (currentTimeMs - previousTimeMs);
-            result.score = result.timeMs;
+            result.score = (evaluator.optionFlags & HipSearchEntrySpeed) != 0u
+                    ? EntrySpeed(previousVelocity,
+                                 state.body.current.linearSpeed, fraction)
+                    : result.timeMs;
             result.valid = true;
         }
         break;
@@ -2253,7 +2448,23 @@ __device__ DeviceSample EvaluateState(
                     position.x, position.y, position.z, &fraction)) return result;
         *reported = true;
         result.timeMs = previousTimeMs + fraction * (currentTimeMs - previousTimeMs);
-        result.score = result.timeMs;
+        result.score = (evaluator.optionFlags & HipSearchEntrySpeed) != 0u
+                ? EntrySpeed(previousVelocity, state.body.current.linearSpeed,
+                             fraction)
+                : result.timeMs;
+        result.valid = true;
+        break;
+    }
+    case HipSearchEvaluatorKind::Distance: {
+        // Reaching the target is handled with the checkpoint counters
+        // before this; here only the closest distance so far counts.
+        const double distance = fmax(distance_target::CarDistance(
+                evaluator, state.race.checkpointSlotsPassed, position,
+                state.body.current.rotationQuat), 0.0);
+        result.score = 1e12 +
+                distance_target::EventsBeforeTarget(evaluator, state.race.progress) * 1e6 +
+                distance;
+        result.detail0 = distance;
         result.valid = true;
         break;
     }
@@ -2390,11 +2601,24 @@ __device__ bool CheckpointEventAccepted(
             CheckpointSlotOfBlock(scene, after.lastAcceptedBlockId) == slot;
 }
 
+// Whether this tick reached the Distance target: its selectors are the
+// CheckpointEvent ones.
+__device__ bool DistanceTargetReached(
+        const HipSearchEvaluatorConfiguration &evaluator,
+        const HipCandidatePhysicsState &state,
+        const CheckpointProgressBefore &before,
+        const HipPackedSceneHeader *scene) {
+    return CheckpointEventAccepted(evaluator, state, before, scene);
+}
+
 __host__ __device__ bool MaximizesScore(
-        HipSearchEvaluatorKind kind) {
+        HipSearchEvaluatorKind kind, std::uint32_t optionFlags) {
     return kind == HipSearchEvaluatorKind::Velocity ||
             kind == HipSearchEvaluatorKind::StuntPoints ||
-            kind == HipSearchEvaluatorKind::ConditionTimeLatest;
+            kind == HipSearchEvaluatorKind::ConditionTimeLatest ||
+            ((kind == HipSearchEvaluatorKind::VolumeEntry ||
+              kind == HipSearchEvaluatorKind::CustomVolumeEntry) &&
+             (optionFlags & HipSearchEntrySpeed) != 0u);
 }
 
 __global__ void SeedCandidateBestSamplesKernel(
@@ -3116,7 +3340,7 @@ __global__ FOREVERVALIDATOR_HIP_SEARCH_LAUNCH_BOUNDS(
             responseOrderScratch;
     DeviceControlState controlState = *mutableBoundaryControls;
     bool evaluatorReported = false;
-    const bool maximize = MaximizesScore(configuredEvaluator.kind);
+    const bool maximize = MaximizesScore(configuredEvaluator.kind, configuredEvaluator.optionFlags);
     DeviceSample localBest;
     std::uint32_t evaluationIndex = 0u;
     if (finishCheckpointTicks != nullptr) {
@@ -3154,6 +3378,7 @@ __global__ FOREVERVALIDATOR_HIP_SEARCH_LAUNCH_BOUNDS(
             }
         }
         const GmVec3 previousPosition = state.body.current.position;
+        const GmVec3 previousVelocity = state.body.current.linearSpeed;
         const CheckpointProgressBefore checkpointBefore{
                 state.race.progress.currentLapCheckpointCount,
                 state.race.progress.totalCheckpointEventCount,
@@ -3265,6 +3490,31 @@ __global__ FOREVERVALIDATOR_HIP_SEARCH_LAUNCH_BOUNDS(
             continue;
         }
         if (configuredEvaluator.kind ==
+                    HipSearchEvaluatorKind::Distance &&
+            DistanceTargetReached(
+                    configuredEvaluator, state, checkpointBefore,
+                    static_cast<const HipPackedSceneHeader *>(sceneData))) {
+            DeviceSample sample{};
+            sample.score = static_cast<double>(publicTime);
+            sample.timeMs = static_cast<double>(publicTime);
+            sample.candidateId = candidateId;
+            sample.candidateSlot = slot;
+            sample.evaluationTick = evaluationIndex;
+            sample.eventCount = eventCount;
+            sample.logicalOrder =
+                    1u +
+                    static_cast<std::uint64_t>(slot) *
+                            evaluationTickCount +
+                    evaluationIndex;
+            sample.mutation = !baseline;
+            sample.valid = true;
+            if (StrictlyBetter(sample, localBest, maximize)) {
+                localBest = sample;
+            }
+            candidateBestSamples[slot + 1u] = localBest;
+            return;
+        }
+        if (configuredEvaluator.kind ==
             HipSearchEvaluatorKind::CheckpointEvent) {
             if (CheckpointEventAccepted(
                         configuredEvaluator, state, checkpointBefore,
@@ -3296,7 +3546,7 @@ __global__ FOREVERVALIDATOR_HIP_SEARCH_LAUNCH_BOUNDS(
             stuntsScore = state.stunts.stuntsScore;
         }
         DeviceSample sample = EvaluateState(
-                configuredEvaluator, state, previousPosition,
+                configuredEvaluator, state, previousPosition, previousVelocity,
                 static_cast<double>(publicTime - tickDurationMs),
                 static_cast<double>(publicTime),
                 stuntsScore,
@@ -4585,7 +4835,7 @@ struct HipSearchExecutor::Impl {
                 nextCandidateBestSamples.Get(), reducedBest.Get(),
                 winnerSlots,
                 BetterSample{
-                        MaximizesScore(configuration.evaluator.kind)},
+                        MaximizesScore(configuration.evaluator.kind, configuration.evaluator.optionFlags)},
                 DeviceSample{});
         if (error != hipSuccess ||
             !nextReductionTemporary.Allocate(reductionBytes)) {
@@ -5072,7 +5322,7 @@ struct HipSearchExecutor::Impl {
                     candidateBestSamples.Get(), reducedBest.Get(),
                     winnerCount,
                     BetterSample{
-                            MaximizesScore(configuration.evaluator.kind)},
+                            MaximizesScore(configuration.evaluator.kind, configuration.evaluator.optionFlags)},
                     DeviceSample{});
         }
         if (error != hipSuccess) {
@@ -5153,7 +5403,7 @@ struct HipSearchExecutor::Impl {
                 static_cast<std::uint32_t>(
                         configuration.maximumEventCount),
                 evaluationTickCount,
-                MaximizesScore(configuration.evaluator.kind),
+                MaximizesScore(configuration.evaluator.kind, configuration.evaluator.optionFlags),
                 configuration.evaluator.kind ==
                         HipSearchEvaluatorKind::Scripted,
                 baseline,
@@ -6258,8 +6508,7 @@ std::unique_ptr<HipSearchExecutor> HipSearchExecutor::Create(
                 impl->reducedBest.Get(),
                 winnerSampleSlots,
                 BetterSample{
-                        MaximizesScore(
-                                preparedConfiguration.evaluator.kind)},
+                        MaximizesScore(preparedConfiguration.evaluator.kind, preparedConfiguration.evaluator.optionFlags)},
                 DeviceSample{});
         if (error != hipSuccess ||
             !impl->reductionTemporary.Allocate(reductionBytes)) {
