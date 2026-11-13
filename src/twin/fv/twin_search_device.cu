@@ -89,9 +89,9 @@ public:
             constexpr std::uint32_t upperMask = 0x80000000u, lowerMask = 0x7fffffffu, coefficient = 0x9908b0dfu;
             const std::uint32_t i = lazy_;
             const std::uint32_t current = i == 0u ? State(0u) : held_;
-            const std::uint32_t next = State(i + 1u), far = State(i + 397u);
+            const std::uint32_t next = State(i + 1u), distant = State(i + 397u);
             const std::uint32_t y = (current & upperMask) | (next & lowerMask);
-            value = far ^ (y >> 1u) ^ ((y & 1u) ? coefficient : 0u);
+            value = distant ^ (y >> 1u) ^ ((y & 1u) ? coefficient : 0u);
             State(i) = value;
             held_ = next;
             lazy_ = i + 1u;
@@ -223,24 +223,24 @@ private:
             const std::uint32_t from = part == 0 ? 0u : 227u, end = part == 0 ? 227u : 623u;
             std::uint32_t i = from;
             for (; i + G <= end; i += G) {
-                std::uint32_t next[G], far[G];
+                std::uint32_t next[G], distant[G];
 #pragma unroll
                 for (std::uint32_t j = 0; j < G; ++j) {
                     next[j] = State(i + j + 1u);
-                    far[j] = State(part == 0 ? i + j + 397u : i + j - 227u);
+                    distant[j] = State(part == 0 ? i + j + 397u : i + j - 227u);
                 }
 #pragma unroll
                 for (std::uint32_t j = 0; j < G; ++j) {
                     const std::uint32_t value = (current & upperMask) | (next[j] & lowerMask);
-                    State(i + j) = far[j] ^ (value >> 1u) ^ ((value & 1u) ? coefficient : 0u);
+                    State(i + j) = distant[j] ^ (value >> 1u) ^ ((value & 1u) ? coefficient : 0u);
                     current = next[j];
                 }
             }
             for (; i < end; ++i) {
                 const std::uint32_t next = State(i + 1u);
-                const std::uint32_t far = State(part == 0 ? i + 397u : i - 227u);
+                const std::uint32_t distant = State(part == 0 ? i + 397u : i - 227u);
                 const std::uint32_t value = (current & upperMask) | (next & lowerMask);
-                State(i) = far ^ (value >> 1u) ^ ((value & 1u) ? coefficient : 0u);
+                State(i) = distant ^ (value >> 1u) ^ ((value & 1u) ? coefficient : 0u);
                 current = next;
             }
         }
@@ -253,7 +253,7 @@ private:
     std::uint32_t slot_ = 0u;
     std::uint32_t stride_ = 0u;
     std::uint32_t cursor_ = 624u;
-    std::uint32_t lazy_ = kNotLazy;   // after a seeding: the words twisted so far (0..227); kNotLazy: FV's cursor
+    std::uint32_t lazy_ = kNotLazy;   // after a seeding: the words twisted so distant (0..227); kNotLazy: FV's cursor
     std::uint32_t held_ = 0u;         // the lazy twist's word lazy_ as the seeding left it
 };
 

@@ -7,7 +7,7 @@
 
 namespace forevervalidator::simulation::cuda_search_modifier_detail {
 
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) || defined(__HIPCC__)
 #define FOREVERVALIDATOR_CUDA_HD __host__ __device__
 #else
 #define FOREVERVALIDATOR_CUDA_HD

@@ -13,7 +13,13 @@
 #include "simulation/backends/cuda/cuda_candidate_events.cuh"
 #include "simulation/backends/cuda/cuda_custom_volume.cuh"
 #include "simulation/backends/cuda/cuda_modifier_event_ops.cuh"
+#include "simulation/backends/cuda/cuda_scene_storage.h"
 #include "simulation/backends/cuda/cuda_search_segments.cuh"
+
+namespace forevervalidator::simulation::cuda::facts {
+// cuda_state_layout.h's, which only the device compiler sees.
+inline std::uint32_t WheelCount(const CudaVehicleState &vehicle) { return vehicle.wheels.count; }
+}  // namespace forevervalidator::simulation::cuda::facts
 
 namespace forevervalidator::simulation::twin_search {
 
@@ -23,6 +29,9 @@ using cuda_search_detail::ApplyControlEvent;
 using cuda_search_detail::DeviceControlState;
 using cuda_search_detail::DeviceSample;
 namespace modifier_ops = cuda_search_modifier_detail;
+// The twin's progress names the slot of the tick's last accepted passage in lastAcceptedBlockId.
+inline std::uint32_t CheckpointSlotOfBlock(const void *, std::uint32_t slot) { return slot; }
+using std::isfinite;
 
 // Verbatim CUDA source: its switches cover only the kinds each function
 // handles (nvcc does not warn about the others).
@@ -53,6 +62,33 @@ cuda_search_detail::DeviceSample EvaluateSearchState(const CudaSearchEvaluatorCo
                                                      bool *reported) {
     return extracted::EvaluateState(evaluator, state, previousPosition, previousVelocity, previousTimeMs, currentTimeMs,
                                     stuntsScore, reported);
+}
+
+bool EvaluateSearchCondition(const CudaSearchConditionInstruction *instructions, std::uint32_t count,
+                             const CudaCandidatePhysicsState &state, std::uint64_t iteration,
+                             const ProgramClock &clock) {
+    return extracted::EvaluateCondition(instructions, count, state, iteration, clock.lastImprovementSeconds,
+                                        clock.lastRestartSeconds, clock.currentSeconds);
+}
+
+bool UpdateScriptedSearchSample(const CudaSearchEvaluatorConfiguration &evaluator,
+                                const CudaCandidatePhysicsState &state, std::uint64_t iteration,
+                                const ProgramClock &clock, double currentTimeMs,
+                                cuda_search_detail::DeviceSample *sample) {
+    return extracted::UpdateScriptedSample(evaluator, state, iteration, clock.lastImprovementSeconds,
+                                           clock.lastRestartSeconds, clock.currentSeconds, currentTimeMs, sample);
+}
+
+bool SearchCheckpointEventAccepted(const CudaSearchEvaluatorConfiguration &evaluator,
+                                   const CudaCandidatePhysicsState &state, const CheckpointCounters &before) {
+    return extracted::CheckpointEventAccepted(
+            evaluator, state, {before.lapCheckpoints, before.events, before.laps, before.finishes}, nullptr);
+}
+
+bool SearchDistanceTargetReached(const CudaSearchEvaluatorConfiguration &evaluator,
+                                 const CudaCandidatePhysicsState &state, const CheckpointCounters &before) {
+    return extracted::DistanceTargetReached(
+            evaluator, state, {before.lapCheckpoints, before.events, before.laps, before.finishes}, nullptr);
 }
 
 bool PrepareMutationProgram(const CudaSearchExecutorConfiguration &configuration, MutationProgram *program,

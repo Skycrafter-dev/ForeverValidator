@@ -19,6 +19,9 @@
 #include <cmath>
 #define FV_AROUND_WALLS_HD
 #endif
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <intrin.h>
+#endif
 
 namespace forevervalidator::experimental::around_walls {
 
@@ -613,6 +616,15 @@ struct Table {
     }
 };
 
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+// Host: the corners this thread's queries marked since it last cleared the
+// count (several threads may query one table: each learns of its own).
+inline std::uint32_t &HostMisses() {
+    static thread_local std::uint32_t misses = 0u;
+    return misses;
+}
+#endif
+
 // A corner a query needed before it was filled. The table's bytes are the
 // query's to mark even where it reads them as const.
 FV_AROUND_WALLS_HD inline void MarkMissed(const unsigned char *bytes, std::uint64_t corner) {
@@ -622,9 +634,15 @@ FV_AROUND_WALLS_HD inline void MarkMissed(const unsigned char *bytes, std::uint6
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicOr(words + 1u + corner / 32u, 1u << (corner % 32u));
     atomicOr(words, 1u);
+#elif defined(_MSC_VER) && !defined(__clang__)
+    _InterlockedOr(reinterpret_cast<volatile long *>(words + 1u + corner / 32u),
+                   static_cast<long>(1u << (corner % 32u)));
+    _InterlockedOr(reinterpret_cast<volatile long *>(words), 1L);
+    ++HostMisses();
 #else
-    words[1u + corner / 32u] |= 1u << (corner % 32u);
-    words[0] = 1u;
+    __atomic_fetch_or(words + 1u + corner / 32u, 1u << (corner % 32u), __ATOMIC_RELAXED);
+    __atomic_fetch_or(words, 1u, __ATOMIC_RELAXED);
+    ++HostMisses();
 #endif
 }
 

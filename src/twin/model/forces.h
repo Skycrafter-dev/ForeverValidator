@@ -133,7 +133,7 @@ template <class F> struct Ctx {
     M grounded;
     M slipFlag;         // a contact wheel slipped this substep (brake cap selector)
     M live;             // active and not frozen: the lanes this call may write
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) || defined(__HIPCC__)
     const std::uint8_t *fakeTex;   // GPU: the fake-contact texture (k.fakeTextureRed, or its copy in global memory)
 #endif
 };
@@ -270,7 +270,7 @@ template <class F, class S> TW_INLINE void FakeContacts(const CarForceConsts &k,
         const V3L<F> p = mull(c.R, rest) + c.pos;
         const I ix = FakeTexelL(p.x, Lookup32(k.byIdFakePeriodX, surf), Lookup32(k.byIdFakeInvX, surf));
         const I iz = FakeTexelL(p.z, Lookup32(k.byIdFakePeriodZ, surf), Lookup32(k.byIdFakeInvZ, surf));
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) || defined(__HIPCC__)
         const I pix = LoadBytes<F>(c.fakeTex, select(m, tw::math::shl<7>(iz) + ix, I(0)));
 #else
         const I pix = LoadBytes<F>(k.fakeTextureRed, select(m, tw::math::shl<7>(iz) + ix, I(0)));
@@ -1104,7 +1104,7 @@ template <class F, class S> TW_INLINE void Turbo(const CarForceConsts &k, S &s, 
 template <class F, class S>
 TW_INLINE void CarForcesT(const CarForceConsts &k, const WaterZone *water, S &s, const TickInT<F> &in, F h,
                           ForceOutT<F> &out, const M3L<F> &R, LaneM<F> active
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) || defined(__HIPCC__)
                           , const std::uint8_t *fakeTex = nullptr
 #endif
 ) {
@@ -1112,7 +1112,7 @@ TW_INLINE void CarForcesT(const CarForceConsts &k, const WaterZone *water, S &s,
     using I = LaneI<F>;
     using M = LaneM<F>;
     Ctx<F> c;
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) || defined(__HIPCC__)
     c.fakeTex = fakeTex != nullptr ? fakeTex : k.fakeTextureRed;
 #endif
     c.R = R;
@@ -1408,7 +1408,7 @@ TW_INLINE void CarForcesAirT(const CarForceConsts &k, const WaterZone *water, S 
     using I = LaneI<F>;
     using M = LaneM<F>;
     Ctx<F> c;
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) || defined(__HIPCC__)
     c.fakeTex = k.fakeTextureRed;
 #endif
     c.R = R;
@@ -1539,13 +1539,13 @@ TW_INLINE V3 ToV3(V3L<f32x1> a) { return V3{a.x.v, a.y.v, a.z.v}; }
 // pass FV's stored matrix instead to separate representation noise).
 TW_INLINE void CarForcesR(const CarForceConsts &k, const WaterZone *water, TwinState &s, const CarTickIn &in, float h,
                           CarForceOut &out, const M3 &R
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) || defined(__HIPCC__)
                           , const std::uint8_t *fakeTex = nullptr
 #endif
 ) {
     TickInT<f32x1> inl{f32x1(in.gas), f32x1(in.brake), f32x1(in.steer), i32x1(static_cast<std::int32_t>(in.tickMs))};
     ForceOutT<f32x1> o;
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) || defined(__HIPCC__)
     CarForcesT<f32x1>(k, water, s, inl, f32x1(h), o, detail::ToLane(R), MaskTrue<f32x1>(), fakeTex);
 #else
     CarForcesT<f32x1>(k, water, s, inl, f32x1(h), o, detail::ToLane(R), MaskTrue<f32x1>());
@@ -1564,7 +1564,7 @@ TW_INLINE void CarForces(const CarForceConsts &k, const WaterZone *water, TwinSt
                          CarForceOut &out) {
     CarForcesR(k, water, s, in, h, out, rot_from_quat(s.quat));
 }
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) || defined(__HIPCC__)
 // GPU: fakeTex, the fake-contact texture to read (the copy in global memory: a warp's lanes read different texels, which
 // constant memory serves one address at a time).
 TW_INLINE void CarForces(const CarForceConsts &k, const WaterZone *water, TwinState &s, const CarTickIn &in, float h,

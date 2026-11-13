@@ -2299,12 +2299,14 @@ bool FillDistanceGeometry(
     return true;
 }
 
-simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
-        const PhysicsSandboxCudaEvaluator &source) {
-    return std::visit(
-            [](const auto &evaluator) {
+// Into result (default-constructed), not returned: the configuration is
+// ~90 KB (the Distance target's tables), too much to copy through a thread's
+// stack (1 MB on Windows).
+void FillCudaEvaluator(const PhysicsSandboxCudaEvaluator &source,
+                       simulation::CudaSearchEvaluatorConfiguration &result) {
+    std::visit(
+            [&result](const auto &evaluator) {
                 using T = std::decay_t<decltype(evaluator)>;
-                simulation::CudaSearchEvaluatorConfiguration result;
                 if constexpr (std::is_same_v<
                                       T,
                                       PhysicsSandboxCudaVelocityEvaluator>) {
@@ -2452,7 +2454,6 @@ simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
                     result.kind =
                             simulation::CudaSearchEvaluatorKind::FinishTime;
                 }
-                return result;
             },
             source);
 }
@@ -3546,6 +3547,7 @@ PhysicsSandboxCudaSearchSession::Impl::Convert(
             execution.winnerStateCaptureKernelMilliseconds;
     result.metrics.finalizationKernelMilliseconds =
             execution.finalizationKernelMilliseconds;
+    result.metrics.aroundWallsReruns = execution.aroundWallsReruns;
     result.metrics.simulationThreadsPerBlock =
             execution.simulationThreadsPerBlock;
     result.metrics.simulationRegistersPerThread =
@@ -3979,7 +3981,10 @@ CreatePhysicsSandboxCudaSearchSession(
             }
             maximumEventCount = sourceInputs.size() + segments * perSegmentGrowth;
         }
-        simulation::CudaSearchExecutorConfiguration internal;
+        // On the heap: see FillCudaEvaluator.
+        const auto internalStorage =
+                std::make_unique<simulation::CudaSearchExecutorConfiguration>();
+        simulation::CudaSearchExecutorConfiguration &internal = *internalStorage;
         internal.changedSegmentCount = configuration.changedSegmentCount;
         for (const auto &segment : configuration.mutationSegments) {
             internal.mutationSegments.push_back(
@@ -4189,7 +4194,7 @@ CreatePhysicsSandboxCudaSearchSession(
                                     "scripted GPU incumbent objective count differs"));
             }
         }
-        internal.evaluator = CudaEvaluator(configuration.evaluator);
+        FillCudaEvaluator(configuration.evaluator, internal.evaluator);
         // The Vulkan shaders are generated from the CUDA sources and have not
         // been regenerated for these options yet.
         if (useVulkan) {

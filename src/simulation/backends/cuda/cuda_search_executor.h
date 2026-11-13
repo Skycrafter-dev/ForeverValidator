@@ -324,6 +324,9 @@ struct CudaSearchBatchExecution {
     double winnerReductionKernelMilliseconds = 0.0;
     double winnerStateCaptureKernelMilliseconds = 0.0;
     double finalizationKernelMilliseconds = 0.0;
+    // Around walls: times the batch ran again after filling the corners it
+    // needed (its time includes those runs and fills).
+    std::uint32_t aroundWallsReruns = 0u;
     std::uint32_t simulationThreadsPerBlock = 0u;
     std::uint32_t simulationRegistersPerThread = 0u;
     std::uint64_t simulationLocalBytesPerThread = 0u;

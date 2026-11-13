@@ -224,11 +224,16 @@ public:
 
     bool Allocate() {
         Reset();
+        // The kernels poll it while they run: on AMD it must be fine-grained
+        // (coherent), else a kernel may read a cached 0 until it ends.
         if (cudaHostAlloc(
                     reinterpret_cast<void **>(&host_),
                     sizeof(*host_),
-                    cudaHostAllocMapped | cudaHostAllocPortable) !=
-            cudaSuccess) {
+                    cudaHostAllocMapped | cudaHostAllocPortable
+#if defined(__HIP_PLATFORM_AMD__)
+                            | hipHostMallocCoherent
+#endif
+                    ) != cudaSuccess) {
             return false;
         }
         if (cudaHostGetDevicePointer(
@@ -5059,7 +5064,8 @@ struct CudaSearchExecutor::Impl {
             bool baseline,
             const std::function<bool()> &cancellationRequested) {
         const bool tables = !configuration.aroundWallsTables.empty();
-        for (bool rerun = false;; rerun = true) {
+        std::uint32_t reruns = 0u;
+        for (bool rerun = false;; rerun = true, ++reruns) {
             const cudaError_t backup = tables ? CopyGlobalBest(rerun) : cudaSuccess;
             if (backup != cudaSuccess) {
                 CudaSearchBatchExecution result;
@@ -5071,6 +5077,7 @@ struct CudaSearchExecutor::Impl {
             }
             CudaSearchBatchExecution result = Execute(
                     firstCandidateId, candidateCount, baseline, cancellationRequested);
+            result.aroundWallsReruns = reruns;
             if (result.status != CudaSearchStatus::Success || !tables) {
                 return result;
             }

@@ -70,7 +70,8 @@ const TickTable *Table(Kind kind) {
 #endif
 
 bool Supported(Kind kind) {
-#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__))
+// (Windows: no dispatch, the baseline only; __builtin_cpu_supports would need compiler-rt there)
+#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__)) && !defined(_WIN32)
     switch (kind) {
     // The variants are built for x86-64-v3 / -v4 (FOREVERVALIDATOR_TWIN_MARCH) or for AVX2 + FMA /
     // AVX-512F + VL + FMA; the levels cover both.

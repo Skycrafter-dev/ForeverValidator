@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "tw_gpu.h"
+#include "tw_gpu_judge.cuh"
 #include "tw_gpu_packs.cuh"
 #include "tw_gpu_session.h"
 #include "tw_gpu_util.cuh"
@@ -49,7 +50,7 @@ using namespace dev;
 #ifndef TW_GPU_CONST_CAR
 #define TW_GPU_CONST_CAR 1
 #endif
-__constant__ unsigned char gCarK[sizeof(model::CarForceConsts)] __attribute__((aligned(64)));
+alignas(64) __constant__ unsigned char gCarK[sizeof(model::CarForceConsts)];
 // Per device: the car constants' bytes in gCarK and the live engines reading them (SearchEngine::Init).
 struct ConstCarSlots {
     struct Slot {
@@ -360,6 +361,20 @@ struct KernelStats {
     unsigned long long clk[8];   // FOREVERVALIDATOR_TWIN_GPU_CLOCKS: RunTick's stage cycles [0..5], the judge, the whole thread
 };
 
+// The judged tick's state as the next tick's previous one (JudgeConfig::targets).
+__device__ __forceinline__ void Remember(const model::TwinState &s, PreviousTick &p) {
+    for (int a = 0; a < 3; ++a) {
+        p.position[a] = s.pos[a];
+        p.velocity[a] = s.vel[a];
+        p.angular[a] = s.angVel[a];
+    }
+    for (int a = 0; a < 4; ++a) p.quat[a] = s.quat[a];
+    p.counters[0] = s.lapCpCount;
+    p.counters[1] = s.cpEvents;
+    p.counters[2] = s.laps;
+    p.counters[3] = s.finishCount;
+}
+
 __global__ void SearchKernel(DevPacks P, JudgeConfig c, const SearchJob *jobs, std::uint32_t n, const model::TwinState *starts,
                              const std::uint32_t *controls, SearchResult *results, KernelStats *stats, bool clocks) {
     const std::uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -379,6 +394,8 @@ __global__ void SearchKernel(DevPacks P, JudgeConfig c, const SearchJob *jobs, s
     std::uint8_t verdict = kJudgeContinue;
     bool finished = false;
     std::uint64_t finishLowerNs = 0u;
+    PreviousTick previous;
+    Remember(s, previous);
     for (std::uint32_t k = 0; k < job.ticks; ++k) {
         const bool completedBefore = s.raceCompleted != 0u;
         RunTickSession(P, s, controls[job.controls + k], contacts, finishStart, &substeps, &lost, clocks ? clk : nullptr);
@@ -390,8 +407,14 @@ __global__ void SearchKernel(DevPacks P, JudgeConfig c, const SearchJob *jobs, s
             finished = true;
             finishLowerNs = s.finishPresent != 0u ? (static_cast<std::uint64_t>(s.finishLowerNs[1]) << 32) | s.finishLowerNs[0] : 0u;
         }
-        const View v{s.pos, s.vel, s.quat, s.raceCompleted != 0u, s.tickMs, finished, finishLowerNs};
-        verdict = OnTick(c, job.firstTick + k, v, r.judge, pt, r);
+        if (c.targets != 0u) {   // (no tick's events here: the slot of its last passage is unknown)
+            verdict = fvjudge::OnTickTargets(c, job.firstTick + k, s, previous, 0xFFFFFFFFu, finished, finishLowerNs, r.judge,
+                                             c.scripted != nullptr ? c.scripted + kScriptedDoubles * i : nullptr);
+            Remember(s, previous);
+        } else {
+            const View v{s.pos, s.vel, s.quat, s.raceCompleted != 0u, s.tickMs, finished, finishLowerNs};
+            verdict = OnTick(c, job.firstTick + k, v, r.judge, pt, r);
+        }
         for (int a = 0; a < 3; ++a) r.judge.previous[a] = s.pos[a];
         if (clocks) clk[6] += static_cast<unsigned long long>(clock64() - j0);
         if (verdict != kJudgeContinue) break;
@@ -416,15 +439,20 @@ struct TailRec {
     std::uint32_t *count;       // the jobs' count
 };
 __device__ __forceinline__ unsigned long long GlobalTimer() {
+#if defined(__HIPCC__)
+    return static_cast<unsigned long long>(wall_clock64());   // the device's constant-rate clock (tail records only)
+#else
     unsigned long long t;
     asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(t));
     return t;
+#endif
 }
 
 // A parked job's judge (LaneJobs::Save / Load).
 struct alignas(16) LaneSaved {
     SearchResult r;
     PoseTrack pt;
+    PreviousTick previous;
     std::uint64_t finishLowerNs;
     std::uint32_t finished;
 };
@@ -443,6 +471,7 @@ struct LaneJobs {
     // the lane's current job's judge
     SearchResult r;
     PoseTrack pt;
+    PreviousTick previous;   // JudgeConfig::targets
     std::uint32_t firstTick;
     std::uint8_t verdict;
     bool finished;                 // step::StepKernel's sticky Events::finished
@@ -470,6 +499,7 @@ struct LaneJobs {
         LaneSaved v;
         v.r = r;
         v.pt = pt;
+        v.previous = previous;
         v.finishLowerNs = finishLowerNs;
         v.finished = finished ? 1u : 0u;
         const uint4 *w = reinterpret_cast<const uint4 *>(&v);
@@ -481,6 +511,7 @@ struct LaneJobs {
         for (int q = 0; q < kSaveQuads; ++q) w[q] = __ldcg(p.at(q));
         r = v.r;
         pt = v.pt;
+        previous = v.previous;
         finishLowerNs = v.finishLowerNs;
         finished = v.finished != 0u;
         firstTick = jobs[j].firstTick;
@@ -492,6 +523,7 @@ struct LaneJobs {
         r.poseCount = 0u;
         r.poseOverflow = 0u;
         pt = PoseTrack{0.0, false};
+        if (c->targets != 0u) Remember(starts[job.start], previous);
         firstTick = job.firstTick;
         verdict = kJudgeContinue;
         finished = false;
@@ -503,8 +535,14 @@ struct LaneJobs {
             finished = true;
             finishLowerNs = s.finishPresent != 0u ? (static_cast<std::uint64_t>(s.finishLowerNs[1]) << 32) | s.finishLowerNs[0] : 0u;
         }
-        const View v{s.pos, s.vel, s.quat, s.raceCompleted != 0u, s.tickMs, finished, finishLowerNs};
-        verdict = OnTick(*c, firstTick + t, v, r.judge, pt, r);
+        if (c->targets != 0u) {
+            verdict = fvjudge::OnTickTargets(*c, firstTick + t, s, previous, ev.cpLastSlot, finished, finishLowerNs, r.judge,
+                                             c->scripted != nullptr ? c->scripted + kScriptedDoubles * j : nullptr);
+            Remember(s, previous);
+        } else {
+            const View v{s.pos, s.vel, s.quat, s.raceCompleted != 0u, s.tickMs, finished, finishLowerNs};
+            verdict = OnTick(*c, firstTick + t, v, r.judge, pt, r);
+        }
         for (int a = 0; a < 3; ++a) r.judge.previous[a] = s.pos[a];
         return verdict == kJudgeContinue;
     }
@@ -575,6 +613,9 @@ struct Pinned {
 struct JobSet {
     Pinned hJobs, hControls, hResults;
     Grow dJobs, dControls, dResults;
+    Pinned hScripted;   // Scripted: the jobs' objectives for the next Submit (scriptedJobs of them), then its results
+    Grow dScripted;
+    std::size_t scriptedJobs = 0u;
     DevBuffer stats;
     Pinned hStats;   // KernelStats (pinned: a copy to pageable memory would make Submit wait for the kernel)
     LaneSpace space; // the lane runner's lanes, rows and pool counter
@@ -608,6 +649,7 @@ struct SearchEngine::Dev {
     CollisionPacks collision;
     DevBuffer starts;
     DevBuffer packs;   // the world's DevPacks (the lane runner reads them through a pointer)
+    DevBuffer evaluator, condition, tables;   // SetTargets
     JobSet sets[kMaxSets];
     int used = 2;                          // SetSets
     unsigned long long tailLastEnd = 0u;   // FOREVERVALIDATOR_TWIN_GPU_TAIL: the last batch's kernel end (globaltimer)
@@ -878,7 +920,7 @@ std::uint32_t *SearchEngine::Controls(int set, std::size_t count, std::string *e
                                                                                               : nullptr;
 }
 
-bool SearchEngine::Submit(int set, const JudgeConfig &config, std::size_t n, std::size_t controlCount, std::string *error, int after) {
+bool SearchEngine::Submit(int set, const JudgeConfig &given, std::size_t n, std::size_t controlCount, std::string *error, int after) {
     if (!dev_) return *error = "SearchEngine: not initialized", false;
     Dev &d = *dev_;
     JobSet &js = d.sets[set];
@@ -897,6 +939,19 @@ bool SearchEngine::Submit(int set, const JudgeConfig &config, std::size_t n, std
                                       "controls H2D", error)) ||
         !Check(cudaMemsetAsync(js.stats.ptr, 0, sizeof(KernelStats), js.stream), "stats", error))
         return false;
+    JudgeConfig config = given;
+    if (config.targets != 0u) {
+        config.evaluator = d.evaluator.ptr;
+        config.condition = d.condition.ptr;
+        config.scripted = nullptr;
+        if (js.scriptedJobs >= n) {
+            const std::size_t bytes = sizeof(double) * kScriptedDoubles * n;
+            if (!js.dScripted.Fit(bytes, error) ||
+                !Check(cudaMemcpyAsync(js.dScripted.b.ptr, js.hScripted.p, bytes, cudaMemcpyHostToDevice, js.stream), "scripted H2D", error))
+                return false;
+            config.scripted = static_cast<double *>(js.dScripted.b.ptr);
+        }
+    }
     const std::uint32_t threads = BlockThreads();
     static const bool clocks = std::getenv("FOREVERVALIDATOR_TWIN_GPU_CLOCKS") != nullptr;
     const std::uint32_t blocks = static_cast<std::uint32_t>((n + threads - 1u) / threads);
@@ -925,9 +980,47 @@ bool SearchEngine::Submit(int set, const JudgeConfig &config, std::size_t n, std
     if (!Check(cudaGetLastError(), "SearchKernel launch", error) ||
         !Check(cudaMemcpyAsync(js.hResults.p, js.dResults.b.ptr, sizeof(SearchResult) * n, cudaMemcpyDeviceToHost, js.stream),
                "results D2H", error) ||
-        !Check(cudaMemcpyAsync(js.hStats.p, js.stats.ptr, sizeof(KernelStats), cudaMemcpyDeviceToHost, js.stream), "stats D2H", error))
+        !Check(cudaMemcpyAsync(js.hStats.p, js.stats.ptr, sizeof(KernelStats), cudaMemcpyDeviceToHost, js.stream), "stats D2H", error) ||
+        (config.scripted != nullptr &&
+         !Check(cudaMemcpyAsync(js.hScripted.p, config.scripted, sizeof(double) * kScriptedDoubles * n, cudaMemcpyDeviceToHost, js.stream),
+                "scripted D2H", error)))
         return false;
+    js.scriptedJobs = 0u;
     return true;
+}
+
+std::size_t SearchEngine::TargetBytes() const { return sizeof(fvjudge::CudaSearchEvaluatorConfiguration); }
+
+double *SearchEngine::Scripted(int set, std::size_t n, std::string *error) {
+    JobSet &js = dev_->sets[set];
+    if (!js.hScripted.Fit(sizeof(double) * kScriptedDoubles * std::max<std::size_t>(n, 1u), error)) return nullptr;
+    js.scriptedJobs = n;
+    return static_cast<double *>(js.hScripted.p);
+}
+
+bool SearchEngine::SetTargets(const void *evaluator, std::size_t evaluatorBytes, std::size_t tablesField,
+                              const unsigned char *tables, std::size_t tableBytes, const void *condition, std::size_t conditionBytes,
+                              std::string *error) {
+    if (!dev_) return *error = "SearchEngine: not initialized", false;
+    Dev &d = *dev_;
+    if (tablesField + sizeof(void *) > evaluatorBytes) return *error = "SearchEngine: tables field out of the evaluator", false;
+    if (!d.tables.Put(tables, tableBytes, error)) return false;
+    std::vector<unsigned char> copy(static_cast<const unsigned char *>(evaluator), static_cast<const unsigned char *>(evaluator) + evaluatorBytes);
+    const void *device = tableBytes != 0u ? d.tables.ptr : nullptr;
+    std::memcpy(copy.data() + tablesField, &device, sizeof device);
+    return d.evaluator.Put(copy.data(), evaluatorBytes, error) && d.condition.Put(condition, conditionBytes, error);
+}
+
+bool SearchEngine::ReadTables(unsigned char *host, std::size_t offset, std::size_t bytes, std::string *error) {
+    if (!dev_ || offset + bytes > dev_->tables.bytes) return *error = "SearchEngine: tables read out of range", false;
+    return Check(cudaMemcpy(host, static_cast<unsigned char *>(dev_->tables.ptr) + offset, bytes, cudaMemcpyDeviceToHost), "tables D2H",
+                 error);
+}
+
+bool SearchEngine::WriteTables(const unsigned char *host, std::size_t offset, std::size_t bytes, std::string *error) {
+    if (!dev_ || offset + bytes > dev_->tables.bytes) return *error = "SearchEngine: tables write out of range", false;
+    return Check(cudaMemcpy(static_cast<unsigned char *>(dev_->tables.ptr) + offset, host, bytes, cudaMemcpyHostToDevice), "tables H2D",
+                 error);
 }
 
 const SearchResult *SearchEngine::Collect(int set, SearchStats *stats, std::string *error) {
@@ -1003,10 +1096,16 @@ bool SearchEngine::SubmitJobs(int set, const JudgeConfig &config, const SearchJo
     if (TailOn() && js.tail.bytes != 0u &&
         !Check(cudaMemsetAsync(js.tail.ptr, 0, sizeof(unsigned long long) * 2u * (js.space.lanes / 32u), js.stream), "tail", error))
         return false;
+    JudgeConfig judged = config;   // (targets: no scripted objectives on this path)
+    if (judged.targets != 0u) {
+        judged.evaluator = d.evaluator.ptr;
+        judged.condition = d.condition.ptr;
+        judged.scripted = nullptr;
+    }
     cudaEventRecord(js.e0, js.stream);
     const DevPacks packs{d.car.dev()->k, d.car.dev()->w, d.car.dev()->r, d.collision.dev()->w};   // M: by value (__grid_constant__)
     SearchLanesKernel<<<blocks, js.space.threads, 0, js.stream>>>(
-            packs, config, jobs, static_cast<std::uint32_t>(maxJobs),
+            packs, judged, jobs, static_cast<std::uint32_t>(maxJobs),
             static_cast<const model::TwinState *>(d.starts.ptr), controls, static_cast<SearchResult *>(js.dResults.b.ptr),
             static_cast<KernelStats *>(js.stats.ptr), js.space.Rows(), js.space.Next(), 0u, count, Tail(js));
     cudaEventRecord(js.e1, js.stream);

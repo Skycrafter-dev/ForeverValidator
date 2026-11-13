@@ -208,7 +208,7 @@ struct HipSearchConditionConfiguration {
     double lastRestartTimeSeconds = 0.0;
 };
 
-struct HipSearchInputEvent {
+struct alignas(16) HipSearchInputEvent {
     std::int32_t timeMs = 0;
     std::uint32_t action = 0u;
     std::uint32_t valueKind = 0u;
@@ -326,6 +326,9 @@ struct HipSearchBatchExecution {
     double winnerReductionKernelMilliseconds = 0.0;
     double winnerStateCaptureKernelMilliseconds = 0.0;
     double finalizationKernelMilliseconds = 0.0;
+    // Around walls: times the batch ran again after filling the corners it
+    // needed (its time includes those runs and fills).
+    std::uint32_t aroundWallsReruns = 0u;
     std::uint32_t simulationThreadsPerBlock = 0u;
     std::uint32_t simulationRegistersPerThread = 0u;
     std::uint64_t simulationLocalBytesPerThread = 0u;

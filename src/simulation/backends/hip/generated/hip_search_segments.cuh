@@ -4,7 +4,7 @@
 
 #include "simulation/backends/hip/generated/hip_search_branch_state.cuh"
 
-#if defined(__HIPCC__)
+#if defined(__HIPCC__) || defined(__HIPCC__)
 #define FOREVERVALIDATOR_SEGMENT_HD __host__ __device__
 #else
 #define FOREVERVALIDATOR_SEGMENT_HD

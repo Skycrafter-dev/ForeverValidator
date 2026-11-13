@@ -66,14 +66,17 @@
 #include <deque>
 #include <limits>
 #include <mutex>
+#include <shared_mutex>
 #include <new>
 #include <string>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 #if defined(__x86_64__) || defined(__i386__)
 #include <x86intrin.h>
 #endif
 
+#include <forevervalidator/experimental/around_walls_table.h>
 #include <forevervalidator/experimental/twin.h>
 
 #include "simulation/backends/cuda/cuda_search_branch_state.cuh"
@@ -339,7 +342,47 @@ public:
             finish.estimatedNs = finish.upperBoundNs;
             view->finish = finish;
         }
-        // Follow-up for condition programs: checkpoint counters, wheels, gear, rpm.
+        ReadFull(experimental::twin::internal::ToModel(state), events != nullptr ? events->cpLastSlot : 0xFFFFFFFFu, view);
+    }
+    // The rest of what condition programs and the checkpoint, distance and scripted targets read: the
+    // twin's fields under their FV names (tools/twin/twin_fv_state.cpp). The local velocity is the body
+    // frame's (FV's goes through the corpus iso: the same for the cars the twin runs).
+    static void ReadFull(const tw::model::TwinState &s, std::uint32_t cpLastSlot, EvaluationView *view) {
+        CudaCandidatePhysicsState &state = *view->state;
+        CHmsDyna::CHmsStateDyna &frame = state.body.current;
+        frame.angularSpeed = {s.angVel[0], s.angVel[1], s.angVel[2]};
+        frame.rotation.Set(frame.rotationQuat);
+        state.vehicle.frameHistory.physicsCurrent.localLinearSpeed = LocalSpeed(frame);
+        CudaVehicleState &vehicle = state.vehicle;
+        vehicle.controls.forcedLowSpeedFriction = s.freewheel != 0u;
+        vehicle.contacts.lateralSlowDownContactActive = s.latContact != 0u;
+        vehicle.wheels.count = 4u;
+        for (std::uint32_t i = 0u; i < 4u; ++i) {
+            auto &wheel = vehicle.wheels.values[i].realTime;
+            wheel.contactPresent = s.contact[i] != 0u;
+            wheel.slipping = s.slipping[i] != 0u;
+            wheel.contactMaterial = static_cast<decltype(wheel.contactMaterial)>(s.surface[i]);
+        }
+        vehicle.engine.useLowSpeedGateB = s.reverse != 0u;
+        vehicle.engine.gearIndex = s.gear;
+        vehicle.engine.engineInputMemory = s.rpm;
+        vehicle.turbo.type = static_cast<decltype(vehicle.turbo.type)>(s.trbType);
+        vehicle.turbo.type2Phase = static_cast<decltype(vehicle.turbo.type2Phase)>(s.trbPhase);
+        vehicle.turbo.impulseScale = s.trbScale;
+        ReplayRaceProgress &race = state.race.progress;
+        race.checkpointCount = s.cpCount;
+        race.currentLapCheckpointCount = s.lapCpCount;
+        race.totalCheckpointEventCount = s.cpEvents;
+        race.completedLapCount = s.laps;
+        race.finishCount = s.finishCount;
+        race.lastAcceptedBlockId = cpLastSlot;   // a slot (twin_search::SearchCheckpointEventAccepted)
+        state.race.checkpointSlotsPassed.words[0] = s.cpSlots[0];
+        state.race.checkpointSlotsPassed.words[1] = s.cpSlots[1];
+    }
+    static GmVec3 LocalSpeed(const CHmsDyna::CHmsStateDyna &frame) {
+        const auto dot = [](const GmVec3 &a, const GmVec3 &b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
+        return {dot(frame.linearSpeed, frame.rotation.basisX), dot(frame.linearSpeed, frame.rotation.basisY),
+                dot(frame.linearSpeed, frame.rotation.basisZ)};
     }
     // The same fields from the batch runner's per-tick view (tw_isa.h BatchTick): the same bits.
     static void ReadTick(const tw::isa::BatchTick &t, EvaluationView *view) {
@@ -360,6 +403,7 @@ public:
             finish.estimatedNs = finish.upperBoundNs;
             view->finish = finish;
         }
+        if (t.state != nullptr) ReadFull(*t.state, t.cpLastSlot, view);   // BatchPolicy::fullState
     }
     static experimental::twin::TwinControl ToTwinControl(const ReplayControlTick &tick) {
         return ToTwinControl(tick.controls, tick.actions);
@@ -502,15 +546,34 @@ public:
         source_ = std::move(source);
         if (source_.session == nullptr || !source_.startSession) return fail("no FV session");
         const CudaSearchEvaluatorKind kind = config_.evaluator.kind;
-        if (kind == CudaSearchEvaluatorKind::Scripted || kind == CudaSearchEvaluatorKind::CheckpointEvent ||
-            kind == CudaSearchEvaluatorKind::Distance || config_.condition.has_value()) {
-            return fail("scripted, checkpoint and distance targets and condition programs are not supported yet "
-                        "(supported: velocity, point, pose, volume entry, custom volume, stunt points, finish time)");
+        // the judge's reads beyond the body and the finish (TwinPhysics::ReadFull)
+        fullState_ = kind == CudaSearchEvaluatorKind::Scripted || kind == CudaSearchEvaluatorKind::CheckpointEvent ||
+                     kind == CudaSearchEvaluatorKind::Distance || config_.condition.has_value();
+        if (fullState_ && source_.options.debugDelegateToOptimizedCpu) {
+            return fail("the FV delegate judges velocity, point, pose, volume, stunt and finish targets only");
         }
-        if ((kind == CudaSearchEvaluatorKind::VolumeEntry || kind == CudaSearchEvaluatorKind::CustomVolumeEntry) &&
-            (config_.evaluator.optionFlags & CudaSearchEntrySpeed) != 0u) {
-            return fail("the entry speed option of volume targets is not supported yet");
+        // programs that read the candidate's iteration judge every candidate's shared prefix again
+        const auto readsIteration = [](const CudaSearchConditionInstruction *instructions, std::size_t count) {
+            for (std::size_t i = 0; i < count; ++i) {
+                if ((instructions[i].opcode == CudaSearchConditionOpcode::Scalar ||
+                     instructions[i].opcode == CudaSearchConditionOpcode::Vector) &&
+                    instructions[i].value == CudaSearchConditionValue::Iterations) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        perCandidatePrefix_ =
+                (config_.condition &&
+                 readsIteration(config_.condition->instructions.data(), config_.condition->instructions.size())) ||
+                (kind == CudaSearchEvaluatorKind::Scripted &&
+                 readsIteration(config_.evaluator.scriptedInstructions, CudaSearchMaximumScriptedInstructions));
+        if (kind == CudaSearchEvaluatorKind::Distance && !config_.aroundWallsTables.empty()) {
+            // around walls on the host copy of the tables (EvaluateTick fills their corners)
+            aroundWalls_ = config_.aroundWallsTables.data();
+            config_.evaluator.aroundWalls = aroundWalls_;
         }
+        if (const std::optional<ReplaySimulationStateView> state = source_.session->CurrentState()) race_ = state->race;
         if (config_.evaluationEndTimeMs < config_.evaluationStartTimeMs ||
             config_.evaluationStartTimeMs < config_.branchTimeMs + config_.tickDurationMs ||
             config_.baselineTicks.empty()) {
@@ -547,6 +610,8 @@ public:
                 return fail("world source: " + build);
             }
             world.collision = source_.options.collision;
+            replayPlayMode_ = static_cast<std::uint32_t>(world.shortcutMode ? EChallengePlayMode::Shortcut
+                                                                            : EChallengePlayMode::Race);
             twinWorld_ = tw::fv::BuildTwinWorld(world, source_.options.policy, tw::fv::TwinWorldLabel{}, &build);
             if (!twinWorld_) return fail("world build: " + build);
             tw::model::TwinState start;
@@ -590,7 +655,8 @@ public:
             if (lanes_ != 16 && lanes_ != 8) lanes_ = 1;
             batchPath_ = lanes_ > 1 && twinWorld_->Internal().isa != nullptr;
             const char *dedupe = std::getenv("FOREVERVALIDATOR_TWIN_SEARCH_DEDUPE");
-            dedupe_ = dedupe == nullptr || std::strcmp(dedupe, "0") != 0;
+            // (a duplicate replays its original's ticks, which carry no full state)
+            dedupe_ = !fullState_ && (dedupe == nullptr || std::strcmp(dedupe, "0") != 0);
             const char *order = std::getenv("FOREVERVALIDATOR_TWIN_SEARCH_ORDER");
             longestFirst_ = order == nullptr || std::strcmp(order, "slot") != 0;
             const char *laneMin = std::getenv("FOREVERVALIDATOR_TWIN_SEARCH_LANE_MIN");
@@ -629,6 +695,11 @@ public:
             globalBest_.valid = true;
             globalBest_.mutation = incumbent.mutation;
             globalBest_.preciseFinish = incumbent.preciseFinish;
+            globalBest_.scriptedObjectiveCount = incumbent.scriptedObjectiveCount;
+            for (std::uint32_t i = 0u; i < incumbent.scriptedObjectiveCount; ++i) {
+                globalBest_.objectiveScores[i] = incumbent.objectiveScores[i];
+                globalBest_.metricValues[i] = incumbent.metricValues[i];
+            }
             globalBest_.eventCount = static_cast<std::uint32_t>(program_.baselineInputs.size());
             globalBestEvents_ = program_.baselineInputs;
             globalBestMutationCount_ = incumbent.mutationCount;
@@ -679,8 +750,13 @@ public:
         ++programVersion_;
         return true;
     }
-    bool UpdateConditionTimes(double, double) noexcept override {
-        return false;  // condition programs are not supported yet
+    bool UpdateConditionTimes(double lastImprovementTimeSeconds, double lastRestartTimeSeconds) noexcept override {
+        if (!config_.condition || !std::isfinite(lastImprovementTimeSeconds) || !std::isfinite(lastRestartTimeSeconds)) {
+            return false;
+        }
+        config_.condition->lastImprovementTimeSeconds = lastImprovementTimeSeconds;
+        config_.condition->lastRestartTimeSeconds = lastRestartTimeSeconds;
+        return true;
     }
     const TwinSearchHostMetrics &LastMetrics() const noexcept override { return metrics_; }
 
@@ -698,7 +774,6 @@ private:
         // Twin mode: one batch runner per worker; its evaluator feeds `judge`.
         std::unique_ptr<experimental::twin::TwinBatchRunner> runner;
         TickJudge *judge = nullptr;
-        GmVec3 previous{};
         bool unsupported = false;
         std::vector<experimental::twin::TwinControl> controls;  // every tick's control (BuildTicks)
         std::uint32_t tickOffset = 0u;                           // the runner's first tick in the timeline
@@ -757,12 +832,34 @@ private:
         }
     }
 
+    // The tick before the one judged, as the kernel keeps it: previousPosition, previousVelocity,
+    // checkpointBefore, and the body condition programs read as body.temporary.
+    struct PreviousTick {
+        float position[3] = {}, velocity[3] = {}, angular[3] = {}, quat[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        twin_search::CheckpointCounters counters;
+    };
+    static PreviousTick Previous(const CudaCandidatePhysicsState &state) {
+        const CHmsDyna::CHmsStateDyna &b = state.body.current;
+        const ReplayRaceProgress &r = state.race.progress;
+        PreviousTick p;
+        p.position[0] = b.position.x, p.position[1] = b.position.y, p.position[2] = b.position.z;
+        p.velocity[0] = b.linearSpeed.x, p.velocity[1] = b.linearSpeed.y, p.velocity[2] = b.linearSpeed.z;
+        p.angular[0] = b.angularSpeed.x, p.angular[1] = b.angularSpeed.y, p.angular[2] = b.angularSpeed.z;
+        p.quat[0] = b.rotationQuat.x, p.quat[1] = b.rotationQuat.y, p.quat[2] = b.rotationQuat.z, p.quat[3] = b.rotationQuat.w;
+        p.counters = {r.currentLapCheckpointCount, r.totalCheckpointEventCount, r.completedLapCount, r.finishCount};
+        return p;
+    }
+
     // A judge's state without its identity (TickJudge::Export / Import).
     struct PrefixJudge {
         double score = 0.0, timeMs = 0.0, detail0 = 0.0, detail1 = 0.0;
         std::uint32_t evaluationTick = 0u, evaluationIndex = 0u;
         std::uint8_t valid = 0u, preciseFinish = 0u, reported = 0u, pad = 0u;
         float previous[3] = {};
+        PreviousTick before;   // previous[] with the rest of the previous tick
+        std::uint32_t objectiveCount = 0u;   // Scripted: each objective's best so far
+        double objectiveScores[CudaSearchMaximumScriptedObjectives] = {};
+        double metricValues[CudaSearchMaximumScriptedObjectives] = {};
     };
 
     // The per-tick body of SimulateSearchCandidatesKernel (and the
@@ -780,14 +877,74 @@ private:
                     incumbent.preciseFinish ? prestartNs + static_cast<std::uint64_t>(incumbent.score) : ~0ull;
         }
 
-        // Tick index t (0 = the first tick after the branch) has been stepped.
-        Verdict OnTick(std::uint32_t t, const EvaluationView &view, const GmVec3 &previousPosition) {
+        // The state before the first tick this judge sees (the branch's, or a prefix's last).
+        void Start(const CudaCandidatePhysicsState &state) { before_ = Previous(state); }
+
+        // Tick index t (0 = the first tick after the branch) has been stepped; the view's state is the
+        // judge's to complete (race constants, body.temporary).
+        Verdict OnTick(std::uint32_t t, const EvaluationView &view) {
+            const PreviousTick before = before_;
+            CudaCandidatePhysicsState &state = *view.state;
+            ReplayRaceProgress &progress = state.race.progress;
+            progress.requiredCheckpointCount = e_.race_.requiredCheckpointCount;
+            progress.requiredLapCount = e_.race_.requiredLapCount;
+            state.race.replayPlayMode = e_.replayPlayMode_;
+            before_ = Previous(state);
             const CudaSearchExecutorConfiguration &c = e_.config_;
             const CudaSearchEvaluatorKind kind = c.evaluator.kind;
             const bool finishTime = kind == CudaSearchEvaluatorKind::FinishTime;
             const std::int64_t publicTime = c.branchTimeMs + static_cast<std::int64_t>(t + 1u) * c.tickDurationMs;
             if (publicTime < c.evaluationStartTimeMs) return Verdict::Continue;
-            if (finishTime && !reported_ && !view.state->race.progress.raceCompleted) {
+            const std::uint64_t iteration = baseline_ ? 0u : id_ + 1u;
+            if (c.condition) {
+                CHmsDyna::CHmsStateDyna &previous = state.body.temporary;
+                previous.position = {before.position[0], before.position[1], before.position[2]};
+                previous.linearSpeed = {before.velocity[0], before.velocity[1], before.velocity[2]};
+                previous.angularSpeed = {before.angular[0], before.angular[1], before.angular[2]};
+                previous.rotationQuat.x = before.quat[0];
+                previous.rotationQuat.y = before.quat[1];
+                previous.rotationQuat.z = before.quat[2];
+                previous.rotationQuat.w = before.quat[3];
+                previous.rotation.Set(previous.rotationQuat);
+                if (!twin_search::EvaluateSearchCondition(c.condition->instructions.data(),
+                                                          static_cast<std::uint32_t>(c.condition->instructions.size()),
+                                                          state, iteration, e_.clock_)) {
+                    ++evaluationIndex_;
+                    return progress.raceCompleted ? Verdict::Done : Verdict::Continue;
+                }
+            }
+            if (kind == CudaSearchEvaluatorKind::Scripted) {
+                if (twin_search::UpdateScriptedSearchSample(c.evaluator, state, iteration, e_.clock_,
+                                                            static_cast<double>(publicTime), &best_)) {
+                    Identify(&best_, evaluationIndex_);
+                }
+                ++evaluationIndex_;
+                return progress.raceCompleted ? Verdict::Done : Verdict::Continue;
+            }
+            if (kind == CudaSearchEvaluatorKind::Distance &&
+                twin_search::SearchDistanceTargetReached(c.evaluator, state, before.counters)) {
+                DeviceSample sample{};
+                sample.score = static_cast<double>(publicTime);
+                sample.timeMs = static_cast<double>(publicTime);
+                sample.valid = true;
+                Identify(&sample, evaluationIndex_);
+                if (StrictlyBetter(sample, best_, e_.maximize_)) best_ = sample;
+                return Verdict::Done;
+            }
+            if (kind == CudaSearchEvaluatorKind::CheckpointEvent) {
+                if (twin_search::SearchCheckpointEventAccepted(c.evaluator, state, before.counters)) {
+                    DeviceSample sample{};
+                    sample.score = static_cast<double>(publicTime);
+                    sample.timeMs = static_cast<double>(publicTime);
+                    sample.valid = true;
+                    Identify(&sample, evaluationIndex_);
+                    best_ = sample;
+                    return Verdict::Done;
+                }
+                ++evaluationIndex_;
+                return progress.raceCompleted ? Verdict::Done : Verdict::Continue;
+            }
+            if (finishTime && !reported_ && !progress.raceCompleted) {
                 // EvaluateState returns an invalid sample here: skip its
                 // 330-byte DeviceSample (exact; the index still advances).
                 ++evaluationIndex_;
@@ -796,17 +953,12 @@ private:
                 }
                 return Verdict::Continue;
             }
-            // the previous velocity only feeds the entry speed option, refused in Create: the current one stands in
-            DeviceSample sample = twin_search::EvaluateSearchState(
-                    c.evaluator, *view.state, previousPosition, view.state->body.current.linearSpeed,
-                    static_cast<double>(publicTime - c.tickDurationMs),
-                    static_cast<double>(publicTime), view.stuntsScore, &reported_);
-            sample.candidateId = id_;
-            sample.candidateSlot = slot_;
-            sample.evaluationTick = evaluationIndex_;
-            sample.eventCount = eventCount_;
-            sample.logicalOrder = 1u + static_cast<std::uint64_t>(slot_) * e_.evaluationTickCount_ + evaluationIndex_;
-            sample.mutation = !baseline_;
+            DeviceSample sample = e_.EvaluateTick(
+                    state, {before.position[0], before.position[1], before.position[2]},
+                    {before.velocity[0], before.velocity[1], before.velocity[2]},
+                    static_cast<double>(publicTime - c.tickDurationMs), static_cast<double>(publicTime),
+                    view.stuntsScore, &reported_);
+            Identify(&sample, evaluationIndex_);
             if (finishTime && reported_ && sample.valid) {
                 // RefineSearchFinishTimesKernel: the precise finish (the
                 // engine's finish estimate), with the incumbent pruning.
@@ -840,12 +992,30 @@ private:
         }
 
         const DeviceSample &Best() const { return best_; }
-        // Pose re-judging (the GPU engine's near-best ticks): the next OnTick's evaluation index.
+        // Scripted on the device: the objectives (tw::gpu::kScriptedDoubles: scores, then metric values) out and back.
+        void ExportObjectives(double *o) const {
+            for (std::uint32_t i = 0u; i < CudaSearchMaximumScriptedObjectives; ++i) {
+                o[i] = best_.objectiveScores[i];
+                o[CudaSearchMaximumScriptedObjectives + i] = best_.metricValues[i];
+            }
+        }
+        void ImportObjectives(const double *o) {
+            if (!best_.valid) return;
+            best_.scriptedObjectiveCount = e_.config_.evaluator.scriptedObjectiveCount;
+            for (std::uint32_t i = 0u; i < CudaSearchMaximumScriptedObjectives; ++i) {
+                best_.objectiveScores[i] = o[i];
+                best_.metricValues[i] = o[CudaSearchMaximumScriptedObjectives + i];
+            }
+        }
+        // Pose re-judging (the GPU engine's near-best ticks): the next OnTick's evaluation index and previous tick.
         void SetEvaluationIndex(std::uint32_t index) { evaluationIndex_ = index; }
+        void SetPreviousPosition(const GmVec3 &position) {
+            before_.position[0] = position.x, before_.position[1] = position.y, before_.position[2] = position.z;
+        }
         // The judge without its identity (PrefixJudge, the device's tw_gpu_session.h JudgeState), and back: a valid best
         // gets this judge's identity exactly as OnTick gives it (an invalid one is DeviceSample{}, as Invalidate
         // leaves it).
-        template <class J> void Export(const GmVec3 &previous, J *j) const {
+        template <class J> void Export(J *j) const {
             j->score = best_.score;
             j->timeMs = best_.timeMs;
             j->detail0 = best_.detail0;
@@ -855,13 +1025,25 @@ private:
             j->valid = best_.valid ? 1u : 0u;
             j->preciseFinish = best_.preciseFinish ? 1u : 0u;
             j->reported = reported_ ? 1u : 0u;
-            j->previous[0] = previous.x;
-            j->previous[1] = previous.y;
-            j->previous[2] = previous.z;
+            for (int a = 0; a < 3; ++a) j->previous[a] = before_.position[a];
+            if constexpr (std::is_same<J, PrefixJudge>::value) {
+                j->before = before_;
+                j->objectiveCount = best_.scriptedObjectiveCount;
+                for (std::uint32_t i = 0u; i < best_.scriptedObjectiveCount; ++i) {
+                    j->objectiveScores[i] = best_.objectiveScores[i];
+                    j->metricValues[i] = best_.metricValues[i];
+                }
+            }
         }
         template <class J> void Import(const J &j) {
             reported_ = j.reported != 0u;
             evaluationIndex_ = j.evaluationIndex;
+            if constexpr (std::is_same<J, PrefixJudge>::value) {
+                before_ = j.before;
+            } else {
+                before_ = PreviousTick{};
+                for (int a = 0; a < 3; ++a) before_.position[a] = j.previous[a];
+            }
             if (j.valid == 0u) {
                 best_ = DeviceSample{};
                 return;
@@ -872,17 +1054,27 @@ private:
             sample.detail0 = j.detail0;
             sample.detail1 = j.detail1;
             sample.valid = true;
-            sample.candidateId = id_;
-            sample.candidateSlot = slot_;
-            sample.evaluationTick = j.evaluationTick;
-            sample.eventCount = eventCount_;
-            sample.logicalOrder = 1u + static_cast<std::uint64_t>(slot_) * e_.evaluationTickCount_ + j.evaluationTick;
-            sample.mutation = !baseline_;
             sample.preciseFinish = j.preciseFinish != 0u;
+            if constexpr (std::is_same<J, PrefixJudge>::value) {
+                sample.scriptedObjectiveCount = j.objectiveCount;
+                for (std::uint32_t i = 0u; i < j.objectiveCount; ++i) {
+                    sample.objectiveScores[i] = j.objectiveScores[i];
+                    sample.metricValues[i] = j.metricValues[i];
+                }
+            }
+            Identify(&sample, j.evaluationTick);
             best_ = sample;
         }
 
     private:
+        void Identify(DeviceSample *sample, std::uint32_t evaluationTick) const {
+            sample->candidateId = id_;
+            sample->candidateSlot = slot_;
+            sample->evaluationTick = evaluationTick;
+            sample->eventCount = eventCount_;
+            sample->logicalOrder = 1u + static_cast<std::uint64_t>(slot_) * e_.evaluationTickCount_ + evaluationTick;
+            sample->mutation = !baseline_;
+        }
         Verdict Invalidate() {
             best_ = DeviceSample{};
             return Verdict::Invalid;
@@ -897,13 +1089,13 @@ private:
         DeviceSample best_{};
         bool reported_ = false;
         std::uint32_t evaluationIndex_ = 0u;
+        PreviousTick before_;
     };
 
     // One slot of the batch path (phases in the header comment).
     struct SlotWork {
         std::vector<experimental::twin::TwinControl> controls;   // every tick's control
         std::optional<TickJudge> judge;
-        GmVec3 previous{};
         std::uint32_t first = 0u;        // first changed tick: the runner starts there
         bool physics = false;            // the runner simulates it (or its original)
         bool unsupported = false;
@@ -921,6 +1113,7 @@ private:
         const std::uint64_t t0 = Tsc();
         if (!w.physics->Begin(&diagnostic)) return SlotStatus::Unsupported;
         w.physics->Read(&w.view);
+        judge.Start(*w.view.state);
         std::uint64_t mark = Tsc();
         w.times.physics += mark - t0;
         SlotStatus status = SlotStatus::Success;
@@ -929,7 +1122,6 @@ private:
                 status = SlotStatus::Cancelled;
                 break;
             }
-            const GmVec3 previousPosition = w.view.state->body.current.position;
             const std::uint64_t s0 = Tsc();
             w.times.evaluation += s0 - mark;
             const bool stepped = w.physics->Step(w.ticks[t]);
@@ -941,7 +1133,7 @@ private:
                 status = SlotStatus::Unsupported;
                 break;
             }
-            const TickJudge::Verdict verdict = judge.OnTick(t, w.view, previousPosition);
+            const TickJudge::Verdict verdict = judge.OnTick(t, w.view);
             if (verdict == TickJudge::Verdict::Continue) continue;
             if (verdict == TickJudge::Verdict::Unsupported) status = SlotStatus::Unsupported;
             break;
@@ -965,8 +1157,7 @@ private:
                                        *lane.state);
             }
             TwinPhysics::ReadState(*lane.state, lane.events, &worker->view);
-            const TickJudge::Verdict verdict = worker->judge->OnTick(t, worker->view, worker->previous);
-            worker->previous = worker->view.state->body.current.position;
+            const TickJudge::Verdict verdict = worker->judge->OnTick(t, worker->view);
             worker->unsupported = verdict == TickJudge::Verdict::Unsupported;
             worker->times.evaluation += Tsc() - e0;
             return verdict == TickJudge::Verdict::Continue;
@@ -1062,7 +1253,7 @@ private:
         w.controls.resize(tickCount);
         for (std::uint32_t t = 0; t < tickCount; ++t) w.controls[t] = TwinPhysics::ToTwinControl(w.ticks[t]);
         TwinPhysics::ReadState(twinBranch_, nullptr, &w.view);
-        w.previous = w.view.state->body.current.position;
+        judge.Start(*w.view.state);
         // The shared prefix: ticks before the first changed control, judged on the baseline's snapshots.
         std::uint32_t first = 0u;
         if (shared && !snapControls_.empty()) {
@@ -1074,8 +1265,7 @@ private:
         const std::uint64_t p0 = Tsc();
         for (std::uint32_t t = 0; t < first; ++t) {
             TwinPhysics::ReadState(snapStates_[t], &snapEvents_[t], &w.view);
-            const TickJudge::Verdict verdict = judge.OnTick(t, w.view, w.previous);
-            w.previous = w.view.state->body.current.position;
+            const TickJudge::Verdict verdict = judge.OnTick(t, w.view);
             if (verdict != TickJudge::Verdict::Continue) {
                 w.sharedPrefixTicks += t + 1u;
                 w.times.evaluation += Tsc() - p0;
@@ -1150,19 +1340,18 @@ private:
         prefix_.clear();
         prefixStop_ = std::numeric_limits<std::uint32_t>::max();
         prefixStopVerdict_ = TickJudge::Verdict::Continue;
-        if (snapControls_.empty()) return;
+        if (snapControls_.empty() || perCandidatePrefix_) return;
         const std::size_t n = std::min(snapControls_.size(), snapStates_.size());
         prefix_.reserve(n);
         TickJudge judge(*this, 0u, 0u, baseline, 0u, incumbent);
         EvaluationView view;
         TwinPhysics::ReadState(twinBranch_, nullptr, &view);
-        GmVec3 previous = view.state->body.current.position;
+        judge.Start(*view.state);
         for (std::uint32_t t = 0; t < n; ++t) {
             TwinPhysics::ReadState(snapStates_[t], &snapEvents_[t], &view);
-            const TickJudge::Verdict verdict = judge.OnTick(t, view, previous);
-            previous = view.state->body.current.position;
+            const TickJudge::Verdict verdict = judge.OnTick(t, view);
             prefix_.emplace_back();
-            judge.Export(previous, &prefix_.back());
+            judge.Export(&prefix_.back());
             if (verdict != TickJudge::Verdict::Continue) {
                 prefixStop_ = t;
                 prefixStopVerdict_ = verdict;
@@ -1199,7 +1388,7 @@ private:
         TickJudge &judge = *sw->judge;
         const std::uint32_t tickCount = static_cast<std::uint32_t>(sw->controls.size());
         TwinPhysics::ReadState(twinBranch_, nullptr, &w.view);
-        sw->previous = w.view.state->body.current.position;
+        judge.Start(*w.view.state);
         std::uint32_t firstChange = 0u;
         if (!snapControls_.empty()) {
             const std::uint32_t same = static_cast<std::uint32_t>(
@@ -1208,7 +1397,20 @@ private:
         }
         // the shared prefix's judge: the batch's baseline judge after tick firstChange - 1 (BuildPrefix), or where
         // it stopped
-        if (firstChange > 0u) {
+        if (firstChange > 0u && perCandidatePrefix_) {
+            // the candidate's own judge over the prefix (its programs read the iteration)
+            for (std::uint32_t t = 0; t < firstChange; ++t) {
+                TwinPhysics::ReadState(snapStates_[t], &snapEvents_[t], &w.view);
+                const TickJudge::Verdict verdict = judge.OnTick(t, w.view);
+                if (verdict != TickJudge::Verdict::Continue) {
+                    w.sharedPrefixTicks += t + 1u;
+                    w.times.evaluation += Tsc() - g1;
+                    r->best = judge.Best();
+                    r->status = verdict == TickJudge::Verdict::Unsupported ? SlotStatus::Unsupported : SlotStatus::Success;
+                    return;
+                }
+            }
+        } else if (firstChange > 0u) {
             if (prefixStop_ < firstChange) {
                 judge.Import(prefix_[prefixStop_]);
                 w.sharedPrefixTicks += prefixStop_ + 1u;
@@ -1217,9 +1419,7 @@ private:
                 r->status = prefixStopVerdict_ == TickJudge::Verdict::Unsupported ? SlotStatus::Unsupported : SlotStatus::Success;
                 return;
             }
-            const PrefixJudge &p = prefix_[firstChange - 1u];
-            judge.Import(p);
-            sw->previous = {p.previous[0], p.previous[1], p.previous[2]};
+            judge.Import(prefix_[firstChange - 1u]);
         }
         w.sharedPrefixTicks += firstChange;
         w.times.evaluation += Tsc() - g1;
@@ -1302,8 +1502,7 @@ private:
     // The judge after one simulated tick of slot `sw` (the runner's evaluator, and the serial path's).
     static bool JudgeTick(SlotWork &sw, Worker &w, const tw::isa::BatchTick &tick) {
         TwinPhysics::ReadTick(tick, &w.view);
-        const TickJudge::Verdict verdict = sw.judge->OnTick(sw.first + tick.tick, w.view, sw.previous);
-        sw.previous = w.view.state->body.current.position;
+        const TickJudge::Verdict verdict = sw.judge->OnTick(sw.first + tick.tick, w.view);
         if (sw.keepViews) sw.views.push_back(tick);
         sw.unsupported = verdict == TickJudge::Verdict::Unsupported;
         return verdict == TickJudge::Verdict::Continue;
@@ -1381,6 +1580,7 @@ private:
                 // cost less (searchq --lane-limit, docs/twin/search-throughput.md)
                 policy.forcesMinLanes = std::max(3, lanes_ / 2 + 1);
                 policy.respondMinLanes = 4;
+                policy.fullState = fullState_;
                 w.batchTable = world.isa;
                 w.batch = world.isa->newBatch(world.isaInstance.get(), policy);
                 if (w.batch == nullptr) throw std::bad_alloc();
@@ -1452,8 +1652,7 @@ private:
         TickJudge::Verdict verdict = TickJudge::Verdict::Continue;
         for (const tw::isa::BatchTick &tick : ow.views) {
             TwinPhysics::ReadTick(tick, &w.view);
-            verdict = sw.judge->OnTick(sw.first + tick.tick, w.view, sw.previous);
-            sw.previous = w.view.state->body.current.position;
+            verdict = sw.judge->OnTick(sw.first + tick.tick, w.view);
             if (verdict != TickJudge::Verdict::Continue) break;
         }
         r.best = sw.judge->Best();
@@ -1523,6 +1722,7 @@ private:
     // original's result with their own identity (the same trajectory and prefix give the same samples).
     bool InitGpu(std::string *diagnostic) {
         const char *engine = std::getenv("FOREVERVALIDATOR_TWIN_SEARCH_ENGINE");
+        if (engine != nullptr && std::strcmp(engine, "cpu") == 0) return true;   // the CPU twin even when asked for the GPU
         if (!source_.options.gpu && (engine == nullptr || std::strcmp(engine, "gpu") != 0)) return true;
 #if FOREVERVALIDATOR_TWIN_GPU
         auto fail = [&](std::string message) {
@@ -1530,10 +1730,17 @@ private:
             return false;
         };
         const CudaSearchEvaluatorKind kind = config_.evaluator.kind;
-        if (kind != CudaSearchEvaluatorKind::Velocity && kind != CudaSearchEvaluatorKind::Point &&
-            kind != CudaSearchEvaluatorKind::Pose && kind != CudaSearchEvaluatorKind::VolumeEntry &&
-            kind != CudaSearchEvaluatorKind::StuntPoints && kind != CudaSearchEvaluatorKind::FinishTime) {
-            return fail("evaluator not supported on the GPU (velocity, point, pose, volume entry, stunt points, finish time)");
+        // the device's hand-written judge: velocity, point, pose, volume entry, stunt points, finish time; the rest with FV's
+        // evaluator code (tw_gpu_judge.cuh), on the host-built jobs
+        gpuTargets_ = fullState_ || (config_.evaluator.optionFlags & CudaSearchEntrySpeed) != 0u ||
+                      (kind != CudaSearchEvaluatorKind::Velocity && kind != CudaSearchEvaluatorKind::Point &&
+                       kind != CudaSearchEvaluatorKind::Pose && kind != CudaSearchEvaluatorKind::VolumeEntry &&
+                       kind != CudaSearchEvaluatorKind::StuntPoints && kind != CudaSearchEvaluatorKind::FinishTime);
+        const char *schedule = std::getenv("FOREVERVALIDATOR_TWIN_GPU_SCHEDULE");
+        if (gpuTargets_ && (perCandidatePrefix_ || (schedule != nullptr && std::strcmp(schedule, "tick") == 0))) {
+            // programs that read the candidate's iteration (no shared prefix), or the tick schedule (no tick events)
+            std::fprintf(stderr, "twin search (gpu): this target runs on the CPU twin\n");
+            return true;
         }
         const experimental::twin::TwinWorld::Impl &world = twinWorld_->Internal();
         if (!world.packs || !world.packs->useC || world.packs->collisionName != "c" || world.packs->collisionAtlas ||
@@ -1552,6 +1759,20 @@ private:
             return fail(error);
         }
         gpu_ = std::move(engine_);
+        if (gpuTargets_) {
+            if (gpu_->TargetBytes() != sizeof(CudaSearchEvaluatorConfiguration)) {
+                gpu_.reset();
+                return fail("the device's evaluator configuration is not the host's");
+            }
+            const std::vector<CudaSearchConditionInstruction> none;
+            const std::vector<CudaSearchConditionInstruction> &condition = config_.condition ? config_.condition->instructions : none;
+            if (!gpu_->SetTargets(&config_.evaluator, sizeof config_.evaluator, offsetof(CudaSearchEvaluatorConfiguration, aroundWalls),
+                                  aroundWalls_, aroundWalls_ != nullptr ? config_.aroundWallsTables.size() : 0u, condition.data(),
+                                  sizeof(CudaSearchConditionInstruction) * condition.size(), &error)) {
+                gpu_.reset();
+                return fail(error);
+            }
+        }
         if (const char *order = std::getenv("FOREVERVALIDATOR_TWIN_SEARCH_GPU_ORDER"); order != nullptr && std::strcmp(order, "length") == 0) {
             gpuLexOrder_ = false;
         }
@@ -1575,8 +1796,8 @@ private:
         // the per-candidate host work on the device (twin_search_device.cu; FOREVERVALIDATOR_TWIN_SEARCH_GPU_GEN=host: on the
         // session's threads, as round 1)
         const char *gen = std::getenv("FOREVERVALIDATOR_TWIN_SEARCH_GPU_GEN");
-        const char *schedule = std::getenv("FOREVERVALIDATOR_TWIN_GPU_SCHEDULE");
-        if ((gen == nullptr || std::strcmp(gen, "host") != 0) && (schedule == nullptr || std::strcmp(schedule, "tick") != 0)) {
+        if (!gpuTargets_ && (gen == nullptr || std::strcmp(gen, "host") != 0) &&
+            (schedule == nullptr || std::strcmp(schedule, "tick") != 0)) {
             std::vector<std::uint32_t> actionBits(timelineTickCount_);
             for (std::uint32_t t = 0; t < timelineTickCount_; ++t) {
                 actionBits[t] = TwinPhysics::ToTwinControl(ReplayVehicleControlState{}, source_.timeline[source_.branchCursor + t].actions);
@@ -1588,7 +1809,8 @@ private:
             EvaluationView view;
             TwinPhysics::ReadState(twinBranch_, nullptr, &view);
             tw::gpu::JudgeState initial;
-            fresh.Export(view.state->body.current.position, &initial);
+            fresh.Start(*view.state);
+            fresh.Export(&initial);
             auto g = std::make_unique<twin_search::DeviceGeneration>();
             if (!g->Init(program_, config_.branchTimeMs, actionBits.data(), timelineTickCount_, snapControls_.data(), snapCount, initial,
                          kind == CudaSearchEvaluatorKind::Pose, &error)) {
@@ -1635,6 +1857,16 @@ private:
         jc.incumbentUpperNs = incumbent.preciseFinish ? static_cast<std::uint64_t>(config_.prestartDurationMs) * 1000000u +
                                                                 static_cast<std::uint64_t>(incumbent.score)
                                                       : ~0ull;
+        if (gpuTargets_) {
+            jc.targets = 1u;
+            jc.conditionCount = config_.condition ? static_cast<std::uint32_t>(config_.condition->instructions.size()) : 0u;
+            jc.requiredCheckpoints = race_.requiredCheckpointCount;
+            jc.requiredLaps = race_.requiredLapCount;
+            jc.playMode = replayPlayMode_;
+            jc.clock[0] = clock_.lastImprovementSeconds;
+            jc.clock[1] = clock_.lastRestartSeconds;
+            jc.clock[2] = clock_.currentSeconds;
+        }
         return jc;
     }
 
@@ -1696,6 +1928,11 @@ private:
         tw::gpu::SearchJob *dj = gpu_->Jobs(set, jobs.size(), &error);
         std::uint32_t *dc = gpu_->Controls(set, offset.back(), &error);
         if (dj == nullptr || dc == nullptr) throw std::runtime_error(error);
+        double *objectives = nullptr;   // scripted: each job's objectives after its prefix
+        if (gpuTargets_ && config_.evaluator.kind == CudaSearchEvaluatorKind::Scripted &&
+            (objectives = gpu_->Scripted(set, jobs.size(), &error)) == nullptr) {
+            throw std::runtime_error(error);
+        }
         std::atomic<std::size_t> nextJob{0u};
         if (!pool_->Run([&](std::uint32_t) {
                 for (std::size_t i = nextJob++; i < jobs.size(); i = nextJob++) {
@@ -1705,7 +1942,8 @@ private:
                     j.controls = offset[i];
                     j.ticks = static_cast<std::uint32_t>(sw.controls.size()) - sw.first;
                     j.firstTick = sw.first;
-                    sw.judge->Export(sw.previous, &j.judge);
+                    sw.judge->Export(&j.judge);
+                    if (objectives != nullptr) sw.judge->ExportObjectives(objectives + tw::gpu::kScriptedDoubles * i);
                     std::memcpy(dc + offset[i], sw.controls.data() + sw.first, sizeof(std::uint32_t) * j.ticks);
                 }
             })) {
@@ -1738,7 +1976,10 @@ private:
         }
         t.ticks += st.ticks;
         t.substeps += st.substeps;
-        const bool pose = config_.evaluator.kind == CudaSearchEvaluatorKind::Pose;
+        const bool pose = config_.evaluator.kind == CudaSearchEvaluatorKind::Pose && !gpuTargets_;
+        const double *objectives = gpuTargets_ && config_.evaluator.kind == CudaSearchEvaluatorKind::Scripted
+                                           ? gpu_->Scripted(b.sets[k], 0u, &error)   // the set's results (Collect)
+                                           : nullptr;
         std::atomic<std::size_t> nextJob{0u};
         if (!pool_->Run([&](std::uint32_t th) {
                 Worker &w = *workers_[th];
@@ -1764,10 +2005,12 @@ private:
                             frame.rotationQuat.w = p.quat[3];
                             w.view.finish.reset();
                             sw.judge->SetEvaluationIndex(p.evaluationIndex);
-                            sw.judge->OnTick(p.t, w.view, frame.position);
+                            sw.judge->SetPreviousPosition(frame.position);
+                            sw.judge->OnTick(p.t, w.view);
                         }
                     } else {
                         sw.judge->Import(r.judge);
+                        if (objectives != nullptr) sw.judge->ImportObjectives(objectives + tw::gpu::kScriptedDoubles * i);
                     }
                     out.best = sw.judge->Best();
                     out.status = r.verdict == tw::gpu::kJudgeUnsupported ? SlotStatus::Unsupported : SlotStatus::Success;
@@ -1789,6 +2032,67 @@ private:
     // it then: nothing it computes depends on what this batch changes.
     void RunGpuBatch(std::uint64_t first, std::uint32_t count, bool baseline, const DeviceSample &incumbent,
                      const std::function<bool()> &cancel, std::vector<SlotResult> &slots) {
+        RunGpuBatchOnce(first, count, baseline, incumbent, cancel, slots);
+        // around walls: the corners the device's queries needed before they were filled, filled here, and the batch again
+        // (CudaSearchExecutor's ExecuteFilled)
+        while (aroundWalls_ != nullptr && FillDeviceMissedCorners()) {
+            std::fill(slots.begin(), slots.end(), SlotResult{});
+            RunGpuBatchOnce(first, count, baseline, incumbent, cancel, slots);
+        }
+    }
+
+    // The tables' corners the device marked missed: filled on the host copy (the session's threads), the device's copy
+    // updated, its marks cleared; whether there were any.
+    bool FillDeviceMissedCorners() {
+        namespace around_walls = forevervalidator::experimental::around_walls;
+        std::string error;
+        bool any = false;
+        std::unique_lock<std::shared_mutex> lock(aroundWallsMutex_);
+        for (std::uint32_t trigger = 0u; trigger < config_.evaluator.distanceTriggerCount; ++trigger) {
+            const std::uint64_t offset = config_.evaluator.aroundWallsOffsets[trigger];
+            unsigned char *bytes = aroundWalls_ + offset;
+            around_walls::Header header;
+            std::memcpy(&header, bytes, sizeof header);
+            std::uint32_t flag = 0u;
+            if (!gpu_->ReadTables(reinterpret_cast<unsigned char *>(&flag), offset + header.missed, sizeof flag, &error)) {
+                throw std::runtime_error(error);
+            }
+            if (flag == 0u) continue;
+            any = true;
+            const std::size_t missedBytes = around_walls::MissedBytes(header.cornerCount);
+            std::vector<std::uint32_t> words(missedBytes / 4u);
+            if (!gpu_->ReadTables(reinterpret_cast<unsigned char *>(words.data()), offset + header.missed, missedBytes, &error)) {
+                throw std::runtime_error(error);
+            }
+            const auto *corners = reinterpret_cast<const around_walls::Corner *>(bytes + header.corners);
+            std::vector<std::uint64_t> missed;
+            for (std::size_t word = 1u; word < words.size(); ++word) {
+                for (std::uint32_t bit = 0u; words[word] != 0u && bit < 32u; ++bit) {
+                    const std::uint64_t corner = (word - 1u) * 32u + bit;
+                    if ((words[word] >> bit & 1u) != 0u && corners[corner].direct == around_walls::kCornerUnfilled) {
+                        missed.push_back(corner);
+                    }
+                }
+            }
+            std::atomic<std::size_t> next{0u};
+            if (!pool_->Run([&](std::uint32_t) {
+                    for (std::size_t i; (i = next.fetch_add(1u)) < missed.size();) around_walls::FillCorner(bytes, missed[i]);
+                })) {
+                throw std::bad_alloc();
+            }
+            std::fill(words.begin(), words.end(), 0u);
+            if (!gpu_->WriteTables(reinterpret_cast<const unsigned char *>(words.data()), offset + header.missed, missedBytes, &error) ||
+                !gpu_->WriteTables(bytes + header.corners, offset + header.corners, header.cornerCount * sizeof(around_walls::Corner),
+                                   &error)) {
+                throw std::runtime_error(error);
+            }
+            if (!missed.empty() && config_.aroundWallsFilled) config_.aroundWallsFilled(trigger, bytes);
+        }
+        return any;
+    }
+
+    void RunGpuBatchOnce(std::uint64_t first, std::uint32_t count, bool baseline, const DeviceSample &incumbent,
+                         const std::function<bool()> &cancel, std::vector<SlotResult> &slots) {
         if (gpuGen_ && !baseline) {
             RunGpuBatchDevice(first, count, incumbent, cancel, slots);
             return;
@@ -1828,6 +2132,7 @@ private:
             b.sets.resize(chunks);
         }
         const bool runAhead = gpuAhead_ && !baseline && chunks == 1u && config_.evaluator.kind != CudaSearchEvaluatorKind::FinishTime &&
+                              aroundWalls_ == nullptr &&
                               first <= std::numeric_limits<std::uint64_t>::max() - 2ull * count;
         if (!tookAhead) {
             for (std::uint32_t k = 0; k < chunks; ++k) {
@@ -1877,7 +2182,7 @@ private:
                 continue;
             }
             tw::gpu::JudgeState j;
-            sw.judge->Export(sw.previous, &j);   // reported / index are not read below
+            sw.judge->Export(&j);   // reported / index are not read below
             j.score = orig.best.score;
             j.timeMs = orig.best.timeMs;
             j.detail0 = orig.best.detail0;
@@ -2040,7 +2345,8 @@ private:
                                 frame.rotationQuat.w = p.quat[3];
                                 w.view.finish.reset();
                                 judge.SetEvaluationIndex(p.evaluationIndex);
-                                judge.OnTick(p.t, w.view, frame.position);
+                                judge.SetPreviousPosition(frame.position);
+                                judge.OnTick(p.t, w.view);
                             }
                             r.best = judge.Best();
                         } else if ((x.flags & twin_search::kSlotJudge) != 0u && x.valid != 0u) {
@@ -2427,6 +2733,9 @@ private:
             metrics_.verificationBackend = verifierBackend_;
             result.evaluationCurrentTimeSeconds =
                     std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+            clock_.currentSeconds = result.evaluationCurrentTimeSeconds;
+            clock_.lastImprovementSeconds = config_.condition ? config_.condition->lastImprovementTimeSeconds : 0.0;
+            clock_.lastRestartSeconds = config_.condition ? config_.condition->lastRestartTimeSeconds : 0.0;
             DeviceSample incumbent = globalBest_;
             incumbent.logicalOrder = 0u;
             incumbent.candidateSlot = InvalidCandidateSlot;
@@ -2485,6 +2794,7 @@ private:
             // One pass over the slots (16,384 slots are 6 MB): the counts, the improvement walk (mutation batches) and the
             // candidate-best reduction (BetterSample over incumbent + slots; its pick and the walk by reference: no 330-byte
             // copy per slot), each in slot order as three passes would be.
+            const bool scripted = config_.evaluator.kind == CudaSearchEvaluatorKind::Scripted;
             const DeviceSample *walk = &incumbent;
             const DeviceSample *pick = &incumbent;
             for (const SlotResult &s : slots) {
@@ -2497,6 +2807,14 @@ private:
                     result.evaluatorCalls += evaluationTickCount_;
                 }
                 result.totalMutationCount += s.mutationCount;
+                if (scripted) {   // SelectScriptedWinnerKernel: the first to dominate the incumbent so far
+                    if (StrictlyDominates(s.best, *walk)) {
+                        if (!baseline) ++result.mutationImprovementCount;
+                        walk = &s.best;
+                    }
+                    pick = walk;
+                    continue;
+                }
                 if (!baseline && StrictlyBetter(s.best, *walk, maximize_)) {
                     ++result.mutationImprovementCount;
                     walk = &s.best;
@@ -2534,6 +2852,11 @@ private:
                 best.timeMs = globalBest_.timeMs;
                 best.detail0 = globalBest_.detail0;
                 best.detail1 = globalBest_.detail1;
+                best.scriptedObjectiveCount = globalBest_.scriptedObjectiveCount;
+                for (std::uint32_t i = 0u; i < globalBest_.scriptedObjectiveCount; ++i) {
+                    best.objectiveScores[i] = globalBest_.objectiveScores[i];
+                    best.metricValues[i] = globalBest_.metricValues[i];
+                }
                 if (best.stateCaptured) best.state = globalBestState_;
                 best.inputs = program_.immutablePrefix;
                 for (CudaSearchInputEvent e : globalBestEvents_) {
@@ -2567,10 +2890,73 @@ private:
         }
     }
 
+    // EvaluateSearchState; around walls, the corners its queries need filled first (FillMissedCorners) and
+    // the tick evaluated again. Queries hold the tables shared, a fill holds them alone.
+    DeviceSample EvaluateTick(const CudaCandidatePhysicsState &state, const GmVec3 &previousPosition,
+                              const GmVec3 &previousVelocity, double previousTimeMs, double currentTimeMs,
+                              std::uint32_t stuntsScore, bool *reported) const {
+        if (aroundWalls_ == nullptr) {
+            return twin_search::EvaluateSearchState(config_.evaluator, state, previousPosition, previousVelocity,
+                                                    previousTimeMs, currentTimeMs, stuntsScore, reported);
+        }
+        std::uint32_t &misses = forevervalidator::experimental::around_walls::detail::HostMisses();
+        for (;;) {
+            bool again = *reported;
+            {
+                std::shared_lock<std::shared_mutex> lock(aroundWallsMutex_);
+                misses = 0u;
+                const DeviceSample sample = twin_search::EvaluateSearchState(
+                        config_.evaluator, state, previousPosition, previousVelocity, previousTimeMs, currentTimeMs,
+                        stuntsScore, &again);
+                if (misses == 0u) {
+                    *reported = again;
+                    return sample;
+                }
+            }
+            FillMissedCorners();
+        }
+    }
+    // The corners the tables' missed bits name, as CudaSearchExecutor's FillMissedAroundWallsCorners
+    // (aroundWallsFilled passes each table on).
+    void FillMissedCorners() const {
+        namespace around_walls = forevervalidator::experimental::around_walls;
+        std::unique_lock<std::shared_mutex> lock(aroundWallsMutex_);
+        for (std::uint32_t trigger = 0u; trigger < config_.evaluator.distanceTriggerCount; ++trigger) {
+            unsigned char *bytes = aroundWalls_ + config_.evaluator.aroundWallsOffsets[trigger];
+            around_walls::Header header;
+            std::memcpy(&header, bytes, sizeof header);
+            auto *words = reinterpret_cast<std::uint32_t *>(bytes + header.missed);
+            if (words[0] == 0u) continue;
+            const auto *corners = reinterpret_cast<const around_walls::Corner *>(bytes + header.corners);
+            const std::size_t wordCount = around_walls::MissedBytes(header.cornerCount) / 4u;
+            bool filled = false;
+            for (std::size_t word = 1u; word < wordCount; ++word) {
+                for (std::uint32_t bit = 0u; words[word] != 0u && bit < 32u; ++bit) {
+                    const std::uint64_t corner = (word - 1u) * 32u + bit;
+                    if ((words[word] >> bit & 1u) != 0u && corners[corner].direct == around_walls::kCornerUnfilled) {
+                        around_walls::FillCorner(bytes, corner);
+                        filled = true;
+                    }
+                }
+            }
+            std::memset(words, 0, wordCount * 4u);
+            if (filled && config_.aroundWallsFilled) config_.aroundWallsFilled(trigger, bytes);
+        }
+    }
+
     CudaSearchExecutorConfiguration config_;
     TwinSearchExecutorSource source_;
     twin_search::MutationProgram program_;
     std::shared_ptr<const ReplaySimulationInstanceClone> branch_;
+    // the judge's: the race's constants, the search loop's clock (Execute), the table bytes around walls
+    ReplayRaceProgress race_{};
+    std::uint32_t replayPlayMode_ = 0u;
+    twin_search::ProgramClock clock_;
+    bool fullState_ = false;            // the judge reads more than the body (TwinPhysics::ReadFull)
+    bool perCandidatePrefix_ = false;   // its programs read the iteration: no prefix judged once for all
+    bool gpuTargets_ = false;           // the GPU judges with FV's evaluator code (tw_gpu_judge.cuh)
+    unsigned char *aroundWalls_ = nullptr;
+    mutable std::shared_mutex aroundWallsMutex_;
     std::vector<std::unique_ptr<Worker>> workers_;
     std::unique_ptr<FvPhysics> verifier_;
     // Twin mode (not delegate): the world and the imported branch state.

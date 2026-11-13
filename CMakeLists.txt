@@ -554,10 +554,17 @@ endif()
 option(FOREVERVALIDATOR_BUILD_TWIN
        "Build the twin engine (src/twin) and the twin backend" OFF)
 option(FOREVERVALIDATOR_BUILD_TWIN_GPU
-       "Build the twin's CUDA engine (src/twin/gpu)" OFF)
+       "Build the twin's GPU engine (src/twin/gpu): CUDA, or HIP when HIP is on and CUDA off" OFF)
+# The twin's GPU engine is CUDA source; with FV's HIP backend and no CUDA it is
+# compiled as HIP (src/twin/gpu/hip).
+set(TW_GPU_HIP OFF)
 if(FOREVERVALIDATOR_BUILD_TWIN AND FOREVERVALIDATOR_BUILD_TWIN_GPU AND NOT FOREVERVALIDATOR_ENABLE_CUDA)
-    enable_language(CUDA)
-    find_package(CUDAToolkit REQUIRED)
+    if(FOREVERVALIDATOR_ENABLE_HIP)
+        set(TW_GPU_HIP ON)
+    else()
+        enable_language(CUDA)
+        find_package(CUDAToolkit REQUIRED)
+    endif()
 endif()
 if(FOREVERVALIDATOR_BUILD_TWIN)
     add_subdirectory(src/twin)

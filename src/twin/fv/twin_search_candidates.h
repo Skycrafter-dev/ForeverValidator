@@ -74,16 +74,49 @@ private:
 
 bool MaximizesSearchScore(CudaSearchEvaluatorKind kind, std::uint32_t optionFlags);
 
-// FV's CUDA EvaluateState, verbatim (extracted): the evaluator kinds
-// Velocity, Point, Pose, VolumeEntry, CustomVolumeEntry, StuntPoints,
-// FinishTime (tick-level; the finish refinement is the caller's) and
-// ConditionTime*. It reads state.body.current {position, linearSpeed,
-// rotationQuat} and state.race.progress only.
+// FV's CUDA EvaluateState, verbatim (extracted): every tick-level evaluator
+// kind (FinishTime's refinement is the caller's). It reads
+// state.body.current {position, linearSpeed, rotationQuat}, state.race and,
+// around walls, the evaluator's tables (host bytes here; a query that needs a
+// corner not filled yet marks it, see around_walls_table.h).
 cuda_search_detail::DeviceSample EvaluateSearchState(const CudaSearchEvaluatorConfiguration &evaluator,
                                                      const CudaCandidatePhysicsState &state,
                                                      const GmVec3 &previousPosition, const GmVec3 &previousVelocity,
                                                      double previousTimeMs, double currentTimeMs, std::uint32_t stuntsScore,
                                                      bool *reported);
+
+// The search loop's values that condition and scripted programs read (the
+// kernel's arguments; iteration = 0 for the baseline, candidate id + 1 else).
+struct ProgramClock {
+    double lastImprovementSeconds = 0.0;
+    double lastRestartSeconds = 0.0;
+    double currentSeconds = 0.0;
+};
+
+// FV's CUDA EvaluateCondition, verbatim: the condition program on the state
+// (body.current, body.temporary = the previous tick, vehicle, race).
+bool EvaluateSearchCondition(const CudaSearchConditionInstruction *instructions, std::uint32_t count,
+                             const CudaCandidatePhysicsState &state, std::uint64_t iteration,
+                             const ProgramClock &clock);
+
+// FV's CUDA UpdateScriptedSample, verbatim: each objective's best so far.
+bool UpdateScriptedSearchSample(const CudaSearchEvaluatorConfiguration &evaluator,
+                                const CudaCandidatePhysicsState &state, std::uint64_t iteration,
+                                const ProgramClock &clock, double currentTimeMs,
+                                cuda_search_detail::DeviceSample *sample);
+
+// The race counters before a tick (CheckpointProgressBefore).
+struct CheckpointCounters {
+    std::uint32_t lapCheckpoints = 0u, events = 0u, laps = 0u, finishes = 0u;
+};
+
+// FV's CUDA CheckpointEventAccepted / DistanceTargetReached, verbatim, with
+// one difference: state.race.progress.lastAcceptedBlockId holds the slot of
+// the tick's last accepted passage (the twin knows slots, not blocks).
+bool SearchCheckpointEventAccepted(const CudaSearchEvaluatorConfiguration &evaluator,
+                                   const CudaCandidatePhysicsState &state, const CheckpointCounters &before);
+bool SearchDistanceTargetReached(const CudaSearchEvaluatorConfiguration &evaluator,
+                                 const CudaCandidatePhysicsState &state, const CheckpointCounters &before);
 
 }  // namespace forevervalidator::simulation::twin_search
 

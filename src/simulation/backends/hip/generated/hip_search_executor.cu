@@ -227,11 +227,16 @@ public:
 
     bool Allocate() {
         Reset();
+        // The kernels poll it while they run: on AMD it must be fine-grained
+        // (coherent), else a kernel may read a cached 0 until it ends.
         if (hipHostAlloc(
                     reinterpret_cast<void **>(&host_),
                     sizeof(*host_),
-                    hipHostMallocMapped | hipHostMallocPortable) !=
-            hipSuccess) {
+                    hipHostMallocMapped | hipHostMallocPortable
+#if defined(__HIP_PLATFORM_AMD__)
+                            | hipHostMallocCoherent
+#endif
+                    ) != hipSuccess) {
             return false;
         }
         if (hipHostGetDevicePointer(
@@ -5062,7 +5067,8 @@ struct HipSearchExecutor::Impl {
             bool baseline,
             const std::function<bool()> &cancellationRequested) {
         const bool tables = !configuration.aroundWallsTables.empty();
-        for (bool rerun = false;; rerun = true) {
+        std::uint32_t reruns = 0u;
+        for (bool rerun = false;; rerun = true, ++reruns) {
             const hipError_t backup = tables ? CopyGlobalBest(rerun) : hipSuccess;
             if (backup != hipSuccess) {
                 HipSearchBatchExecution result;
@@ -5074,6 +5080,7 @@ struct HipSearchExecutor::Impl {
             }
             HipSearchBatchExecution result = Execute(
                     firstCandidateId, candidateCount, baseline, cancellationRequested);
+            result.aroundWallsReruns = reruns;
             if (result.status != HipSearchStatus::Success || !tables) {
                 return result;
             }

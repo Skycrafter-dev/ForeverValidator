@@ -3,7 +3,7 @@
 
 #include "simulation/backends/cuda/cuda_search_branch_state.cuh"
 
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) || defined(__HIPCC__)
 #define FOREVERVALIDATOR_SEGMENT_HD __host__ __device__
 #else
 #define FOREVERVALIDATOR_SEGMENT_HD

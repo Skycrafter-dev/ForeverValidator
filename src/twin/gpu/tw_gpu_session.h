@@ -42,7 +42,25 @@ struct JudgeConfig {                 // per batch
     std::uint32_t incumbentPrecise = 0u;    // the batch's incumbent (FinishTime pruning)
     double incumbentTimeMs = 0.0;
     std::uint64_t incumbentUpperNs = ~0ull;
+    // The targets tw_gpu_judge.cuh evaluates with FV's own code (kind then = FV's CudaSearchEvaluatorKind, any of them):
+    // set `targets` and the engine judges every tick there with FV's evaluator configuration and condition program
+    // (SetTargets' device copies), the search loop's clock, the race's constants and, scripted, the jobs' objectives
+    // (Scripted).
+    std::uint32_t targets = 0u;
+    std::uint32_t conditionCount = 0u;
+    std::uint32_t requiredCheckpoints = 0u, requiredLaps = 0u, playMode = 0u;
+    double clock[3] = {};   // last improvement, last restart, now (s)
+    const void *evaluator = nullptr;   // set by Submit
+    const void *condition = nullptr;   // set by Submit
+    double *scripted = nullptr;        // set by Submit
 };
+// The tick before the judged one: its body and race counters (the targets' previous position, velocity, body.temporary
+// and CheckpointProgressBefore).
+struct PreviousTick {
+    float position[3], velocity[3], angular[3], quat[4];
+    std::uint32_t counters[4];   // lap checkpoints, checkpoint events, laps, finishes
+};
+constexpr std::size_t kScriptedDoubles = 32u;   // a job's objective scores then metric values (16 each)
 // A candidate's judge without its identity (TickJudge: best sample, reported, evaluation index) and the previous
 // tick's position.
 struct JudgeState {
@@ -107,6 +125,16 @@ public:
     // with the batch before it, only follows it without a gap)
     bool Submit(int set, const JudgeConfig &config, std::size_t n, std::size_t controlCount, std::string *error, int after = -1);
     const SearchResult *Collect(int set, SearchStats *stats, std::string *error);
+    // JudgeConfig::targets: FV's evaluator configuration (bytes; its around-walls table pointer at `tablesField`, pointed at
+    // the device copy of `tables`) and condition program, for every later Submit.
+    std::size_t TargetBytes() const;   // sizeof the evaluator configuration the device reads
+    bool SetTargets(const void *evaluator, std::size_t evaluatorBytes, std::size_t tablesField, const unsigned char *tables,
+                    std::size_t tableBytes, const void *condition, std::size_t conditionBytes, std::string *error);
+    // The device copy of the tables: read (the bits queries marked missed) and written back (corners filled on the host).
+    bool ReadTables(unsigned char *host, std::size_t offset, std::size_t bytes, std::string *error);
+    bool WriteTables(const unsigned char *host, std::size_t offset, std::size_t bytes, std::string *error);
+    // Scripted targets: the jobs' objectives (kScriptedDoubles each) before the set's next Submit, after its Collect.
+    double *Scripted(int set, std::size_t n, std::string *error);
     std::size_t WorldBytes() const;
 
     // Jobs built on the device (the search's generation on the device, twin_search_device.cu): the caller's kernels write

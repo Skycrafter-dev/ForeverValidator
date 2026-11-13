@@ -42,7 +42,9 @@
 
 // In a CUDA/HIP TU every TW_INLINE function is also a device function: the GPU engine (src/twin/gpu)
 // runs the scalar (L = 1) path, one candidate per thread.
-#if defined(__CUDACC__) || defined(__HIPCC__)
+#if (defined(__CUDACC__) || defined(__HIPCC__)) && defined(_MSC_VER) && !defined(__clang__)
+#define TW_INLINE __host__ __device__ __forceinline__   // nvcc with cl.exe: no GCC attributes
+#elif defined(__CUDACC__) || defined(__HIPCC__)
 #define TW_INLINE __host__ __device__ inline __attribute__((always_inline))
 #elif defined(_MSC_VER) && !defined(__clang__)
 #define TW_INLINE __forceinline
@@ -51,7 +53,10 @@
 #endif
 
 // Out of line, for the rare paths of large inlined kernels (keeps the hot code compact).
-#if defined(__CUDACC__) || defined(__HIPCC__)
+#if (defined(__CUDACC__) || defined(__HIPCC__)) && defined(_MSC_VER) && !defined(__clang__)
+#define TW_NOINLINE __host__ __device__ __noinline__
+#define TW_NOINLINE_COLD __host__ __device__ __noinline__
+#elif defined(__CUDACC__) || defined(__HIPCC__)
 #define TW_NOINLINE __host__ __device__ __attribute__((noinline))
 #define TW_NOINLINE_COLD __host__ __device__ __attribute__((noinline, cold))
 #elif defined(_MSC_VER) && !defined(__clang__)

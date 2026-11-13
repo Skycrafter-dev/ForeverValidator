@@ -8,7 +8,7 @@
 
 namespace forevervalidator::simulation::hip_search_modifier_detail {
 
-#if defined(__HIPCC__)
+#if defined(__HIPCC__) || defined(__HIPCC__)
 #define FOREVERVALIDATOR_HIP_HD __host__ __device__
 #else
 #define FOREVERVALIDATOR_HIP_HD

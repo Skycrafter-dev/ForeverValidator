@@ -176,7 +176,32 @@ tw_configure(tw_engine)
 # ---- GPU engine (src/twin/gpu, docs/twin/gpu.md) -------------------------------------------
 # The scalar (L = 1) path as CUDA device code, one candidate per thread: no FMA, IEEE division and
 # square root, no flush-to-zero, so the device computes the CPU twin's bits.
-if(FOREVERVALIDATOR_BUILD_TWIN_GPU)
+# HIP: the same sources through gpu/hip (tw_hip_compat.h): one module per kernel file, each with the device stages
+# it calls (no device link), the twin's floating point (no contraction, IEEE division and square root, denormals
+# kept) and 32-lane waves.
+set(TW_GPU_HIP_OPTIONS
+    "$<$<COMPILE_LANGUAGE:HIP>:-ffp-contract=off>"
+    "$<$<COMPILE_LANGUAGE:HIP>:-fno-fast-math>"
+    "$<$<COMPILE_LANGUAGE:HIP>:-fhip-fp32-correctly-rounded-divide-sqrt>"
+    "$<$<COMPILE_LANGUAGE:HIP>:-mno-wavefrontsize64>")
+if(CMAKE_HIP_FLAGS MATCHES "driver-mode=cl")
+    list(APPEND TW_GPU_HIP_OPTIONS "$<$<COMPILE_LANGUAGE:HIP>:/FI${TW_SRC}/gpu/hip/tw_hip_compat.h>")
+else()
+    list(APPEND TW_GPU_HIP_OPTIONS "$<$<COMPILE_LANGUAGE:HIP>:SHELL:-include ${TW_SRC}/gpu/hip/tw_hip_compat.h>")
+endif()
+if(FOREVERVALIDATOR_BUILD_TWIN_GPU AND TW_GPU_HIP)
+    add_library(tw_gpu STATIC "${TW_SRC}/gpu/hip/tw_gpu_car_hip.hip" "${TW_SRC}/gpu/hip/tw_gpu_collide_hip.hip"
+        "${TW_SRC}/gpu/hip/tw_gpu_queue_hip.hip" "${TW_SRC}/gpu/hip/tw_gpu_session_hip.hip" "${TW_SRC}/gpu/tw_gpu_world.cpp")
+    set_property(GLOBAL APPEND PROPERTY JOB_POOLS tw_gpu_pool=2)
+    set_target_properties(tw_gpu PROPERTIES JOB_POOL_COMPILE tw_gpu_pool HIP_STANDARD 17 HIP_STANDARD_REQUIRED ON
+        HIP_EXTENSIONS OFF)
+    target_include_directories(tw_gpu BEFORE PRIVATE "$<$<COMPILE_LANGUAGE:HIP>:${TW_SRC}/gpu/hip/include>"
+        "$<$<COMPILE_LANGUAGE:HIP>:${TW_SRC}/gpu/hip>")
+    target_include_directories(tw_gpu PUBLIC "${TW_SRC}/gpu")
+    target_link_libraries(tw_gpu PUBLIC tw_collide tw_model tw_car tw_race tw_math)
+    target_compile_options(tw_gpu PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${TW_FLAGS}>" ${TW_GPU_HIP_OPTIONS})
+    target_compile_definitions(tw_gpu PRIVATE TW_CAR_NO_SSE3V=1)
+elseif(FOREVERVALIDATOR_BUILD_TWIN_GPU)
     add_library(tw_gpu STATIC "${TW_SRC}/gpu/tw_gpu_car.cu" "${TW_SRC}/gpu/tw_gpu_collide.cu" "${TW_SRC}/gpu/tw_gpu_queue.cu"
         "${TW_SRC}/gpu/tw_gpu_k_forces.cu" "${TW_SRC}/gpu/tw_gpu_k_detect.cu" "${TW_SRC}/gpu/tw_gpu_k_respond.cu"
         "${TW_SRC}/gpu/tw_gpu_session.cu" "${TW_SRC}/gpu/tw_gpu_world.cpp")
@@ -205,12 +230,38 @@ if(FOREVERVALIDATOR_BUILD_TWIN_GPU)
         "$<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>"
         "$<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-ffp-contract=off>")
     target_compile_definitions(tw_gpu PRIVATE TW_CAR_NO_SSE3V=1)
+    # nvcc with cl.exe (Windows): the GCC builtins and attributes the twin spells, for both passes
+    set(TW_CUDA_MSVC_OPTIONS "")
+    if(CMAKE_CUDA_SIMULATE_ID STREQUAL "MSVC")
+        set(TW_CUDA_MSVC_OPTIONS "$<$<COMPILE_LANGUAGE:CUDA>:--pre-include=${TW_SRC}/gpu/tw_cuda_msvc_compat.h>")
+    endif()
+    target_compile_options(tw_gpu PRIVATE ${TW_CUDA_MSVC_OPTIONS})
     # 128 (512 threads an SM) is the measured best on real sessions with the stages inlined in the lane runner's pass
     # (gpu-a2; 80 before, 64 before detection v5): re-measure 96 / 128 / 168 when the collision or the pass changes
     set(FOREVERVALIDATOR_TWIN_GPU_MAXRREG "128" CACHE STRING "Twin GPU: registers per thread cap (-maxrregcount; empty: none)")
     if(FOREVERVALIDATOR_TWIN_GPU_MAXRREG)
         target_compile_options(tw_gpu PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-maxrregcount=${FOREVERVALIDATOR_TWIN_GPU_MAXRREG}>")
     endif()
+endif()
+
+if(FOREVERVALIDATOR_BUILD_TWIN_GPU)
+    # the session judge's FV targets (gpu/tw_gpu_judge.cuh): FV's evaluator code with its CUDA qualifiers, extracted at
+    # build time (FV source only, no FV header)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(TW_JUDGE_EXTRACT "${CMAKE_CURRENT_BINARY_DIR}/generated/twin_cuda_judge_extract.inc")
+    set(TW_CUDA_BACKEND_DIR "${TW_REPO_ROOT}/src/simulation/backends/cuda")
+    add_custom_command(
+        OUTPUT "${TW_JUDGE_EXTRACT}"
+        COMMAND "${Python3_EXECUTABLE}" "${TW_SRC}/fv/extract_cuda_search.py" --judge
+                "${TW_CUDA_BACKEND_DIR}/cuda_search_executor.cu" "${TW_JUDGE_EXTRACT}"
+        DEPENDS "${TW_SRC}/fv/extract_cuda_search.py" "${TW_CUDA_BACKEND_DIR}/cuda_search_executor.cu"
+                "${TW_CUDA_BACKEND_DIR}/cuda_search_executor.h" "${TW_CUDA_BACKEND_DIR}/cuda_search_winner_selection.cuh"
+                "${TW_CUDA_BACKEND_DIR}/cuda_custom_volume.cuh"
+        COMMENT "Extracting FV CUDA search evaluator code for the twin GPU judge"
+        VERBATIM)
+    add_custom_target(tw_judge_extract DEPENDS "${TW_JUDGE_EXTRACT}")
+    add_dependencies(tw_gpu tw_judge_extract)
+    target_include_directories(tw_gpu PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated" "${TW_REPO_ROOT}/include")
 endif()
 
 # ---- runtime ISA dispatch (isa/tw_isa.h) -----------------------------------------------
@@ -454,6 +505,15 @@ if(FOREVERVALIDATOR_BUILD_TWIN_GPU)
     target_include_directories(tw_gpu_search PRIVATE "${TW_REPO_ROOT}" "${TW_REPO_ROOT}/include" "${TW_REPO_ROOT}/src"
         "${TW_GENERATED_DIR}" "${TW_SRC}/fv")
     target_link_libraries(tw_gpu_search PUBLIC tw_gpu)
+    if(NOT TW_GPU_HIP)
+        target_compile_options(tw_gpu_search PRIVATE ${TW_CUDA_MSVC_OPTIONS})
+    endif()
+    if(TW_GPU_HIP)
+        set_source_files_properties("${TW_SRC}/fv/twin_search_device.cu" PROPERTIES LANGUAGE HIP)
+        set_target_properties(tw_gpu_search PROPERTIES HIP_STANDARD 17 HIP_STANDARD_REQUIRED ON HIP_EXTENSIONS OFF)
+        target_include_directories(tw_gpu_search BEFORE PRIVATE "${TW_SRC}/gpu/hip/include" "${TW_SRC}/gpu/hip")
+        target_compile_options(tw_gpu_search PRIVATE ${TW_GPU_HIP_OPTIONS})
+    endif()
     set_target_properties(tw_gpu_search PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON CUDA_EXTENSIONS OFF
         CUDA_SEPARABLE_COMPILATION OFF JOB_POOL_COMPILE tw_gpu_pool)
     if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
@@ -497,6 +557,10 @@ target_link_libraries(forevervalidator-twin-handoff-tests PRIVATE forevervalidat
 target_compile_definitions(forevervalidator-twin-handoff-tests PRIVATE
     TW_STADIUMCAR_JSON="${TW_REPO_ROOT}/src/twin/model/stadiumcar-values.json")
 forevervalidator_configure_target(forevervalidator-twin-handoff-tests)
+if(FOREVERVALIDATOR_ENABLE_HIP AND NOT CMAKE_HIP_PLATFORM STREQUAL "nvidia")
+    # FV's internal headers it reads include HIP's (as forevervalidator_core's sources do)
+    target_compile_definitions(forevervalidator-twin-handoff-tests PRIVATE __HIP_PLATFORM_AMD__=1)
+endif()
 set(FOREVERVALIDATOR_TWIN_TEST_PACKS "" CACHE PATH "Game pack directory for the twin asset tests")
 set(FOREVERVALIDATOR_TWIN_TEST_REPLAYS "" CACHE STRING "Replays (;-list) for the twin asset tests")
 if(FOREVERVALIDATOR_TWIN_TEST_PACKS AND FOREVERVALIDATOR_TWIN_TEST_REPLAYS)
@@ -558,3 +622,15 @@ set_tests_properties(forevervalidator-twin-api forevervalidator-twin-backend-rou
 
 
 
+
+# A build without tests (an application's, BUILD_TESTING OFF) leaves the twin's test and tool programs out of
+# "all"; each still builds by name.
+if(DEFINED BUILD_TESTING AND NOT BUILD_TESTING)
+    get_property(TW_DIRECTORY_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(tw_target IN LISTS TW_DIRECTORY_TARGETS)
+        get_target_property(tw_type ${tw_target} TYPE)
+        if(tw_type STREQUAL "EXECUTABLE")
+            set_target_properties(${tw_target} PROPERTIES EXCLUDE_FROM_ALL TRUE)
+        endif()
+    endforeach()
+endif()

@@ -80,6 +80,11 @@ __device__ __forceinline__ float Comp(const V3 &v, int a) { return a == 0 ? v.x 
 // 1,920,991,234 inputs in [2^-101, max] and +-0; reciprocal: the 4,227,858,434 with |x| normal below 2^126 and +-0). The
 // caller takes the library's operations again when a lane's ok is clear.
 // The fast paths alone (no range check: callers whose input is known to be in range) and the checks.
+#if defined(__HIPCC__)
+// HIP: the correctly rounded operations themselves (no PTX; the same bits wherever ok holds).
+__device__ __forceinline__ float SqrtU(float x) { return __builtin_sqrtf(x); }
+__device__ __forceinline__ float RcpU(float x) { return 1.0f / x; }
+#else
 __device__ __forceinline__ float SqrtU(float x) {
     const unsigned b = __float_as_uint(x);
     float r, s, h;
@@ -99,6 +104,7 @@ __device__ __forceinline__ float RcpU(float x) {
     const float y = __fmaf_rn(r, t2, r);
     return (b << 1) == 0u ? __uint_as_float((b & 0x80000000u) | 0x7f800000u) : y;
 }
+#endif
 __device__ __forceinline__ float SqrtF(float x, bool &ok) {
     const unsigned b = __float_as_uint(x);
     ok &= (b - 0x0d000000u <= 0x727fffffu) | ((b << 1) == 0u);
@@ -113,12 +119,16 @@ __device__ __forceinline__ float RcpF(float x, bool &ok) {
 // select). A subset of SqrtF's ok inputs, on which it returns SqrtF's y: the same bits as sqrtf.
 __device__ __forceinline__ float SqrtP(float x, bool &ok) {
     ok &= __float_as_uint(x) - 0x0d000000u <= 0x727fffffu;
+#if defined(__HIPCC__)
+    return __builtin_sqrtf(x);
+#else
     float r, s, h;
     asm("rsqrt.approx.ftz.f32 %0, %1;" : "=f"(r) : "f"(x));
     asm("mul.ftz.f32 %0, %1, %2;" : "=f"(s) : "f"(x), "f"(r));
     asm("mul.ftz.f32 %0, %1, 0f3F000000;" : "=f"(h) : "f"(r));
     const float e = __fmaf_rn(-s, s, x);
     return __fmaf_rn(e, h, s);
+#endif
 }
 template <bool kFast> __device__ __forceinline__ float SqrtK(float x, bool &ok) {
     if constexpr (kFast) return SqrtF(x, ok); else return L::Sqrt(x);
@@ -460,6 +470,11 @@ __device__ __forceinline__ bool OverlapBox(const RankBox &b, const Box &q) {   /
 __device__ __forceinline__ unsigned OverlapMask8(const float4 &lo, const float4 &hi, const Box box[8]) {
     unsigned sm = 0u;
     for (int k = 0; k < 8; ++k) {
+#if defined(__HIPCC__)
+        const bool in = lo.x <= box[k].hi[0] && box[k].lo[0] <= hi.x && lo.y <= box[k].hi[1] &&
+                        box[k].lo[1] <= hi.y && lo.z <= box[k].hi[2] && box[k].lo[2] <= hi.z;
+        sm |= in ? 1u << k : 0u;
+#else
         unsigned bit;
         asm("{\n\t.reg .pred p;\n\t"
             "setp.le.f32 p, %1, %2;\n\t"
@@ -473,6 +488,7 @@ __device__ __forceinline__ unsigned OverlapMask8(const float4 &lo, const float4 
             : "f"(lo.x), "f"(box[k].hi[0]), "f"(box[k].lo[0]), "f"(hi.x), "f"(lo.y), "f"(box[k].hi[1]), "f"(box[k].lo[1]), "f"(hi.y),
               "f"(lo.z), "f"(box[k].hi[2]), "f"(box[k].lo[2]), "f"(hi.z), "r"(1u << k));
         sm |= bit;
+#endif
     }
     return sm;
 }
@@ -661,10 +677,12 @@ __device__ inline void DetectT(const DevWorld &w, const float pos[3], const floa
         }
     // the union box once: without this ptxas recomputes it from the 8 boxes at every node of the walk (41 instructions a
     // node, 3% of the kernel's), keeping 3 registers fewer
+#if !defined(__HIPCC__)
     for (int a = 0; a < 3; ++a) {
         asm volatile("" : "+f"(u.lo[a]));
         asm volatile("" : "+f"(u.hi[a]));
     }
+#endif
     // BoxPlaneMask's margin without |w|: twice PlaneMayTouch's for any centre in the union box (|c|_1 <= the union box's)
     const float mPlane = 0.02f + 2e-5f * ((fmaxf(fabsf(u.lo[0]), fabsf(u.hi[0])) + fmaxf(fabsf(u.lo[1]), fabsf(u.hi[1]))) +
                                           fmaxf(fabsf(u.lo[2]), fabsf(u.hi[2])));

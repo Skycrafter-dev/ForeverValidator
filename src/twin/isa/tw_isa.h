@@ -66,7 +66,8 @@ struct BatchTick {
     bool raceCompleted = false;
     bool finished = false;                        // sticky from the tick that completed the race (Events::finished)
     std::uint64_t finishLowerNs = 0u;             // ... and that tick's finish bracket (Events::finishLowerNs)
-    const model::TwinState *state = nullptr;      // the full state (BatchPolicy::fullState only, tests)
+    std::uint32_t cpLastSlot = 0xFFFFFFFFu;       // this tick's last accepted passage's slot (Events::cpLastSlot)
+    const model::TwinState *state = nullptr;      // the full state (BatchPolicy::fullState only)
 };
 struct BatchCallbacks {
     void *user = nullptr;
@@ -79,7 +80,7 @@ struct BatchPolicy {
     int lanes = 16;                               // 16 or 8
     int forcesMinLanes = 3;                       // batch::Policy: wide forces + integration from this many lanes
     int respondMinLanes = 4;                      // ... wide response from this many touching lanes
-    bool fullState = false;                       // BatchTick::state (an AoS copy per tick: tests only)
+    bool fullState = false;                       // BatchTick::state (an AoS copy per tick)
 };
 struct BatchStats {
     std::uint64_t jobs = 0u, ticks = 0u, laneSubsteps = 0u, passes = 0u;

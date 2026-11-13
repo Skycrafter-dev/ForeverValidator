@@ -212,6 +212,9 @@ bool HasVbmi2() {
     static const bool v = [] {
         const char *e = std::getenv("FOREVERVALIDATOR_TWIN_VBMI2");
         if (e != nullptr && e[0] == '0') return false;
+#if defined(_WIN32)
+        return false;   // (no __builtin_cpu_supports without compiler-rt; Windows runs the baseline)
+#endif
         __builtin_cpu_init();
         return __builtin_cpu_supports("avx512vbmi2") != 0 && __builtin_cpu_supports("avx512bw") != 0;
     }();

@@ -323,6 +323,7 @@ private:
             }
             tick.finished = slot.finished;
             tick.finishLowerNs = slot.finishLowerNs;
+            tick.cpLastSlot = t.cpLastSlot;
             if (fullState_) {
                 if (v.aos != nullptr) {
                     std::memcpy(&full_, v.aos, sizeof full_);
