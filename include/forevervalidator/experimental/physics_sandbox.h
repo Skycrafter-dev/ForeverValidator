@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <variant>
@@ -23,6 +24,9 @@ struct PhysicsSandboxStaticSceneTestAccess;
 }
 namespace cuda_test {
 struct PhysicsSandboxCudaTestAccess;
+}
+namespace twin_test {
+struct PhysicsSandboxTwinTestAccess;
 }
 
 class PhysicsSandboxCudaSearchSession;
@@ -146,7 +150,12 @@ struct PhysicsSandboxCollisionTriangle {
     Vector3 a{};
     Vector3 b{};
     Vector3 c{};
+    // The surface material (EPlugSurfaceMaterialId, 28 = NotCollidable);
+    // kPhysicsSandboxUnknownMaterial where the surface names none.
+    std::uint8_t material = 0xffu;
 };
+
+inline constexpr std::uint8_t kPhysicsSandboxUnknownMaterial = 0xffu;
 
 struct PhysicsSandboxEllipsoid {
     float rotationX = 0.0f;
@@ -487,12 +496,23 @@ struct PhysicsSandboxCudaCustomVolumeEntryEvaluator {
 // scores 1e12 + 1e6 per checkpoint still to come before it + its closest
 // distance in metres (to the slot's trigger, or with any slot to the
 // nearest checkpoint not taken yet this lap). Lower is better. CUDA, HIP.
+// An around-walls table and the lock its users take to read or fill it.
+struct PhysicsSandboxAroundWallsTable {
+    std::mutex mutex;
+    std::vector<std::uint8_t> bytes;
+};
+
 struct PhysicsSandboxCudaDistanceEvaluator {
     bool finish = false;
     std::uint32_t checkpointIndex = 0u;
     std::uint32_t lap = 1u;
     std::optional<std::uint32_t> checkpointSlot;
     std::uint64_t eventIndex = 0u;
+    // Around walls: one table per target trigger (around_walls_table.h),
+    // in the order the map lists the triggers; empty measures straight.
+    // Shared with the caller: the corners a search fills on demand stay
+    // filled in it for the next searches.
+    std::vector<std::shared_ptr<PhysicsSandboxAroundWallsTable>> aroundWalls;
 };
 
 struct PhysicsSandboxCudaStuntPointsEvaluator {};
@@ -656,6 +676,34 @@ struct PhysicsSandboxCudaMutationSegment {
     std::int64_t maximumTimeMs = 0;
 };
 
+// Runs the search on CPU threads with the twin engine instead of a GPU
+// (docs/twin/m13-search.md). Needs a loaded optimized-CPU sandbox and a
+// build with FOREVERVALIDATOR_HAS_TWIN. Same configuration, same candidates
+// for the same seeds, same batch results as the GPU backends.
+struct PhysicsSandboxTwinSearchOptions {
+    // Worker threads; 0 = hardware concurrency. The FV delegate below runs
+    // on one thread (FV's game random sequence is process-global).
+    std::uint32_t threads = 0u;
+    TwinPolicy policy = TwinPolicy::FvSubsteps;          // others fail the acceptance test
+    TwinCollision collision = TwinCollision::Noise;      // Exact: the reference stage
+    // DEBUG ONLY, until the twin tick exists: candidates are simulated on
+    // FV optimized_cpu instead of the twin, through the same loop.
+    bool debugDelegateToOptimizedCpu = false;
+    // No longer read: the search runs the twin path whatever
+    // twin::QueryTwinEngine().stepImplemented says (it describes another step).
+    bool debugAllowUnfinishedEngine = false;
+    // Re-simulate every new best on FV reference (metrics.winnerVerified*).
+    bool verifyWinners = true;
+    // The candidates' physics on the GPU (the twin's GPU engine; needs a build
+    // with FOREVERVALIDATOR_BUILD_TWIN_GPU) instead of CPU threads. The same
+    // results bit for bit. FOREVERVALIDATOR_TWIN_SEARCH_ENGINE=gpu sets it too.
+    bool gpu = false;
+    // Twin path: a candidate starts from the baseline's state before its first
+    // changed control, the shared prefix judged from the baseline's per-tick
+    // states (same results bit for bit; false: every candidate from the branch).
+    bool branchAtFirstChange = true;
+};
+
 struct PhysicsSandboxCudaSearchConfiguration {
     std::uint32_t maximumBatchSize = 1u;
     std::int64_t earliestMutationTimeMs = 0;
@@ -677,6 +725,9 @@ struct PhysicsSandboxCudaSearchConfiguration {
     // Inclusive, ordered, non-overlapping tick ranges. Empty keeps flat search.
     std::vector<PhysicsSandboxCudaMutationSegment> mutationSegments;
     std::uint32_t changedSegmentCount = 1u;
+    // Set to search on the CPU with the twin engine (the sandbox must be
+    // optimized-CPU); unset keeps the sandbox's GPU backend.
+    std::optional<PhysicsSandboxTwinSearchOptions> twin;
 };
 
 // An opaque in-process runtime clone. States are not serializable and are not
@@ -697,6 +748,7 @@ private:
     std::shared_ptr<const Impl> impl_;
     friend class PhysicsSandbox;
     friend class PhysicsSandboxCudaSearchSession;
+    friend struct twin_test::PhysicsSandboxTwinTestAccess;
 };
 
 struct PhysicsSandboxCudaSearchMetrics {
@@ -725,6 +777,19 @@ struct PhysicsSandboxCudaSearchMetrics {
     // Conservative reservation bound, excluding fixed shared scene buffers.
     // Zero means the backend requires measured capacity-growth estimates.
     std::uint64_t reservationBytesPerCandidate = 0u;
+    // Twin CPU search only (zero on GPU backends): thread-summed host time
+    // per stage, simulated ticks, and the FV re-check of a new best.
+    double hostGenerationMilliseconds = 0.0;
+    double hostPhysicsMilliseconds = 0.0;
+    double hostEvaluationMilliseconds = 0.0;
+    double hostSelectionMilliseconds = 0.0;
+    double hostVerificationMilliseconds = 0.0;
+    std::uint32_t hostThreads = 0u;
+    std::uint64_t hostSimulatedTicks = 0u;
+    std::uint64_t hostSharedPrefixTicks = 0u;  // judged from the baseline's states, not simulated
+    bool winnerVerified = false;
+    bool winnerVerificationMatched = false;
+    double winnerVerifiedScore = 0.0;
 };
 
 struct PhysicsSandboxCudaSearchBatch {
@@ -793,6 +858,11 @@ public:
     PhysicsSandboxResult<PhysicsSandboxRenderSceneHandle> ReadRenderScene()
             const noexcept;
     PhysicsSandboxResult<PhysicsSandboxSceneView> ReadScene() const noexcept;
+    // The game's static collision segment query (the race cameras' cast):
+    // the fraction along start..end of the first face the segment enters
+    // (one-sided meshes and spheres). None without a loaded race.
+    std::optional<float> IntersectStaticSegment(
+            const Vector3 &start, const Vector3 &end) const noexcept;
 
 private:
     struct Impl;
@@ -813,6 +883,7 @@ private:
                     std::uint32_t count) noexcept;
     friend struct static_scene_test::PhysicsSandboxStaticSceneTestAccess;
     friend struct cuda_test::PhysicsSandboxCudaTestAccess;
+    friend struct twin_test::PhysicsSandboxTwinTestAccess;
     friend class PhysicsSandboxCudaSearchSession;
     friend PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>
             CreatePhysicsSandboxCudaSearchSession(

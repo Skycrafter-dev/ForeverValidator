@@ -12,10 +12,16 @@ struct InstalledVehicleAssetReference {
     std::string logicalPath;
     std::string selectedPath;
     u32 classId = 0u;
+    u32 collectorIndex = 0xffffffffu;
 
     bool IsValid() const {
         return !logicalPath.empty() && !selectedPath.empty() && classId != 0u;
     }
+};
+
+struct InstalledVehicleCameraSet {
+    std::vector<InstalledVehicleAssetReference> cameras;
+    u32 defaultCameraIndex = 0xffffffffu;
 };
 
 struct InstalledVehicleAssetGraph {
@@ -31,7 +37,7 @@ struct InstalledVehicleAssetGraph {
 
     static std::optional<InstalledVehicleAssetGraph> ResolveFromPack(
             CPlugFilePack &pack);
-    static std::optional<std::vector<InstalledVehicleAssetReference>>
+    static std::optional<InstalledVehicleCameraSet>
     ResolveRaceCamerasFromPack(CPlugFilePack &pack);
     bool IsComplete() const;
 };

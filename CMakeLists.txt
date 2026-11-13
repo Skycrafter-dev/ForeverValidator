@@ -549,6 +549,20 @@ if(FOREVERVALIDATOR_BUILD_CLI)
     endif()
 endif()
 
+# Experimental twin engine (docs/twin/integration.md): twin libraries, the
+# "twin" backend in forevervalidator_core, experimental/twin.h, CTest tests.
+option(FOREVERVALIDATOR_BUILD_TWIN
+       "Build the twin engine (src/twin) and the twin backend" OFF)
+option(FOREVERVALIDATOR_BUILD_TWIN_GPU
+       "Build the twin's CUDA engine (src/twin/gpu)" OFF)
+if(FOREVERVALIDATOR_BUILD_TWIN AND FOREVERVALIDATOR_BUILD_TWIN_GPU AND NOT FOREVERVALIDATOR_ENABLE_CUDA)
+    enable_language(CUDA)
+    find_package(CUDAToolkit REQUIRED)
+endif()
+if(FOREVERVALIDATOR_BUILD_TWIN)
+    add_subdirectory(src/twin)
+endif()
+
 if(FOREVERVALIDATOR_BUILD_TESTS)
     enable_testing()
 
@@ -585,6 +599,17 @@ if(FOREVERVALIDATOR_BUILD_TESTS)
     forevervalidator_configure_target(forevervalidator-race-camera-tests)
     add_test(NAME forevervalidator-race-camera
              COMMAND forevervalidator-race-camera-tests)
+
+    add_executable(forevervalidator-native-race-camera-tests
+        tests/native_race_camera_tests.cpp)
+    target_include_directories(forevervalidator-native-race-camera-tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_compile_definitions(forevervalidator-native-race-camera-tests PRIVATE
+        NATIVE_CAMERA_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/data/camera/ordinary-race.bin")
+    target_link_libraries(forevervalidator-native-race-camera-tests PRIVATE forevervalidator_native)
+    forevervalidator_configure_target(forevervalidator-native-race-camera-tests)
+    add_test(NAME forevervalidator-native-race-camera
+             COMMAND forevervalidator-native-race-camera-tests)
 
     add_executable(forevervalidator-race-camera-pack-tests
         tests/race_camera_pack_tests.cpp)

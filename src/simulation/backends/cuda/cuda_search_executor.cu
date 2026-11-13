@@ -10,6 +10,7 @@
 #endif
 
 #include "simulation/backends/cuda/cuda_search_executor.h"
+#include <forevervalidator/experimental/around_walls_table.h>
 #include "simulation/backends/gpu_memory_budget.h"
 
 #include <cuda_runtime.h>
@@ -1835,17 +1836,17 @@ __device__ bool SegmentEntry(
             }
             continue;
         }
-        double near =
+        double low =
                 (evaluator.values[axis] - fromValues[axis]) / delta;
-        double far =
+        double high =
                 (evaluator.values[axis + 3u] - fromValues[axis]) / delta;
-        if (near > far) {
-            const double swap = near;
-            near = far;
-            far = swap;
+        if (low > high) {
+            const double swap = low;
+            low = high;
+            high = swap;
         }
-        enter = enter > near ? enter : near;
-        leave = leave < far ? leave : far;
+        enter = enter > low ? enter : low;
+        leave = leave < high ? leave : high;
         if (enter > leave) {
             return false;
         }
@@ -2253,6 +2254,46 @@ __device__ inline bool SlotPassed(const CudaCheckpointSlots &slots,
             ((slots.words[slot / 32u] >> (slot % 32u)) & 1u) != 0u;
 }
 
+// How far the car's shapes reach from its body centre along a unit
+// direction (support function of the ellipsoids; ForeverTAS's Reach).
+__device__ inline double BodyReach(const CudaSearchEvaluatorConfiguration &evaluator,
+                                   const GmQuat &rotation, Vec direction) {
+    const Vec local = Rotate(-rotation.x, -rotation.y, -rotation.z, rotation.w, direction);
+    double farthest = 0.0;
+    for (std::uint32_t s = 0u; s < evaluator.distanceShapeCount; ++s) {
+        const double *shape = evaluator.distanceShapes[s];
+        const Vec inShape = Rotate(-shape[3], -shape[4], -shape[5], shape[6], local);
+        const Vec scaled{inShape.x * shape[7], inShape.y * shape[8], inShape.z * shape[9]};
+        const Vec offset{shape[0] - evaluator.bodyCenter[0], shape[1] - evaluator.bodyCenter[1],
+                         shape[2] - evaluator.bodyCenter[2]};
+        farthest = fmax(farthest, Dot(offset, local) + sqrt(Dot(scaled, scaled)));
+    }
+    return farthest;
+}
+
+// Around walls: the car's way to one trigger, never shorter than straight
+// (ForeverTAS's DistanceSession::Observe).
+__device__ inline double AroundDistance(const CudaSearchEvaluatorConfiguration &evaluator,
+                                        std::uint32_t trigger, double straight,
+                                        const Vec &p, const GmQuat &rotation) {
+    const Vec body = Add(p, Rotate(rotation.x, rotation.y, rotation.z, rotation.w,
+                                   {evaluator.bodyCenter[0], evaluator.bodyCenter[1],
+                                    evaluator.bodyCenter[2]}));
+    const experimental::around_walls::Path path = experimental::around_walls::PathTo(
+            evaluator.aroundWalls + evaluator.aroundWallsOffsets[trigger], body.x, body.y,
+            body.z);
+    // Near a trigger in plain sight, the exact distance.
+    if (path.inSight && straight <= 4.0) return straight;
+    // The path starts at the sphere; the body reaches farther towards
+    // where it first bends (or the trigger).
+    const Vec toward = Sub({path.via[0], path.via[1], path.via[2]}, body);
+    const double span = sqrt(Dot(toward, toward));
+    const double reach = span > 1e-9 ? BodyReach(evaluator, rotation, Mul(toward, 1.0 / span))
+                                     : evaluator.bodyRadius;
+    const double around = path.length - fmin(span, fmax(0.0, reach - evaluator.bodyRadius));
+    return fmax(straight, around);
+}
+
 // The closest the car is to the target's triggers: the slot's, or with any
 // slot the checkpoints not taken yet this lap (all once every one is).
 // Far from a trigger its box stands in.
@@ -2268,9 +2309,11 @@ __device__ inline double CarDistance(
         const double slot = evaluator.distanceTriggers[i][0];
         anyOpen |= slot < 0.0 || !SlotPassed(passed, static_cast<std::uint32_t>(slot));
     }
+    double straight[CudaSearchMaximumDistanceTriggers];
     double best = 1e300;
     for (std::uint32_t i = 0u; i < evaluator.distanceTriggerCount; ++i) {
         const double *trigger = evaluator.distanceTriggers[i];
+        straight[i] = 1e300;
         if (anySlot && anyOpen && trigger[0] >= 0.0 &&
             SlotPassed(passed, static_cast<std::uint32_t>(trigger[0]))) {
             continue;
@@ -2279,8 +2322,25 @@ __device__ inline double CarDistance(
         const double dy = fmax(fmax(trigger[4] - p.y, 0.0), p.y - trigger[7]);
         const double dz = fmax(fmax(trigger[5] - p.z, 0.0), p.z - trigger[8]);
         const double coarse = sqrt(dx * dx + dy * dy + dz * dz) - evaluator.values[6];
-        best = fmin(best, coarse > 4.0 ? coarse
-                                       : TriggerDistance(evaluator, trigger, p, rotation));
+        straight[i] = coarse > 4.0 ? coarse : TriggerDistance(evaluator, trigger, p, rotation);
+        best = fmin(best, straight[i]);
+    }
+    if (evaluator.aroundWalls == nullptr) return best;
+    // Around walls: straight-nearest first; the way around is never
+    // shorter, so a trigger straight-farther than the best way so far is
+    // not measured.
+    best = 1e300;
+    for (;;) {
+        std::uint32_t next = evaluator.distanceTriggerCount;
+        for (std::uint32_t i = 0u; i < evaluator.distanceTriggerCount; ++i) {
+            if (straight[i] < 1e300 &&
+                (next == evaluator.distanceTriggerCount || straight[i] < straight[next])) {
+                next = i;
+            }
+        }
+        if (next == evaluator.distanceTriggerCount || straight[next] >= best) break;
+        best = fmin(best, AroundDistance(evaluator, next, straight[next], p, rotation));
+        straight[next] = 1e300;
     }
     return best;
 }
@@ -4188,6 +4248,9 @@ struct CudaSearchExecutor::Impl {
     DeviceAllocation<CudaSearchMutationSegment> mutationSegments;
     DeviceAllocation<double> smoothWeights;
     DeviceAllocation<CudaSearchEvaluatorConfiguration> evaluator;
+    DeviceAllocation<unsigned char> aroundWallsTables;
+    // The global best as it was before a batch, for running it again.
+    DeviceAllocation<std::byte> globalBestBackup;
     DeviceAllocation<CudaSearchConditionInstruction> condition;
     DeviceAllocation<CudaCandidateState> capturedWinnerState;
     DeviceAllocation<DeviceSample> candidateBestSamples;
@@ -4245,6 +4308,7 @@ struct CudaSearchExecutor::Impl {
         ADD_BYTES(mutationSegments);
         ADD_BYTES(smoothWeights);
         ADD_BYTES(evaluator);
+        ADD_BYTES(aroundWallsTables);
         ADD_BYTES(condition);
         ADD_BYTES(capturedWinnerState);
         ADD_BYTES(candidateBestSamples);
@@ -4889,6 +4953,137 @@ struct CudaSearchExecutor::Impl {
             diagnostic->clear();
         }
         return true;
+    }
+
+    // Fills the around-walls corners the last batch marked missed, on the
+    // host copy and the device's; how many (0: the batch needed none).
+    std::uint64_t FillMissedAroundWallsCorners(std::string *diagnostic) {
+        namespace around_walls = forevervalidator::experimental::around_walls;
+        std::vector<unsigned char> &host = configuration.aroundWallsTables;
+        std::uint64_t total = 0u;
+        for (std::uint32_t trigger = 0u;
+             trigger < configuration.evaluator.distanceTriggerCount; ++trigger) {
+            const std::uint64_t offset = configuration.evaluator.aroundWallsOffsets[trigger];
+            around_walls::Header header;
+            std::memcpy(&header, host.data() + offset, sizeof header);
+            unsigned char *device = aroundWallsTables.Get() + offset;
+            std::uint32_t any = 0u;
+            cudaError_t error = cudaMemcpy(&any, device + header.missed, sizeof any,
+                                           cudaMemcpyDeviceToHost);
+            if (error == cudaSuccess && any == 0u) continue;
+            const std::uint64_t missedBytes = around_walls::MissedBytes(header.cornerCount);
+            std::vector<std::uint32_t> words(missedBytes / 4u);
+            if (error == cudaSuccess) {
+                error = cudaMemcpy(words.data(), device + header.missed, missedBytes,
+                                   cudaMemcpyDeviceToHost);
+            }
+            if (error == cudaSuccess) error = cudaMemset(device + header.missed, 0, missedBytes);
+            if (error != cudaSuccess) {
+                *diagnostic = CudaFailure("reading CUDA around-walls missed corners", error);
+                return 0u;
+            }
+            const auto *corners = reinterpret_cast<const around_walls::Corner *>(
+                    host.data() + offset + header.corners);
+            std::vector<std::uint64_t> missed;
+            for (std::size_t word = 1u; word < words.size(); ++word) {
+                for (std::uint32_t bit = 0u; words[word] != 0u && bit < 32u; ++bit) {
+                    const std::uint64_t corner = (word - 1u) * 32u + bit;
+                    if ((words[word] >> bit & 1u) != 0u &&
+                        corners[corner].direct == around_walls::kCornerUnfilled) {
+                        missed.push_back(corner);
+                    }
+                }
+            }
+            if (missed.empty()) continue;
+            std::atomic<std::size_t> next{0u};
+            const auto fill = [&] {
+                for (std::size_t i; (i = next.fetch_add(1u)) < missed.size();) {
+                    around_walls::FillCorner(host.data() + offset, missed[i]);
+                }
+            };
+            const unsigned helpers = static_cast<unsigned>(std::min<std::size_t>(
+                    std::max(1u, std::thread::hardware_concurrency()) - 1u, missed.size() / 8u));
+            std::vector<std::thread> threads;
+            for (unsigned i = 0u; i < helpers; ++i) threads.emplace_back(fill);
+            fill();
+            for (std::thread &thread : threads) thread.join();
+            error = cudaMemcpy(device + header.corners, host.data() + offset + header.corners,
+                               header.cornerCount * sizeof(around_walls::Corner),
+                               cudaMemcpyHostToDevice);
+            if (error != cudaSuccess) {
+                *diagnostic = CudaFailure("uploading CUDA around-walls corners", error);
+                return 0u;
+            }
+            if (configuration.aroundWallsFilled) {
+                configuration.aroundWallsFilled(trigger, host.data() + offset);
+            }
+            total += missed.size();
+        }
+        return total;
+    }
+
+    // Copies the global best (sample, state, inputs, counts) to or from
+    // the backup.
+    cudaError_t CopyGlobalBest(bool restore) {
+        const std::pair<std::byte *, std::size_t> parts[] = {
+                {reinterpret_cast<std::byte *>(globalBestSample.Get()), globalBestSample.Bytes()},
+                {reinterpret_cast<std::byte *>(globalBestState.Get()), globalBestState.Bytes()},
+                {reinterpret_cast<std::byte *>(globalBestInputs.Get()), globalBestInputs.Bytes()},
+                {reinterpret_cast<std::byte *>(globalBestEventCount.Get()),
+                 globalBestEventCount.Bytes()},
+                {reinterpret_cast<std::byte *>(globalBestMutationCount.Get()),
+                 globalBestMutationCount.Bytes()}};
+        std::size_t total = 0u;
+        for (const auto &part : parts) total += part.second;
+        if (globalBestBackup.Bytes() != total && !globalBestBackup.Allocate(total)) {
+            return cudaErrorMemoryAllocation;
+        }
+        std::size_t offset = 0u;
+        for (const auto &part : parts) {
+            std::byte *backup = globalBestBackup.Get() + offset;
+            const cudaError_t error = cudaMemcpy(restore ? part.first : backup,
+                                                 restore ? backup : part.first, part.second,
+                                                 cudaMemcpyDeviceToDevice);
+            if (error != cudaSuccess) return error;
+            offset += part.second;
+        }
+        return cudaSuccess;
+    }
+
+    // A batch, run again while it needed around-walls corners not filled
+    // yet, from the global best it started with: its answers are those of
+    // tables filled in full.
+    CudaSearchBatchExecution ExecuteFilled(
+            std::uint64_t firstCandidateId,
+            std::uint32_t candidateCount,
+            bool baseline,
+            const std::function<bool()> &cancellationRequested) {
+        const bool tables = !configuration.aroundWallsTables.empty();
+        for (bool rerun = false;; rerun = true) {
+            const cudaError_t backup = tables ? CopyGlobalBest(rerun) : cudaSuccess;
+            if (backup != cudaSuccess) {
+                CudaSearchBatchExecution result;
+                result.status = CudaSearchStatus::DeviceFailure;
+                result.firstCandidateId = firstCandidateId;
+                result.candidateCount = candidateCount;
+                result.diagnostic = CudaFailure("saving the CUDA global best", backup);
+                return result;
+            }
+            CudaSearchBatchExecution result = Execute(
+                    firstCandidateId, candidateCount, baseline, cancellationRequested);
+            if (result.status != CudaSearchStatus::Success || !tables) {
+                return result;
+            }
+            std::string diagnostic;
+            const std::uint64_t filled = FillMissedAroundWallsCorners(&diagnostic);
+            if (!diagnostic.empty()) {
+                result.status = CudaSearchStatus::DeviceFailure;
+                result.diagnostic = diagnostic;
+                return result;
+            }
+            if (filled == 0u) return result;
+            if (baseline) baselineEvaluated = false;
+        }
     }
 
     CudaSearchBatchExecution Execute(
@@ -6420,6 +6615,8 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
             !impl->smoothWeights.Allocate(
                     preparedConfiguration.smoothWeights.size()) ||
             !impl->evaluator.Allocate(1u) ||
+            !impl->aroundWallsTables.Allocate(
+                    preparedConfiguration.aroundWallsTables.size()) ||
             !impl->condition.Allocate(
                     preparedConfiguration.condition
                             ? preparedConfiguration.condition->instructions.size()
@@ -6592,11 +6789,19 @@ std::unique_ptr<CudaSearchExecutor> CudaSearchExecutor::Create(
         UPLOAD(impl->sharedEligibleIndices,
                sharedEligibleIndices,
                "uploading CUDA shared eligible indices");
+        UPLOAD(impl->aroundWallsTables,
+               preparedConfiguration.aroundWallsTables,
+               "uploading CUDA around-walls tables");
 #undef UPLOAD
+        CudaSearchEvaluatorConfiguration uploadedEvaluator =
+                preparedConfiguration.evaluator;
+        uploadedEvaluator.aroundWalls =
+                preparedConfiguration.aroundWallsTables.empty()
+                ? nullptr : impl->aroundWallsTables.Get();
         error = cudaMemcpy(
                 impl->evaluator.Get(),
-                &preparedConfiguration.evaluator,
-                sizeof(preparedConfiguration.evaluator),
+                &uploadedEvaluator,
+                sizeof(uploadedEvaluator),
                 cudaMemcpyHostToDevice);
         if (error != cudaSuccess) {
             if (diagnostic != nullptr) {
@@ -6718,7 +6923,7 @@ CudaSearchBatchExecution CudaSearchExecutor::EvaluateBaseline(
         return result;
     }
     CudaSearchBatchExecution result =
-            impl_->Execute(0u, 1u, true, cancellationRequested);
+            impl_->ExecuteFilled(0u, 1u, true, cancellationRequested);
     result.hostToDeviceBytes += impl_->initialUploadBytes;
     return result;
 }
@@ -6754,7 +6959,7 @@ CudaSearchBatchExecution CudaSearchExecutor::RunBatch(
         result.diagnostic = "CUDA candidate ID range overflow";
         return result;
     }
-    return impl_->Execute(
+    return impl_->ExecuteFilled(
             firstCandidateId, candidateCount, false,
             cancellationRequested);
 }

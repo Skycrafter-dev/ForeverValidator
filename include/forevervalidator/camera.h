@@ -13,6 +13,7 @@ namespace forevervalidator::camera {
 
 namespace detail {
 struct RaceCameraEnvironmentFactory;
+struct RaceCameraSessionAccess;
 }
 
 struct Vector3 {
@@ -49,6 +50,7 @@ enum class RaceCameraProfile : std::uint8_t {
     Race,
     Race2,
     Race3,
+    Internal,
 };
 
 struct RaceCameraProfileInfo {
@@ -56,6 +58,12 @@ struct RaceCameraProfileInfo {
     std::uint32_t classId = 0u;
     std::string_view className;
     std::optional<std::uint32_t> stadiumVehicleResourceIndex;
+};
+
+struct RaceCameraResourceSelection {
+    RaceCameraProfile profile = RaceCameraProfile::Race;
+    std::size_t resourceIndex = 0u;
+    std::uint32_t collectorIndex = 0xffffffffu;
 };
 
 const RaceCameraProfileInfo &ProfileInfo(RaceCameraProfile profile) noexcept;
@@ -115,6 +123,10 @@ struct RaceCameraVehicleState {
     // camera support resource. It is already negated as expected by the
     // original SetDOVandUpV call.
     Vector3 cameraSupportUp{0.0f, 1.0f, 0.0f};
+
+    // Native reset uses the mobil's simulation pose (+0x7c), whereas ordinary
+    // updates use its visual pose (+0x80). Omit when both poses are identical.
+    std::optional<Transform> resetTransform;
 };
 
 struct RaceCameraQuery {
@@ -145,6 +157,9 @@ class RaceCameraEnvironment {
     std::size_t ResourceCount(RaceCameraProfile profile) const noexcept;
     std::string_view ResourceName(RaceCameraProfile profile,
                                   std::size_t resourceIndex) const noexcept;
+    std::optional<RaceCameraResourceSelection>
+    ResourceForCollectorIndex(std::uint32_t collectorIndex) const noexcept;
+    std::optional<RaceCameraResourceSelection> DefaultResource() const noexcept;
 
   private:
     class Impl;
@@ -160,6 +175,13 @@ class RaceCameraEnvironment {
 // called by a consumer.
 class RaceCameraSession {
   public:
+    // Process-local controller state, excluding immutable camera resources.
+    // Not a persistent or versioned interchange format.
+    struct State {
+        std::array<std::uint8_t, 1024u> bytes{};
+        std::size_t size = 0u;
+        RaceCameraProfile profile = RaceCameraProfile::Race;
+    };
     // Uses only profiles declared by the supplied environment. When multiple
     // resources share a class, this selects the collector's final declaration.
     // Construction fails with std::invalid_argument when the profile is absent.
@@ -180,10 +202,18 @@ class RaceCameraSession {
     RaceCameraProfile Profile() const noexcept;
     void Reset(const RaceCameraVehicleState &vehicle);
     RaceCameraOutput Evaluate(const RaceCameraQuery &query);
+    // An independent session in this one's exact state, for example to
+    // carry on later from a moment a consumer went back to.
+    RaceCameraSession Clone() const;
+    State CaptureState() const;
+    // Restore into a session using the same environment/resource selection.
+    void RestoreState(const State &state);
 
   private:
     class Impl;
+    explicit RaceCameraSession(std::unique_ptr<Impl> impl);
     std::unique_ptr<Impl> impl_;
+    friend struct detail::RaceCameraSessionAccess;
 };
 
 } // namespace forevervalidator::camera

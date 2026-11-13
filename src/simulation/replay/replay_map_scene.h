@@ -45,6 +45,8 @@ public:
             CTrackManiaRace &race,
             CHmsCollisionManagerSZone *&selectedZone);
     bool FirstStartLineSpawnLocation(GmIso4 &location) const;
+    // The installed static models (twin world compile, docs/twin/m2-world.md).
+    const StaticSceneModelCollection &Models() const noexcept { return models_; }
     const CHmsCollisionManagerSZone &PersistentCollisionZoneForTesting(
             void) const noexcept {
         return persistentCollisionZone_;

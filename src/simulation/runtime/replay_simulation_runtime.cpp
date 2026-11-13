@@ -1008,10 +1008,23 @@ ReplaySimulationRuntime::CurrentRaceCameraState() const {
                 car.WheelAt(static_cast<u32>(index));
         result.wheelContact[index] =
                 wheel.currentPhysicsState.contactPresent;
+        // The asynchronous wheel state (the native SetBlend of the two last
+        // physics samples) keeps contact only when both samples have it.
+        // Validator playback does not run that scene update, so derive it.
         result.wheelHasSurface[index] =
-                wheel.asyncState.contactPresent;
+                wheel.previousPhysicsState.contactPresent &&
+                wheel.currentPhysicsState.contactPresent;
     }
     return result;
+}
+
+std::optional<float> ReplaySimulationRuntime::IntersectStaticSegment(
+        const GmVec3 &start, const GmVec3 &delta) const {
+    float fraction = 0.0f;
+    EPlugSurfaceMaterialId material = EPlugSurfaceMaterialId_Concrete;
+    return state_->world.CollisionZone().IntersectSegment3(
+                   CHmsItem::ECollisionGroup_Static, start, delta, fraction, material)
+            ? std::optional<float>(fraction) : std::nullopt;
 }
 
 CSceneVehicleCar::SConditionState

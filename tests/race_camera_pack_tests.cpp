@@ -456,8 +456,8 @@ bool TestMultipleRaceResources() {
     second.common.baseFieldOfView = 82.0f;
     second.common.initialFieldOfView = 82.0f;
     config.raceResources = {
-            {"CameraFirst.gbx", first},
-            {"CameraSecond.gbx", second},
+            {"CameraFirst.gbx", 0u, first},
+            {"CameraSecond.gbx", 1u, second},
     };
     RaceCameraEnvironment environment =
             RaceCameraEnvironmentFactory::Create(std::move(config));

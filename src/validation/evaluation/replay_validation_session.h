@@ -80,6 +80,9 @@ enum class ReplayValidationExecutionResult {
     CudaUnavailable,
     CudaInitializationFailed,
     CudaExecutionFailed,
+    TwinUnavailable,
+    TwinNotImplemented,
+    TwinExecutionFailed,
 };
 
 ReplayValidationExecutionResult ExecuteReplayValidation(

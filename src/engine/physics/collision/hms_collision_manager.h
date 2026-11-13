@@ -149,6 +149,10 @@ struct CHmsCollisionManager {
         void RemoveCorpus(CHmsCorpus *corpus);
         void UpdateStaticCollisionTrees(void);
         void PrepareCollisions(void);
+        bool IntersectSegment3(CHmsItem::ECollisionGroup group,
+                               const GmVec3 &start, const GmVec3 &delta,
+                               float &ratio,
+                               EPlugSurfaceMaterialId &material) const;
         int ComputeCollisionTree1RootOnly(
                 const SPlugTreeLocatedPair &pair,
                 const GmBoxAligned &boxA);

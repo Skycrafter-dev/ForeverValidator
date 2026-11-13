@@ -27,6 +27,66 @@ constexpr std::array<AxisCycle, 3> SpatialAxisCycles = {{
 }};
 } // namespace
 
+bool GmBoxAligned::TestInterSegmentMiddleVector(
+        const GmVec3 &middle, const GmVec3 &delta) const {
+    const GmVec3 distance = center - middle;
+    const GmVec3 extent{std::fabs(delta.x), std::fabs(delta.y),
+                        std::fabs(delta.z)};
+    if (extent.x * 0.5f + halfExtents.x < std::fabs(distance.x) ||
+        extent.y * 0.5f + halfExtents.y < std::fabs(distance.y) ||
+        extent.z * 0.5f + halfExtents.z < std::fabs(distance.z)) {
+        return false;
+    }
+    return std::fabs(delta.z * distance.y - delta.y * distance.z) <=
+                    extent.y * halfExtents.z + halfExtents.y * extent.z &&
+            std::fabs(distance.z * delta.x - delta.z * distance.x) <=
+                    extent.z * halfExtents.x + extent.x * halfExtents.z &&
+            std::fabs(distance.x * delta.y - distance.y * delta.x) <=
+                    extent.x * halfExtents.y + extent.y * halfExtents.x;
+}
+
+bool GmBoxAligned::TestInterSegment(
+        const GmVec3 &start, const GmVec3 &end) const {
+    const GmVec3 middle{(start.x + end.x) * 0.5f,
+                        (start.y + end.y) * 0.5f,
+                        (start.z + end.z) * 0.5f};
+    return TestInterSegmentMiddleVector(middle, end - start);
+}
+
+bool GmSurf::ClipSegment3(
+        const LocatedGmSurf &surface, const GmVec3 &start,
+        const GmVec3 &delta, float &ratio, GmLocalMaterialIndex &material) {
+    if (surface.surf == nullptr || surface.iso == nullptr) return false;
+    if (const auto *mesh = dynamic_cast<const GmSurfMesh *>(surface.surf)) {
+        GmVec3 localStart = start - surface.iso->translation;
+        localStart.MultTranspose(surface.iso->rotation);
+        GmVec3 localDelta;
+        localDelta.SetMultTranspose(delta, surface.iso->rotation);
+        return mesh->ClipSegment3(localStart, localDelta, ratio, material);
+    }
+    const auto *sphere = dynamic_cast<const GmSurfSphere *>(surface.surf);
+    if (sphere == nullptr) return false;
+    // Native ClipSegment3 accepts sphere and mesh surfaces only. In
+    // particular, a visual water query must not invent box/ellipsoid hits.
+    const GmVec3 distance = start - surface.iso->translation;
+    const float along = delta.x * distance.x + distance.y * delta.y +
+            distance.z * delta.z;
+    const float lengthSquared = delta.y * delta.y + delta.x * delta.x +
+            delta.z * delta.z;
+    const float distanceSquared = distance.z * distance.z +
+            distance.y * distance.y + distance.x * distance.x;
+    const float discriminant = along * 4.0f * along -
+            4.0f * lengthSquared *
+                    (distanceSquared - sphere->radius * sphere->radius);
+    if (discriminant < 0.0f || !(lengthSquared > 0.0f)) return false;
+    const float intersection =
+            (-along - CIsqrt(discriminant) * 0.5f) / lengthSquared;
+    if (intersection < 0.0f || intersection > 1.0f) return false;
+    ratio = intersection;
+    material = sphere->material;
+    return true;
+}
+
 void GmSurfPolygon::ComputeNormalFromVertices() {
     GmSurfPolygon *polygon = this;
     const float edge10x = (polygon->vertices[1].x - polygon->vertices[0].x);

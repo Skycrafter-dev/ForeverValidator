@@ -192,6 +192,14 @@ struct HipSearchEvaluatorConfiguration {
     double distanceTriggers[HipSearchMaximumDistanceTriggers][9]{};
     double distanceTriangles[HipSearchMaximumDistanceTriangles][9]{};
     double distanceShapes[HipSearchMaximumDistanceShapes][10]{};
+    // Distance around walls: the tables (device memory, set when uploaded;
+    // null measures straight), each trigger's byte offset into them, and
+    // the car's body sphere (car-local centre, radius) the tables were
+    // built for.
+    const unsigned char *aroundWalls = nullptr;
+    std::uint64_t aroundWallsOffsets[HipSearchMaximumDistanceTriggers]{};
+    double bodyCenter[3]{};
+    double bodyRadius = 0.0;
 };
 
 struct HipSearchConditionConfiguration {
@@ -238,6 +246,11 @@ struct HipSearchExecutorConfiguration {
     std::uint32_t changedSegmentCount = 1u;
     std::vector<double> smoothWeights;
     HipSearchEvaluatorConfiguration evaluator{};
+    // The evaluator's around-walls tables, uploaded with it. Corners the
+    // batches need are filled on demand (around_walls_table.h); after each
+    // fill, aroundWallsFilled (if set) gets the table's index and bytes.
+    std::vector<unsigned char> aroundWallsTables;
+    std::function<void(std::uint32_t, const unsigned char *)> aroundWallsFilled;
     std::optional<HipSearchConditionConfiguration> condition;
     std::uint32_t maximumBatchSize = 1u;
     std::uint32_t tickDurationMs = 10u;

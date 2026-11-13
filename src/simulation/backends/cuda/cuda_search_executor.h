@@ -190,6 +190,14 @@ struct CudaSearchEvaluatorConfiguration {
     double distanceTriggers[CudaSearchMaximumDistanceTriggers][9]{};
     double distanceTriangles[CudaSearchMaximumDistanceTriangles][9]{};
     double distanceShapes[CudaSearchMaximumDistanceShapes][10]{};
+    // Distance around walls: the tables (device memory, set when uploaded;
+    // null measures straight), each trigger's byte offset into them, and
+    // the car's body sphere (car-local centre, radius) the tables were
+    // built for.
+    const unsigned char *aroundWalls = nullptr;
+    std::uint64_t aroundWallsOffsets[CudaSearchMaximumDistanceTriggers]{};
+    double bodyCenter[3]{};
+    double bodyRadius = 0.0;
 };
 
 struct CudaSearchConditionConfiguration {
@@ -198,7 +206,7 @@ struct CudaSearchConditionConfiguration {
     double lastRestartTimeSeconds = 0.0;
 };
 
-struct CudaSearchInputEvent {
+struct alignas(16) CudaSearchInputEvent {
     std::int32_t timeMs = 0;
     std::uint32_t action = 0u;
     std::uint32_t valueKind = 0u;
@@ -236,6 +244,11 @@ struct CudaSearchExecutorConfiguration {
     std::uint32_t changedSegmentCount = 1u;
     std::vector<double> smoothWeights;
     CudaSearchEvaluatorConfiguration evaluator{};
+    // The evaluator's around-walls tables, uploaded with it. Corners the
+    // batches need are filled on demand (around_walls_table.h); after each
+    // fill, aroundWallsFilled (if set) gets the table's index and bytes.
+    std::vector<unsigned char> aroundWallsTables;
+    std::function<void(std::uint32_t, const unsigned char *)> aroundWallsFilled;
     std::optional<CudaSearchConditionConfiguration> condition;
     std::uint32_t maximumBatchSize = 1u;
     std::uint32_t tickDurationMs = 10u;

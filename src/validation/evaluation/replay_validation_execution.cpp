@@ -54,6 +54,12 @@ ReplayValidationExecutionResult FromSimulationResult(
         return ReplayValidationExecutionResult::CudaInitializationFailed;
     case ReplaySimulationRunResult::CudaExecutionFailed:
         return ReplayValidationExecutionResult::CudaExecutionFailed;
+    case ReplaySimulationRunResult::TwinUnavailable:
+        return ReplayValidationExecutionResult::TwinUnavailable;
+    case ReplaySimulationRunResult::TwinNotImplemented:
+        return ReplayValidationExecutionResult::TwinNotImplemented;
+    case ReplaySimulationRunResult::TwinExecutionFailed:
+        return ReplayValidationExecutionResult::TwinExecutionFailed;
     case ReplaySimulationRunResult::StaticSceneConstructionFailed:
     case ReplaySimulationRunResult::StaticSceneSourcesMissing:
     case ReplaySimulationRunResult::StaticSceneCorpusCountMismatch:

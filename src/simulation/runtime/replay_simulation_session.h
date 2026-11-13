@@ -81,6 +81,8 @@ struct ReplayStaticCollisionTriangle {
     GmVec3 a{};
     GmVec3 b{};
     GmVec3 c{};
+    // EPlugSurfaceMaterialId, or 0xff where the surface names none.
+    std::uint8_t material = 0xffu;
 };
 
 // A checkpoint or finish trigger surface (see
@@ -121,6 +123,26 @@ public:
     ReplaySimulationSession &operator=(const ReplaySimulationSession &) = delete;
 
     std::unique_ptr<ReplaySimulationSession> ClonePrepared() const;
+    // The same prepared scene on another CPU backend (Reference or
+    // OptimizedCpu); used by the twin search to re-check winners on FV
+    // reference. Null for GPU backends.
+    std::unique_ptr<ReplaySimulationSession> ClonePrepared(
+            forevervalidator::SimulationBackend backend) const;
+
+    // SimulationBackend::Twin (docs/twin/integration.md): the session runs as
+    // optimized_cpu; SimulateTimeline runs the ticks up to and including
+    // `handoffMs` (the prestart, = PhysicsSandbox race time 0) on FV
+    // and hands the rest to the twin (or, with the debug delegate, keeps
+    // stepping FV optimized_cpu).
+    void ConfigureTwinTimeline(
+            const forevervalidator::TwinValidationOptions &options,
+            std::uint32_t handoffMs);
+    const std::string &TwinDiagnostic() const noexcept;
+    // Twin world compile inputs (src/twin/fv/twin_world_build.h): the
+    // installed static models and the race start spawn (the first start
+    // line's spawn, the location SimulateTimeline starts the runtime at).
+    const StaticSceneModelCollection &StaticModels() const noexcept;
+    bool StartSpawnLocation(GmIso4 &location) const;
 
     void Reset();
     bool PreloadChallenge(CGameCtnChallengeConstruction &construction);
@@ -143,6 +165,8 @@ public:
             std::size_t begin,
             std::size_t count);
     std::optional<ReplaySimulationStateView> CurrentState() const;
+    std::optional<float> IntersectStaticSegment(
+            const GmVec3 &start, const GmVec3 &delta) const;
     std::optional<OptimizedCpuStaticSceneFingerprint>
             CaptureOptimizedCpuStaticSceneFingerprintForTesting(
                     void) const noexcept;

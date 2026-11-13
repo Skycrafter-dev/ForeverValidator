@@ -37,6 +37,7 @@ enum : uint32_t {
     TMNF_CLASS_CGameCtnZoneTest = 0x0305f000u,
     TMNF_CLASS_CGameCtnGhost = 0x03092000u,
     TMNF_CLASS_CGameCtnReplayRecord = 0x03093000u,
+    TMNF_CLASS_CGameControlCamera = 0x0306b000u,
     TMNF_CLASS_CGameControlCameraTrackManiaRace = 0x24085000u,
     TMNF_CLASS_CGameControlCameraTrackManiaRace2 = 0x24086000u,
     TMNF_CLASS_CGameControlCameraTrackManiaRace3 = 0x24087000u,

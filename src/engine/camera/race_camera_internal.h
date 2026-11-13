@@ -6,62 +6,15 @@
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
+#include <cstring>
+#include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 #include "engine/core/gm_types.h"
 #include "engine/camera/race_camera_config.h"
 
 namespace forevervalidator::camera::detail {
-
-inline constexpr float Pi = 3.1415927410125732421875f;
-inline constexpr float MillisecondsToSeconds = 0.0010000000474974513f;
-inline constexpr float VectorNormalizeEpsilonSquared = 0.000009999999747378752f;
-
-class LinearCurve {
-  public:
-    LinearCurve() = default;
-    LinearCurve(std::initializer_list<CurveKey> keys);
-    explicit LinearCurve(std::vector<CurveKey> keys);
-
-    float Evaluate(float position) const;
-    const std::vector<CurveKey> &Keys() const noexcept { return keys_; }
-
-  private:
-    std::vector<CurveKey> keys_;
-};
-
-enum class SmoothDirection : std::uint32_t {
-    Falling = 0u,
-    Rising = 1u,
-};
-
-class SmoothReal2 {
-  public:
-    SmoothReal2() = default;
-    SmoothReal2(float delta, std::uint32_t riseTimeMs,
-                std::uint32_t fallTimeMs);
-
-    void Reset();
-    float Update(bool active, std::uint32_t timeMs);
-    float UpdateUsingFullTime(bool active, std::uint32_t timeMs);
-
-    float Value() const noexcept { return value_; }
-    float Delta() const noexcept { return delta_; }
-
-  private:
-    static float SmoothedValue(SmoothDirection direction, float position);
-    static float SmoothedPosition(SmoothDirection direction, float value);
-    void SetDirection(SmoothDirection direction, std::uint32_t timeMs);
-
-    float delta_ = 0.0f;
-    std::uint32_t riseTimeMs_ = 1000u;
-    std::uint32_t fallTimeMs_ = 1000u;
-    float transitionScale_ = 1.0f;
-    float value_ = 0.0f;
-    std::uint32_t transitionStartTimeMs_ = 0u;
-    float transitionStartValue_ = 0.0f;
-    SmoothDirection direction_ = SmoothDirection::Falling;
-};
 
 struct CameraFrame {
     GmIso4 transform{};
@@ -73,6 +26,7 @@ struct VehicleFrame {
     std::uint32_t timeMs = 0u;
     GmIso4 transform{};
     GmVec3 linearSpeed{};
+    std::optional<GmIso4> resetTransform;
     float signedSpeed = 0.0f;
     float steering = 0.0f;
     float accelerate = 0.0f;
@@ -90,6 +44,32 @@ struct VehicleFrame {
     bool AllWheelsWithoutSurface() const noexcept;
 };
 
+class StateArchive {
+  public:
+    StateArchive(RaceCameraSession::State &state, bool restoring)
+        : state_(state), restoring_(restoring) {}
+    template <class... Values> void Fields(Values &...values) {
+        (Field(values), ...);
+    }
+    std::size_t Size() const { return offset_; }
+
+  private:
+    template <class Value> void Field(Value &value) {
+        static_assert(std::is_trivially_copyable_v<Value>);
+        const auto limit = restoring_ ? state_.size : state_.bytes.size();
+        if (offset_ + sizeof(value) > limit)
+            throw std::invalid_argument("invalid camera controller state");
+        if (restoring_)
+            std::memcpy(&value, state_.bytes.data() + offset_, sizeof(value));
+        else
+            std::memcpy(state_.bytes.data() + offset_, &value, sizeof(value));
+        offset_ += sizeof(value);
+    }
+    RaceCameraSession::State &state_;
+    bool restoring_;
+    std::size_t offset_ = 0u;
+};
+
 class Controller {
   public:
     virtual ~Controller() = default;
@@ -98,23 +78,8 @@ class Controller {
     virtual CameraFrame
     Evaluate(const VehicleFrame &vehicle,
              const SegmentCollisionQuery &segmentCollision) = 0;
-};
-
-class TargetController : public Controller {
-  public:
-    CameraFrame Evaluate(const VehicleFrame &vehicle,
-                         const SegmentCollisionQuery &segmentCollision) final;
-
-  protected:
-    explicit TargetController(float fieldOfViewDegrees);
-
-    virtual void
-    UpdateCamera(const VehicleFrame &vehicle,
-                 const SegmentCollisionQuery &segmentCollision) = 0;
-
-    CameraFrame camera_{};
-
-  private:
+    virtual std::unique_ptr<Controller> Clone() const = 0;
+    virtual void VisitState(StateArchive &archive) = 0;
 };
 
 std::unique_ptr<Controller> CreateController(
@@ -128,6 +93,11 @@ struct RaceCameraEnvironmentFactory {
             const RaceCameraEnvironment &environment);
 };
 
+struct RaceCameraSessionAccess {
+    static CameraFrame Evaluate(RaceCameraSession &session,
+                                const RaceCameraQuery &query);
+};
+
 GmVec3 ToInternal(const Vector3 &value);
 Vector3 ToPublic(const GmVec3 &value);
 GmQuat ToInternal(const Quaternion &value);
@@ -136,21 +106,5 @@ GmIso4 ToInternal(const Transform &value);
 Transform ToPublic(const GmIso4 &value);
 VehicleFrame ToInternal(const RaceCameraVehicleState &value);
 RaceCameraOutput ToPublic(const CameraFrame &value);
-
-float Clamp(float value, float minimum, float maximum);
-GmVec3 Add(const GmVec3 &left, const GmVec3 &right);
-GmVec3 Subtract(const GmVec3 &left, const GmVec3 &right);
-GmVec3 Scale(const GmVec3 &value, float scale);
-float LengthSquared(const GmVec3 &value);
-GmVec3 Normalize(const GmVec3 &value);
-GmVec3 Cross(const GmVec3 &left, const GmVec3 &right);
-float Dot(const GmVec3 &left, const GmVec3 &right);
-GmVec3 TransformDirection(const GmMat3 &rotation, const GmVec3 &value);
-GmVec3 InverseTransformDirection(const GmMat3 &rotation, const GmVec3 &value);
-void SetDovAndUp(GmMat3 &rotation, const GmVec3 &directionOfView,
-                 const GmVec3 &up);
-GmVec3 SlerpVector(const GmVec3 &from, const GmVec3 &to, float blend);
-std::uint32_t DeltaTimeMs(std::uint32_t now, std::uint32_t before);
-float RateLimit(float current, float target, float maximumStep);
 
 } // namespace forevervalidator::camera::detail

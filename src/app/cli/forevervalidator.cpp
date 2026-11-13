@@ -116,7 +116,14 @@ void PrintUsage(const char *program) {
                  "usage:\n"
                  "  %s --pak-dir DIR [--backend BACKEND] [--batch-size N] [--requested-samples N] REPLAY [--out PATH]\n"
                  "  %s --pak-dir DIR [--backend BACKEND] [--batch-size N] [--requested-samples N] --out-dir DIR REPLAY_OR_DIRECTORY [REPLAY_OR_DIRECTORY ...]\n"
-                 "  BACKEND: reference, optimized-cpu, speculative-ticking, vulkan, cuda, hip, batched; batch size defaults to 10\n",
+                 "  BACKEND: reference, optimized-cpu, speculative-ticking, vulkan, cuda, hip, twin, batched; batch size defaults to 10\n"
+                 "  twin (experimental, Stadium/StadiumCar): [--twin-policy fv|contact-full|contact|cap3] [--twin-collision noise|exact]\n"
+                 "    [--twin-debug-delegate-optimized-cpu]\n"
+                 "    --twin-policy: fv (default) = FV substeps, passes the acceptance test; contact-full, contact and cap3\n"
+                 "      take fewer substeps and FAIL the acceptance test (opt-in only)\n"
+                 "    --twin-collision: noise (default) = the fast stage, contacts within float noise of FV's;\n"
+                 "      exact = the reference stage, FV's contacts bit for bit\n"
+                 "    --twin-debug-delegate-optimized-cpu: DEBUG ONLY, runs the ticks after the prestart on optimized-cpu\n",
                  program,
                  program);
 }
@@ -242,6 +249,37 @@ std::optional<forevervalidator::SimulationBackend> ParseBackend(
     if (std::strcmp(value, "batched") == 0) {
         return forevervalidator::SimulationBackend::Batched;
     }
+    if (std::strcmp(value, "twin") == 0) {
+        return forevervalidator::SimulationBackend::Twin;
+    }
+    return std::nullopt;
+}
+
+std::optional<forevervalidator::TwinPolicy> ParseTwinPolicy(
+        const char *value) {
+    if (std::strcmp(value, "fv") == 0) {
+        return forevervalidator::TwinPolicy::FvSubsteps;
+    }
+    if (std::strcmp(value, "cap3") == 0) {
+        return forevervalidator::TwinPolicy::CappedSubsteps3;
+    }
+    if (std::strcmp(value, "contact") == 0) {
+        return forevervalidator::TwinPolicy::ContactSubsteps;
+    }
+    if (std::strcmp(value, "contact-full") == 0) {
+        return forevervalidator::TwinPolicy::ContactSubstepsFull;
+    }
+    return std::nullopt;
+}
+
+std::optional<forevervalidator::TwinCollision> ParseTwinCollision(
+        const char *value) {
+    if (std::strcmp(value, "noise") == 0) {
+        return forevervalidator::TwinCollision::Noise;
+    }
+    if (std::strcmp(value, "exact") == 0) {
+        return forevervalidator::TwinCollision::Exact;
+    }
     return std::nullopt;
 }
 
@@ -296,6 +334,8 @@ int main(int argc, char **argv) {
     std::size_t batchSize = 10u;
     std::optional<std::uint32_t> requestedSamples;
     std::optional<forevervalidator::SimulationBackend> selectedBackend;
+    forevervalidator::TwinValidationOptions twinOptions;
+    bool twinOptionGiven = false;
 
     for (int index = 1; index < argc; ++index) {
         if (std::strcmp(argv[index], "--out") == 0 && index + 1 < argc) {
@@ -315,6 +355,30 @@ int main(int argc, char **argv) {
                 PrintUsage(argv[0]);
                 return 64;
             }
+        } else if (std::strcmp(argv[index], "--twin-policy") == 0 &&
+                   index + 1 < argc) {
+            const std::optional<forevervalidator::TwinPolicy> policy =
+                    ParseTwinPolicy(argv[++index]);
+            if (!policy.has_value()) {
+                PrintUsage(argv[0]);
+                return 64;
+            }
+            twinOptions.policy = *policy;
+            twinOptionGiven = true;
+        } else if (std::strcmp(argv[index], "--twin-collision") == 0 &&
+                   index + 1 < argc) {
+            const std::optional<forevervalidator::TwinCollision> collision =
+                    ParseTwinCollision(argv[++index]);
+            if (!collision.has_value()) {
+                PrintUsage(argv[0]);
+                return 64;
+            }
+            twinOptions.collision = *collision;
+            twinOptionGiven = true;
+        } else if (std::strcmp(argv[index],
+                               "--twin-debug-delegate-optimized-cpu") == 0) {
+            twinOptions.debugDelegateToOptimizedCpu = true;
+            twinOptionGiven = true;
         } else if (std::strcmp(argv[index], "--batch-size") == 0 &&
                    index + 1 < argc) {
             const std::optional<std::size_t> parsed =
@@ -343,6 +407,20 @@ int main(int argc, char **argv) {
         } else {
             replays.emplace_back(argv[index]);
         }
+    }
+
+    if (twinOptionGiven &&
+        selectedBackend != forevervalidator::SimulationBackend::Twin) {
+        std::fprintf(stderr, "--twin-* options require --backend twin\n");
+        PrintUsage(argv[0]);
+        return 64;
+    }
+    if (twinOptions.debugDelegateToOptimizedCpu) {
+        std::fprintf(stderr,
+                     "warning: --twin-debug-delegate-optimized-cpu: the twin "
+                     "is NOT running; every tick runs on optimized-cpu "
+                     "through the twin backend's hand-off (routing test "
+                     "only)\n");
     }
 
     if (!packDirectory.has_value() || packDirectory->empty() ||
@@ -383,6 +461,7 @@ int main(int argc, char **argv) {
     validationOptions.backend = selectedBackend.value_or(
             singleRun ? forevervalidator::SimulationBackend::Reference
                       : forevervalidator::SimulationBackend::Batched);
+    validationOptions.twin = twinOptions;
     if (requestedSamples.has_value()) {
         validationOptions.requestedSamples = *requestedSamples;
     }

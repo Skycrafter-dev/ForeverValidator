@@ -47,6 +47,8 @@ bool HasDecodedCameraClass(
         const camera::detail::EnvironmentConfig &environment,
         u32 classId) {
     switch (classId) {
+    case TMNF_CLASS_CGameControlCamera:
+        return environment.internal.has_value();
     case TMNF_CLASS_CGameControlCameraTrackManiaRace:
         return environment.race.has_value();
     case TMNF_CLASS_CGameControlCameraTrackManiaRace2:
@@ -62,22 +64,28 @@ void AppendDecodedCameraClass(
         camera::detail::EnvironmentConfig *environment,
         camera::detail::EnvironmentConfig decoded,
         u32 classId,
-        std::string sourceName) {
+        std::string sourceName,
+        u32 collectorIndex) {
     switch (classId) {
+    case TMNF_CLASS_CGameControlCamera:
+        environment->internal = std::move(decoded.internal);
+        environment->internalResources.push_back(
+                {std::move(sourceName), collectorIndex, *environment->internal});
+        break;
     case TMNF_CLASS_CGameControlCameraTrackManiaRace:
         environment->race = std::move(decoded.race);
         environment->raceResources.push_back(
-                {std::move(sourceName), *environment->race});
+                {std::move(sourceName), collectorIndex, *environment->race});
         break;
     case TMNF_CLASS_CGameControlCameraTrackManiaRace2:
         environment->race2 = std::move(decoded.race2);
         environment->race2Resources.push_back(
-                {std::move(sourceName), *environment->race2});
+                {std::move(sourceName), collectorIndex, *environment->race2});
         break;
     case TMNF_CLASS_CGameControlCameraTrackManiaRace3:
         environment->race3 = std::move(decoded.race3);
         environment->race3Resources.push_back(
-                {std::move(sourceName), *environment->race3});
+                {std::move(sourceName), collectorIndex, *environment->race3});
         break;
     default:
         break;
@@ -140,9 +148,9 @@ Result<camera::RaceCameraEnvironment> LoadInstalledRaceCameraEnvironment(
                             "installed camera pack could not be authenticated or opened"));
         }
 
-        const auto cameraAssets =
+        const auto cameraSet =
                 InstalledVehicleAssetGraph::ResolveRaceCamerasFromPack(pack);
-        if (!cameraAssets) {
+        if (!cameraSet) {
             return Result<camera::RaceCameraEnvironment>::Failure(
                     CameraEnvironmentError(
                             ValidationErrorCode::AssetLoadingFailed,
@@ -153,7 +161,8 @@ Result<camera::RaceCameraEnvironment> LoadInstalledRaceCameraEnvironment(
 
         camera::detail::EnvironmentConfig environment;
         environment.sourceName = packName + ".pak";
-        for (const InstalledVehicleAssetReference &asset : *cameraAssets) {
+        environment.defaultCollectorIndex = cameraSet->defaultCameraIndex;
+        for (const InstalledVehicleAssetReference &asset : cameraSet->cameras) {
             ByteBuffer bytes;
             std::string decodeError;
             camera::detail::EnvironmentConfig decoded;
@@ -173,9 +182,10 @@ Result<camera::RaceCameraEnvironment> LoadInstalledRaceCameraEnvironment(
             }
             AppendDecodedCameraClass(
                     &environment, std::move(decoded), asset.classId,
-                    asset.logicalPath);
+                    asset.logicalPath, asset.collectorIndex);
         }
-        if (!environment.race && !environment.race2 && !environment.race3) {
+        if (!environment.race && !environment.race2 && !environment.race3 &&
+            !environment.internal) {
             return Result<camera::RaceCameraEnvironment>::Failure(
                     CameraEnvironmentError(
                             ValidationErrorCode::AssetLoadingFailed,

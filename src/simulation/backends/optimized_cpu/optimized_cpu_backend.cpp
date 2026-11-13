@@ -14,6 +14,8 @@ SimulationBackend ResolveLeafBackend(SimulationBackend backend) noexcept {
         return SimulationBackend::Hip;
     case SimulationBackend::Vulkan:
         return SimulationBackend::Vulkan;
+    case SimulationBackend::Twin:
+        return SimulationBackend::Twin;
     case SimulationBackend::Batched:
         return SimulationBackend::Reference;
     case SimulationBackend::Reference:

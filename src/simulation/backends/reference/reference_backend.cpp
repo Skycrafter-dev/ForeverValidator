@@ -11,6 +11,7 @@ bool IsSimulationBackendSupported(SimulationBackend backend) noexcept {
     case SimulationBackend::Cuda:
     case SimulationBackend::Hip:
     case SimulationBackend::Vulkan:
+    case SimulationBackend::Twin:
         return true;
     }
     return false;
