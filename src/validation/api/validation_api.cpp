@@ -137,16 +137,24 @@ ValidationError AllocationError(
             diagnostic);
 }
 
+
 bool IsCudaSupportedRoute(const ReplayAssetRoute &route) noexcept {
     const bool stadium =
             route.mapEnvironment == ReplayMapEnvironment::Stadium &&
             route.vehicleModel == ReplayVehicleModel::StadiumCar;
+
     const bool speed =
             route.mapEnvironment == ReplayMapEnvironment::Speed &&
             route.vehicleModel == ReplayVehicleModel::DesertCar;
+
+    const bool snow =
+            route.mapEnvironment == ReplayMapEnvironment::Alpine &&
+            route.vehicleModel == ReplayVehicleModel::SnowCar;
+
     return route.mapEnvironment == route.decorationEnvironment &&
-           (stadium || speed);
+           (stadium || speed || snow);
 }
+
 
 ValidationError CudaScopeError(
         const ReplayAssetRoute &route,
