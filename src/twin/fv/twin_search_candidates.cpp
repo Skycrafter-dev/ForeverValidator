@@ -179,7 +179,11 @@ bool PrepareMutationProgram(const CudaSearchExecutorConfiguration &configuration
 
 CandidateGenerator::CandidateGenerator(const MutationProgram &program)
     : program_(program), scratch_(new Scratch) {
-    const std::size_t capacity = std::max<std::size_t>(program.eventCapacity, 1u);
+    Fit();
+}
+
+void CandidateGenerator::Fit() {
+    const std::size_t capacity = std::max<std::size_t>(program_.eventCapacity, 1u);
     scratch_->events.resize(capacity);
     scratch_->temporary.resize(capacity);
     scratch_->passBaseline.resize(capacity);

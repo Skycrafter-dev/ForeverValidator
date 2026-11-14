@@ -10,35 +10,23 @@ namespace forevervalidator::simulation::hip::dynamics {
 
 __device__ inline bool IsFrozen(
         const HipDynamicBodyState &body) {
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_FULL_ANGULAR_DYNAMICS)
-    return false;
-#else
     return body.dynamicType ==
             static_cast<std::uint32_t>(
                     CHmsDyna::EDynamicType_Frozen);
-#endif
 }
 
 __device__ inline bool IsLinearOnly(
         const HipDynamicBodyState &body) {
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_FULL_ANGULAR_DYNAMICS)
-    return false;
-#else
     return body.dynamicType ==
             static_cast<std::uint32_t>(
                     CHmsDyna::EDynamicType_LinearOnly);
-#endif
 }
 
 __device__ inline bool IsFullAngular(
         const HipDynamicBodyState &body) {
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_FULL_ANGULAR_DYNAMICS)
-    return true;
-#else
     return body.dynamicType ==
             static_cast<std::uint32_t>(
                     CHmsDyna::EDynamicType_FullAngularDynamics);
-#endif
 }
 
 namespace detail {

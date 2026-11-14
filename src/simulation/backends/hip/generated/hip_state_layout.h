@@ -151,11 +151,7 @@ namespace hip::facts {
 
 __device__ inline std::uint32_t WheelCount(
         const HipVehicleState &vehicle) {
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_FOUR_WHEELS)
-    return 4u;
-#else
     return vehicle.wheels.count;
-#endif
 }
 
 }  // namespace hip::facts

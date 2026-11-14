@@ -2394,29 +2394,8 @@ namespace forevervalidator::simulation::cuda::tuning {
 inline T *Section<T>(
         CudaPackedStaticConfigurationHeader *configuration,
         __constref CudaStaticConfigurationSection section) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_SESSION_LTO)
-    if (is_same_v<T, CudaTuningCurveKey>) {
-        return reinterpret<T *>(
-                research::ForeverValidatorSessionCurveKeyBytes());
-    }
-#endif
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_CONSTANT_CURVE_KEYS)
-    if (is_same_v<T, CudaTuningCurveKey>) {
-        return research::StaticCurveKeys;
-    }
-#endif
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_SESSION_LTO)
-    let *base =
-            reinterpret<uint8_t *>(
-                    research::SessionConfigurationBase());
-#elif defined(FOREVERVALIDATOR_CUDA_RESEARCH_CONSTANT_CONFIGURATION)
-    let *base =
-            reinterpret<uint8_t *>(
-                    research::StaticConfigurationBase);
-#else
     uint8_t *base =
             reinterpret<uint8_t *>(configuration);
-#endif
     return reinterpret<T *>(base + section.offset);
 }
 
@@ -2747,18 +2726,8 @@ inline void AddMain(
 inline T *SceneSection<T>(
         CudaPackedSceneHeader *scene,
         __constref CudaSceneSection section) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_SESSION_LTO)
-    let *base =
-            reinterpret<uint8_t *>(
-                    ::forevervalidator::simulation::cuda::research::SessionSceneBase());
-#elif defined(FOREVERVALIDATOR_CUDA_RESEARCH_CONSTANT_SCENE)
-    let *base =
-            reinterpret<uint8_t *>(
-                    ::forevervalidator::simulation::cuda::research::StaticSceneBase);
-#else
     uint8_t *base =
             reinterpret<uint8_t *>(scene);
-#endif
     return reinterpret<T *>(
             base + section.offset);
 }
@@ -3879,26 +3848,6 @@ inline void MergeShapeContacts(
     return {body.current.rotation, body.current.position};
 }
 
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_EIGHT_ROOT_SHAPES)
- inline GmIso4 RootShapeWorldPose(
-        uint shapeIndex,
-        CudaVehicleCollisionShape *shapes,
-        const CudaCandidatePhysicsState &candidate,
-        const GmIso4 &bodyPose) {
-    GmIso4 shapeBodyPose;
-    if (shapeIndex < 4u) {
-        shapeBodyPose = shapes[shapeIndex].bodyPose;
-    } else {
-        const uint wheelIndex =
-                (shapeIndex - 4u) ^
-                (shapeIndex >= 6u ? 1u : 0u);
-        shapeBodyPose =
-                candidate.vehicle.wheels.values[
-                        wheelIndex].currentPose;
-    }
-    return Compose(shapeBodyPose, bodyPose);
-}
-#endif
 
  inline GmIso4 ShapeBodyPose(
         __constref CudaVehicleCollisionShape shape,
@@ -4160,19 +4109,10 @@ inline uint Detect<let TrackDiagnostics : bool = true, let TrustedInputs : bool 
     CudaSceneAccelerationCell *acceleration =
             detail::SceneSection<CudaSceneAccelerationCell>(
                     scene, scene->accelerationCells);
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_SESSION_LTO)
-    CudaVehicleCollisionShape *shapes =
-            reinterpret<CudaVehicleCollisionShape *>(
-                    research::ForeverValidatorSessionCollisionShapeBytes());
-#elif defined(FOREVERVALIDATOR_CUDA_RESEARCH_CONSTANT_COLLISION_SHAPES)
-    CudaVehicleCollisionShape *shapes =
-            research::StaticCollisionShapes;
-#else
     CudaVehicleCollisionShape *shapes =
             forevervalidator::simulation::cuda::tuning::Section<CudaVehicleCollisionShape>(
                     configuration,
                     configuration->collisionShapes);
-#endif
     const GmIso4 bodyPose = detail::BodyPose(candidate.body);
 
     {
@@ -4292,35 +4232,23 @@ namespace forevervalidator::simulation::cuda::dynamics {
 
  inline bool IsFrozen(
         __constref CudaDynamicBodyState body) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_FULL_ANGULAR_DYNAMICS)
-    return false;
-#else
     return body.dynamicType ==
             uint(
                     CHmsDyna__EDynamicType_EDynamicType_Frozen);
-#endif
 }
 
  inline bool IsLinearOnly(
         __constref CudaDynamicBodyState body) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_FULL_ANGULAR_DYNAMICS)
-    return false;
-#else
     return body.dynamicType ==
             uint(
                     CHmsDyna__EDynamicType_EDynamicType_LinearOnly);
-#endif
 }
 
  inline bool IsFullAngular(
         __constref CudaDynamicBodyState body) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_FULL_ANGULAR_DYNAMICS)
-    return true;
-#else
     return body.dynamicType ==
             uint(
                     CHmsDyna__EDynamicType_EDynamicType_FullAngularDynamics);
-#endif
 }
 
 namespace detail {
@@ -4788,13 +4716,9 @@ namespace forevervalidator::simulation::cuda::environment {
     GmVec3 accumulatedForce = GmVec3();
     const float fieldScale =
             body.parameters.forceScale * body.parameters.mass;
-#if !defined(FOREVERVALIDATOR_CUDA_RESEARCH_NO_FORCE_FIELDS)
     CudaForceField *fields =
             forevervalidator::simulation::cuda::tuning::Section<CudaForceField>(
                     configuration, configuration->forceFields);
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_ONE_UNIFORM_FORCE_FIELD)
-    AddScaled(accumulatedForce, fields[0].vector, fieldScale);
-#else
     for (uint index = 0u;
          index < configuration->forceFields.count; ++index) {
         GmVec3 value;
@@ -4803,23 +4727,15 @@ namespace forevervalidator::simulation::cuda::environment {
             AddScaled(accumulatedForce, value, fieldScale);
         }
     }
-#endif
-#else
-    (void)fieldScale;
-#endif
     AddScaled(
             accumulatedForce, body.current.linearSpeed,
             -configuration->zoneLinearDampingCoefficient *
                     body.parameters.linearDampingScale);
     body.current.force = accumulatedForce;
 
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_FULL_ANGULAR_DYNAMICS)
-    {
-#else
     if (body.dynamicType ==
         uint(
                 CHmsDyna__EDynamicType_EDynamicType_FullAngularDynamics)) {
-#endif
         GmVec3 dampingTorque = body.current.angularSpeed;
         const float scale =
                 -configuration->zoneAngularDampingCoefficient *
@@ -10014,39 +9930,23 @@ static const float DegreesDivisor = 180.0f;
 
  inline bool UpdateWheelVisuals(
         __constref CudaVehicleState vehicle) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_STEADY_INTEGRATION)
-    return true;
-#else
     return vehicle.integration.updateWheelVisuals;
-#endif
 }
 
  inline bool IntegrateWheels(
         __constref CudaVehicleState vehicle) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_STEADY_INTEGRATION)
-    return true;
-#else
     return vehicle.integration.integrateWheels;
-#endif
 }
 
  inline bool IntegrateEngine(
         __constref CudaVehicleState vehicle) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_STEADY_INTEGRATION)
-    return true;
-#else
     return vehicle.integration.integrateEngine;
-#endif
 }
 
  inline bool SpeedBlocked(
         __constref CudaVehicleState vehicle) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_STEADY_INTEGRATION)
-    return false;
-#else
     return vehicle.integration.speedBlocked ||
             vehicle.integration.speedBlockedSecondary;
-#endif
 }
 
  inline float Mod(float value,
@@ -10303,18 +10203,10 @@ inline void UpdateWheelVisual<let ReuseFrontInvariants : bool = false>(
         float dt,
         float visualSpeedDenominator,
         __constref WheelVisualInvariants invariants = {}) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_CANONICAL_WHEEL_FACTS)
-    wheel.realTime.visualRotation = {
-            {1.0f, 0.0f, 0.0f},
-            {0.0f, 1.0f, 0.0f},
-            {0.0f, 0.0f, 1.0f},
-    };
-#else
     VehicleWheelDefinition definition =
             forevervalidator::simulation::cuda::facts::Wheel(configuration, wheelIndex);
     wheel.realTime.visualRotation =
             definition.restSurfacePose.rotation;
-#endif
     float visualSteerAngle = 0.0f;
     if (forevervalidator::simulation::cuda::facts::WheelAxle(
                 configuration,
@@ -10377,16 +10269,7 @@ inline void UpdateWheelVisual<let ReuseFrontInvariants : bool = false>(
                 wheel.realTime.damperAbsorb -
                 wheel.realTime.maxReplacementY;
         wheel.realTime.maxReplacementY = 0.0f;
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_CANONICAL_WHEEL_FACTS)
-        wheel.currentPose = {
-                {{1.0f, 0.0f, 0.0f},
-                 {0.0f, 1.0f, 0.0f},
-                 {0.0f, 0.0f, 1.0f}},
-                restPose.translation,
-        };
-#else
         wheel.currentPose = restPose;
-#endif
         const float acceleration =
                 (tuning.wheelRestDamperAbsorb -
                  wheel.realTime.damperAbsorb) *
@@ -10408,16 +10291,7 @@ inline void UpdateWheelVisual<let ReuseFrontInvariants : bool = false>(
         const float baseAbsorb =
                 wheel.realTime.damperAbsorb -
                 wheel.realTime.maxReplacementY;
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_CANONICAL_WHEEL_FACTS)
-        wheel.currentPose = {
-                {{1.0f, 0.0f, 0.0f},
-                 {0.0f, 1.0f, 0.0f},
-                 {0.0f, 0.0f, 1.0f}},
-                restPose.translation,
-        };
-#else
         wheel.currentPose = restPose;
-#endif
         const float displacement =
                 tuning.wheelRestDamperAbsorb - baseAbsorb;
         const float target =

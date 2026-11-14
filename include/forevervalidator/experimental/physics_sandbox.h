@@ -65,8 +65,6 @@ struct PhysicsSandboxOptions {
             PhysicsSandboxTimelineMode::RecordedReplay;
     // Required in canonical mode and unset in recorded-replay mode.
     std::optional<std::uint32_t> simulationHorizonMs;
-    // Build the optional map-specific CUDA search module during LoadReplay.
-    bool prepareCudaSearchSpecialization = false;
 };
 
 enum class PhysicsSandboxInputAction : std::uint8_t {
@@ -713,8 +711,6 @@ struct PhysicsSandboxCudaSearchConfiguration {
     PhysicsSandboxCudaEvaluator evaluator =
             PhysicsSandboxCudaFinishTimeEvaluator{};
     std::optional<PhysicsSandboxCudaConditionProgram> condition;
-    // Use the map-specific CUDA module, preparing it on demand if needed.
-    bool useSessionSpecialization = false;
     // Retains the original materialization path for exact differential tests.
     bool useLegacyMutationPipelineForTesting = false;
     // ForeverTAS resolves improved runs on its optimized CPU worker. Other
@@ -893,6 +889,12 @@ private:
                     PhysicsSandbox &sandbox,
                     const PhysicsSandboxCudaSearchConfiguration
                             &configuration) noexcept;
+    friend PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>
+            PromotePhysicsSandboxCudaSearchSession(
+                    PhysicsSandbox &sandbox,
+                    PhysicsSandboxCudaSearchSession &&previous,
+                    const PhysicsSandboxCudaSearchConfiguration
+                            &configuration) noexcept;
 };
 
 class PhysicsSandboxCudaSearchSession {
@@ -936,6 +938,12 @@ private:
                     PhysicsSandbox &sandbox,
                     const PhysicsSandboxCudaSearchConfiguration
                             &configuration) noexcept;
+    friend PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>
+            PromotePhysicsSandboxCudaSearchSession(
+                    PhysicsSandbox &sandbox,
+                    PhysicsSandboxCudaSearchSession &&previous,
+                    const PhysicsSandboxCudaSearchConfiguration
+                            &configuration) noexcept;
 };
 
 PhysicsSandboxResult<PhysicsSandbox> CreatePhysicsSandbox(
@@ -948,6 +956,17 @@ PhysicsSandboxResult<PhysicsSandbox> ClonePhysicsSandbox(
 PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>
 CreatePhysicsSandboxCudaSearchSession(
         PhysicsSandbox &sandbox,
+        const PhysicsSandboxCudaSearchConfiguration &configuration) noexcept;
+
+// A search whose best became its baseline: the session
+// CreatePhysicsSandboxCudaSearchSession makes for the sandbox (its inputs now
+// the promoted best's), made from `previous`. An approximate (twin) session
+// keeps its compiled world, threads and device buffers; any other is closed,
+// then made anew.
+PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>
+PromotePhysicsSandboxCudaSearchSession(
+        PhysicsSandbox &sandbox,
+        PhysicsSandboxCudaSearchSession &&previous,
         const PhysicsSandboxCudaSearchConfiguration &configuration) noexcept;
 
 std::vector<PhysicsSandboxResult<PhysicsSandboxStateView>>

@@ -1,5 +1,6 @@
 // Twin search (GPU engine): a batch's per-candidate host work on the device (see twin_search_device.h).
 #include "twin_search_device.h"
+#include "../gpu/tw_gpu_arch.cuh"
 
 #include <cuda_runtime.h>
 
@@ -500,10 +501,13 @@ __device__ __forceinline__ void GenerateSlots(const GenParams &P, std::uint32_t 
 // The thread's event arrays (FV's events, temporary, pass baseline, eligible): kLocal > 0 (capacity <= kLocal), in local
 // memory, which the hardware interleaves across a warp's threads word by word, so the warp's accesses to the same event index
 // (the copies, the normalization's passes) coalesce; 0, in the set's global scratch, thread-major (each thread's array
-// contiguous: a warp's access to one index touches 32 sectors).
+// contiguous: a warp's access to one index touches 32 sectors, 4-5 times slower). Three sizes: a promoted baseline with a
+// steering event every tick passes 128 within a second of window.
 constexpr std::uint32_t kLocalEvents = 128u;
+constexpr std::uint32_t kLocalEventsLarge = 256u;
+constexpr std::uint32_t kLocalEventsHuge = 512u;
 template <std::uint32_t kLocal>
-__global__ void __launch_bounds__(kGenBlock, 3) GenerateKernel(const __grid_constant__ GenParams P) {
+__global__ void __launch_bounds__(kGenBlock, 3) GenerateKernel(const TW_GRID_CONSTANT GenParams P) {
     const std::uint32_t g = blockIdx.x * blockDim.x + threadIdx.x;
     if (g >= P.gen) return;
     if constexpr (kLocal != 0u) {
@@ -623,7 +627,7 @@ __global__ void HeadsKernel(const std::uint32_t *order, const std::uint32_t *fir
 }
 
 // The jobs in pool order (a run's first slot), every physics slot's job.
-__global__ void JobsKernel(const __grid_constant__ GenParams P, const std::uint32_t *order, const std::uint32_t *head,
+__global__ void JobsKernel(const TW_GRID_CONSTANT GenParams P, const std::uint32_t *order, const std::uint32_t *head,
                            const std::uint32_t *rank, SearchJob *jobs) {
     const std::uint32_t p = blockIdx.x * blockDim.x + threadIdx.x;
     const std::uint32_t physics = P.counters[0];
@@ -692,14 +696,29 @@ __global__ void GeneratorCheckKernel(std::uint32_t *wordsA, std::uint32_t *words
 }
 
 constexpr std::uint32_t kBlock = 128u;
-// FOREVERVALIDATOR_TWIN_SEARCH_GPU_GEN_EVENTS=global (measurement): the generator's event arrays in the global scratch
-bool UseLocalEvents(std::uint32_t capacity) {
+// The local event arrays' size for a capacity (0: the global scratch). Local memory is reserved for every thread the device
+// can hold: a size whose reservation passes an eighth of the device's memory is not used.
+// FOREVERVALIDATOR_TWIN_SEARCH_GPU_GEN_EVENTS=global (measurement): the generator's event arrays in the global scratch.
+std::uint32_t LocalEvents(std::uint32_t capacity) {
     static const bool global = [] {
         const char *v = std::getenv("FOREVERVALIDATOR_TWIN_SEARCH_GPU_GEN_EVENTS");
         return v != nullptr && std::strcmp(v, "global") == 0;
     }();
-    return !global && capacity <= kLocalEvents;
+    static const std::uint64_t budget = [] {
+        int device = 0;
+        cudaDeviceProp p{};
+        if (cudaGetDevice(&device) != cudaSuccess || cudaGetDeviceProperties(&p, device) != cudaSuccess) return std::uint64_t{0};
+        const std::uint64_t threads = static_cast<std::uint64_t>(p.maxThreadsPerMultiProcessor) * p.multiProcessorCount;
+        return threads == 0u ? 0u : static_cast<std::uint64_t>(p.totalGlobalMem) / 8u / threads;   // bytes a thread
+    }();
+    if (global) return 0u;
+    for (const std::uint32_t size : {kLocalEvents, kLocalEventsLarge, kLocalEventsHuge}) {
+        const std::uint64_t bytes = std::uint64_t{size} * (3u * sizeof(CudaSearchInputEvent) + sizeof(std::uint32_t));
+        if (capacity <= size) return size == kLocalEvents || bytes <= budget ? size : 0u;
+    }
+    return 0u;
 }
+bool UseLocalEvents(std::uint32_t capacity) { return LocalEvents(capacity) != 0u; }
 inline std::uint32_t Blocks(std::size_t n) { return static_cast<std::uint32_t>((n + kBlock - 1u) / kBlock); }
 
 }  // namespace
@@ -781,6 +800,8 @@ bool DeviceGeneration::Init(const MutationProgram &program, std::int64_t branchT
         // for the work queued before it, so a batch run ahead would wait for the first batch's kernels)
         cudaFuncAttributes a;
         if (!Check(cudaFuncGetAttributes(&a, GenerateKernel<kLocalEvents>), "load", error) ||
+            !Check(cudaFuncGetAttributes(&a, GenerateKernel<kLocalEventsLarge>), "load", error) ||
+            !Check(cudaFuncGetAttributes(&a, GenerateKernel<kLocalEventsHuge>), "load", error) ||
             !Check(cudaFuncGetAttributes(&a, GenerateKernel<0u>), "load", error) || !Check(cudaFuncGetAttributes(&a, IotaKernel), "load", error) ||
             !Check(cudaFuncGetAttributes(&a, MergePassKernel), "load", error) || !Check(cudaFuncGetAttributes(&a, HeadsKernel), "load", error) ||
             !Check(cudaFuncGetAttributes(&a, ScanWarpsKernel), "load", error) || !Check(cudaFuncGetAttributes(&a, ScanSumsKernel), "load", error) ||
@@ -809,6 +830,44 @@ bool DeviceGeneration::Init(const MutationProgram &program, std::int64_t branchT
 }
 
 void DeviceGeneration::SetSets(int sets) { dev_->used = std::max(2, std::min(sets, tw::gpu::SearchEngine::kMaxSets)); }
+
+bool DeviceGeneration::Rebase(const MutationProgram &program, std::int64_t branchTimeMs, const std::uint32_t *actionBits,
+                              std::uint32_t ticks, const std::uint32_t *snap, std::uint32_t snapCount, const JudgeState &initial,
+                              std::string *error) {
+    Dev &d = *dev_;
+    auto put = [&](Buffer &b, const void *src, std::size_t bytes) {
+        if (!b.Fit(std::max<std::size_t>(bytes, 16u), error)) return false;
+        return bytes == 0u || Check(cudaMemcpy(b.p, src, bytes, cudaMemcpyHostToDevice), "upload", error);
+    };
+    if (!put(d.base, program.baselineInputs.data(), sizeof(CudaSearchInputEvent) * program.baselineInputs.size()) ||
+        !put(d.modifiers, program.modifiers.data(), sizeof(CudaSearchModifierConfiguration) * program.modifiers.size()) ||
+        !put(d.segments, program.segments.data(), sizeof(CudaSearchMutationSegment) * program.segments.size()) ||
+        !put(d.smoothWeights, program.smoothWeights.data(), sizeof(double) * program.smoothWeights.size()) ||
+        !put(d.actionBits, actionBits, sizeof(std::uint32_t) * ticks) || !put(d.snap, snap, sizeof(std::uint32_t) * snapCount))
+        return false;
+    GenParams &P = d.params;
+    P.base = d.base.As<CudaSearchInputEvent>();
+    P.modifiers = d.modifiers.As<CudaSearchModifierConfiguration>();
+    P.segments = d.segments.As<CudaSearchMutationSegment>();
+    P.smoothWeights = program.smoothWeights.empty() ? nullptr : d.smoothWeights.As<double>();
+    P.actionBits = d.actionBits.As<std::uint32_t>();
+    P.snap = d.snap.As<std::uint32_t>();
+    P.baseCount = static_cast<std::uint32_t>(program.baselineInputs.size());
+    P.modifierCount = static_cast<std::uint32_t>(program.modifiers.size());
+    P.segmentCount = static_cast<std::uint32_t>(program.segments.size());
+    P.tickDurationMs = program.tickDurationMs;
+    P.capacity = program.eventCapacity;
+    P.tailCount = static_cast<std::uint32_t>(program.immutableTail.size());
+    P.ticks = ticks;
+    P.snapCount = std::min(snapCount, ticks);
+    P.branchTimeMs = branchTimeMs;
+    P.mutableFromTimeMs = program.mutableFromTimeMs;
+    P.boundary = program.mutableBoundaryControls;
+    P.initial = initial;
+    P.canonical = program.baselineInputsCanonical ? 1u : 0u;
+    for (int k = 0; k < d.used; ++k) d.sets[k].slotsCap = 0u;   // capacity and ticks may differ: Reserve fits again
+    return true;
+}
 
 bool DeviceGeneration::Reserve(std::size_t slots, std::string *error) {
     Dev &d = *dev_;
@@ -886,8 +945,13 @@ bool DeviceGeneration::Generate(int set, void *stream, std::uint64_t firstId, st
         const int b = v != nullptr ? std::atoi(v) : 0;
         return b >= 32 && b <= static_cast<int>(kGenBlock) ? static_cast<std::uint32_t>(b) : kGenBlock;
     }();
-    if (UseLocalEvents(P.capacity)) GenerateKernel<kLocalEvents><<<(P.gen + genBlock - 1u) / genBlock, genBlock, 0, st>>>(P);
-    else GenerateKernel<0u><<<(P.gen + genBlock - 1u) / genBlock, genBlock, 0, st>>>(P);
+    const std::uint32_t genBlocks = (P.gen + genBlock - 1u) / genBlock;
+    switch (LocalEvents(P.capacity)) {
+    case kLocalEvents: GenerateKernel<kLocalEvents><<<genBlocks, genBlock, 0, st>>>(P); break;
+    case kLocalEventsLarge: GenerateKernel<kLocalEventsLarge><<<genBlocks, genBlock, 0, st>>>(P); break;
+    case kLocalEventsHuge: GenerateKernel<kLocalEventsHuge><<<genBlocks, genBlock, 0, st>>>(P); break;
+    default: GenerateKernel<0u><<<genBlocks, genBlock, 0, st>>>(P); break;
+    }
     IotaKernel<<<Blocks(n), kBlock, 0, st>>>(s.order.As<std::uint32_t>(), n);
     std::size_t sortBytes = s.sortTemp.bytes, scanBytes = s.scanTemp.bytes;
     // FOREVERVALIDATOR_TWIN_SEARCH_GPU_SORT=cub (measurement): cub's merge sort and scan (their kernels' shared memory

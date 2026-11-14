@@ -143,6 +143,13 @@ public:
     // line's spawn, the location SimulateTimeline starts the runtime at).
     const StaticSceneModelCollection &StaticModels() const noexcept;
     bool StartSpawnLocation(GmIso4 &location) const;
+    // The twin search's compiled world for this scene, under the key of what
+    // it was compiled from (a search starts a twin session again for every
+    // promoted best, on the same scene). Null when another key or none is
+    // kept; dropped with the scene (Reset, PreloadChallenge,
+    // InstallStaticScene).
+    std::shared_ptr<const void> CachedTwinWorld(std::uint64_t key) const;
+    void KeepTwinWorld(std::uint64_t key, std::shared_ptr<const void> world) const;
 
     void Reset();
     bool PreloadChallenge(CGameCtnChallengeConstruction &construction);
@@ -222,11 +229,6 @@ public:
             std::uint32_t overtimeMs);
     std::shared_ptr<const ReplaySimulationInstanceClone>
             CaptureRuntimeClone() const;
-    bool PrepareCudaSearchSpecialization(std::string *diagnostic);
-    std::shared_ptr<const forevervalidator::simulation::cuda::specialization::
-                            SessionModule>
-            CudaSearchSpecialization() const noexcept;
-    const std::string &CudaSearchSpecializationDiagnostic() const noexcept;
     std::unique_ptr<forevervalidator::simulation::CudaSearchExecutor>
             CreateCudaSearchExecutor(
                     forevervalidator::simulation::

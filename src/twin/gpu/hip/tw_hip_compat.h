@@ -8,6 +8,16 @@
 
 #include <hip/hip_runtime.h>
 
+#if defined(_MSC_VER)
+// Windows: the C library's memcpy and memset are dllimport, which clang does not treat as callable on the GPU
+// (glibc's are), and std:: names only them. The GPU's: the compiler's own, as on Linux.
+#include <cstring>
+namespace std {
+__device__ inline void *memcpy(void *dst, const void *src, size_t size) { return __builtin_memcpy(dst, src, size); }
+__device__ inline void *memset(void *dst, int value, size_t size) { return __builtin_memset(dst, value, size); }
+}  // namespace std
+#endif
+
 #define cudaError_t hipError_t
 #define cudaSuccess hipSuccess
 #define cudaStream_t hipStream_t

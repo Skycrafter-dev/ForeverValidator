@@ -2744,16 +2744,7 @@ PhysicsSandboxResult<PhysicsSandboxStateView> PhysicsSandbox::LoadScenarioFile(
         impl_->controlPlan = SandboxControlPlanStorage::Full(
                 std::move(plan).Value());
         impl_->loaded = true;
-        PhysicsSandboxResult<PhysicsSandboxStateView> restarted =
-                impl_->Restart(0u);
-        if (restarted &&
-            impl_->options.backend == SimulationBackend::Cuda &&
-            impl_->options.prepareCudaSearchSpecialization) {
-            static_cast<void>(
-                    impl_->session->PrepareCudaSearchSpecialization(
-                            nullptr));
-        }
-        return restarted;
+        return impl_->Restart(0u);
     } catch (const std::bad_alloc &) {
         return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
                 SandboxError(PhysicsSandboxErrorCode::AllocationFailed,
@@ -3859,8 +3850,21 @@ PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>
 CreatePhysicsSandboxCudaSearchSession(
         PhysicsSandbox &sandbox,
         const PhysicsSandboxCudaSearchConfiguration &configuration) noexcept {
+    return PromotePhysicsSandboxCudaSearchSession(
+            sandbox, PhysicsSandboxCudaSearchSession(nullptr), configuration);
+}
+
+PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>
+PromotePhysicsSandboxCudaSearchSession(
+        PhysicsSandbox &sandbox,
+        PhysicsSandboxCudaSearchSession &&previous,
+        const PhysicsSandboxCudaSearchConfiguration &configuration) noexcept {
     try {
         const bool useTwin = configuration.twin.has_value();
+        PhysicsSandboxCudaSearchSession previousSession(std::move(previous));
+        // only a twin session carries over; any other is closed before one is made
+        const bool keepPrevious = useTwin && previousSession.impl_ && previousSession.impl_->twinExecutor;
+        if (!keepPrevious) previousSession.impl_.reset();
         if (!sandbox.impl_ || !sandbox.impl_->loaded ||
             !sandbox.impl_->session ||
             (!useTwin &&
@@ -4042,28 +4046,6 @@ CreatePhysicsSandboxCudaSearchSession(
                         configuration.incumbent->metricValues[i];
             }
             internal.incumbent = incumbent;
-        }
-        if (configuration.useSessionSpecialization &&
-            !useVulkan && !useHip && !useTwin) {
-            internal.sessionSpecialization =
-                    source.session->CudaSearchSpecialization();
-            if (!internal.sessionSpecialization) {
-                std::string specializationDiagnostic;
-                if (!source.session->PrepareCudaSearchSpecialization(
-                            &specializationDiagnostic)) {
-                    return PhysicsSandboxResult<
-                            PhysicsSandboxCudaSearchSession>::Failure(
-                            SearchError(
-                                    PhysicsSandboxErrorCode::
-                                            SimulationFailed,
-                                    specializationDiagnostic.empty()
-                                            ? "The optional fast CUDA kernel is unavailable"
-                                            : std::move(
-                                                      specializationDiagnostic)));
-                }
-                internal.sessionSpecialization =
-                        source.session->CudaSearchSpecialization();
-            }
         }
         internal.baselineTicks.reserve(endCursor - source.cursor);
         for (std::size_t index = source.cursor;
@@ -4354,8 +4336,15 @@ CreatePhysicsSandboxCudaSearchSession(
             twinSource.options.branchAtFirstChange =
                     configuration.twin->branchAtFirstChange;
             twinSource.replayName = source.identity.name;
-            twinExecutor = simulation::CreateTwinSearchExecutor(
-                    std::move(internal), std::move(twinSource), &diagnostic);
+            if (keepPrevious &&
+                previousSession.impl_->twinExecutor->Rebaseline(internal, twinSource, &diagnostic)) {
+                twinExecutor = std::move(previousSession.impl_->twinExecutor);
+            } else {
+                previousSession.impl_.reset();
+                diagnostic.clear();
+                twinExecutor = simulation::CreateTwinSearchExecutor(
+                        std::move(internal), std::move(twinSource), &diagnostic);
+            }
         } else if (useVulkan) {
             vulkanExecutor = source.session->CreateVulkanSearchExecutor(
                     std::move(internal), source.cursor, &diagnostic);

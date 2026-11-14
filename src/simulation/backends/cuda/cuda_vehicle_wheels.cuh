@@ -19,39 +19,23 @@ constexpr float DegreesDivisor = 180.0f;
 
 __device__ inline bool UpdateWheelVisuals(
         const CudaVehicleState &vehicle) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_STEADY_INTEGRATION)
-    return true;
-#else
     return vehicle.integration.updateWheelVisuals;
-#endif
 }
 
 __device__ inline bool IntegrateWheels(
         const CudaVehicleState &vehicle) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_STEADY_INTEGRATION)
-    return true;
-#else
     return vehicle.integration.integrateWheels;
-#endif
 }
 
 __device__ inline bool IntegrateEngine(
         const CudaVehicleState &vehicle) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_STEADY_INTEGRATION)
-    return true;
-#else
     return vehicle.integration.integrateEngine;
-#endif
 }
 
 __device__ inline bool SpeedBlocked(
         const CudaVehicleState &vehicle) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_STEADY_INTEGRATION)
-    return false;
-#else
     return vehicle.integration.speedBlocked ||
             vehicle.integration.speedBlockedSecondary;
-#endif
 }
 
 __device__ inline float Mod(float value,
@@ -311,18 +295,10 @@ __device__ inline void UpdateWheelVisual(
         float dt,
         float visualSpeedDenominator,
         const WheelVisualInvariants &invariants = {}) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_CANONICAL_WHEEL_FACTS)
-    wheel.realTime.visualRotation = {
-            {1.0f, 0.0f, 0.0f},
-            {0.0f, 1.0f, 0.0f},
-            {0.0f, 0.0f, 1.0f},
-    };
-#else
     const VehicleWheelDefinition &definition =
             facts::Wheel(configuration, wheelIndex);
     wheel.realTime.visualRotation =
             definition.restSurfacePose.rotation;
-#endif
     float visualSteerAngle = 0.0f;
     if (facts::WheelAxle(
                 configuration,
@@ -391,16 +367,7 @@ __device__ inline void IntegrateWheelSuspension(
                 wheel.realTime.damperAbsorb -
                 wheel.realTime.maxReplacementY;
         wheel.realTime.maxReplacementY = 0.0f;
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_CANONICAL_WHEEL_FACTS)
-        wheel.currentPose = {
-                {{1.0f, 0.0f, 0.0f},
-                 {0.0f, 1.0f, 0.0f},
-                 {0.0f, 0.0f, 1.0f}},
-                restPose.translation,
-        };
-#else
         wheel.currentPose = restPose;
-#endif
         const float acceleration =
                 (tuning.wheelRestDamperAbsorb -
                  wheel.realTime.damperAbsorb) *
@@ -422,16 +389,7 @@ __device__ inline void IntegrateWheelSuspension(
         const float baseAbsorb =
                 wheel.realTime.damperAbsorb -
                 wheel.realTime.maxReplacementY;
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_CANONICAL_WHEEL_FACTS)
-        wheel.currentPose = {
-                {{1.0f, 0.0f, 0.0f},
-                 {0.0f, 1.0f, 0.0f},
-                 {0.0f, 0.0f, 1.0f}},
-                restPose.translation,
-        };
-#else
         wheel.currentPose = restPose;
-#endif
         const float displacement =
                 tuning.wheelRestDamperAbsorb - baseAbsorb;
         const float target =

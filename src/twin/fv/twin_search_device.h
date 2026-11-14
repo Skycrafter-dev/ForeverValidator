@@ -54,6 +54,10 @@ public:
     bool Init(const MutationProgram &program, std::int64_t branchTimeMs, const std::uint32_t *actionBits, std::uint32_t ticks,
               const std::uint32_t *snap, std::uint32_t snapCount, const tw::gpu::JudgeState &initial, bool pose, std::string *error);
     // The sets in use (2..SearchEngine::kMaxSets; 2 by default): Reserve sizes those. Before the first Reserve.
+    // Another baseline (a promoted best) for the same search: the program, action bits and snapshots uploaded again into
+    // the buffers made at Init (grown when needed); the sets' buffers fit again at the next Reserve. Nothing in flight.
+    bool Rebase(const MutationProgram &program, std::int64_t branchTimeMs, const std::uint32_t *actionBits, std::uint32_t ticks,
+                const std::uint32_t *snap, std::uint32_t snapCount, const tw::gpu::JudgeState &initial, std::string *error);
     void SetSets(int sets);
     // Every set's buffers for chunks of up to `slots` (allocation synchronizes the device: before a batch's first launch).
     bool Reserve(std::size_t slots, std::string *error);

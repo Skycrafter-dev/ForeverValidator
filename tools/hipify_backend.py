@@ -16,7 +16,6 @@ CUDA = ROOT / "src/simulation/backends/cuda"
 HIP = ROOT / "src/simulation/backends/hip/generated"
 EXCLUDED = {
     "cuda_driver_shim.cpp",
-    "cuda_session_specialization.cpp",
     "cuda_vehicle_cpu_reference.cpp",
     "cuda_vehicle_cpu_reference.h",
 }
@@ -106,10 +105,10 @@ def translate(source: pathlib.Path, hipify: str) -> bytes:
             output,
             '__global__ __launch_bounds__(\n'
             '        SimulationBlockSize,\n'
-            '        MinimumBlocksPerSm) void SimulateSearchCandidatesKernel(',
+            '        SimulationKernelMinimumBlocksPerSm) void SimulateSearchCandidatesKernel(',
             '__global__ FOREVERVALIDATOR_HIP_SEARCH_LAUNCH_BOUNDS(\n'
             '        SimulationBlockSize,\n'
-            '        MinimumBlocksPerSm) void SimulateSearchCandidatesKernel(',
+            '        SimulationKernelMinimumBlocksPerSm) void SimulateSearchCandidatesKernel(',
         )
     if source.name == "cuda_collision.cuh":
         warp_guard = "#if __HIP_ARCH__ >= 800"

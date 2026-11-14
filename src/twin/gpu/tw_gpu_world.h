@@ -14,7 +14,15 @@
 #define TW_GPU_WORLD_H
 
 #include <cstdint>
+#include <string>
 #include <vector>
+
+namespace tw::world {
+struct WorldPackView;
+}
+namespace tw::collide {
+struct CarShapes;
+}
 
 namespace tw::gpu {
 
@@ -113,6 +121,9 @@ struct HostWorld {
     std::vector<float> verts;        // 9 per pack model triangle
     std::vector<OutRecG> outRec;     // per world triangle
 };
+
+// The flat world from C's stage's world pack and the car shapes (tw_gpu_world.cpp).
+bool BuildHostWorld(const world::WorldPackView &view, const collide::CarShapes &car, HostWorld *w, std::string *error);
 
 }  // namespace tw::gpu
 

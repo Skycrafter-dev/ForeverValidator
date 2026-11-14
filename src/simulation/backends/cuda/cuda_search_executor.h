@@ -14,10 +14,6 @@
 
 namespace forevervalidator::simulation {
 
-namespace cuda::specialization {
-class SessionModule;
-}
-
 enum class CudaSearchModifierKind : std::uint32_t {
     RandomSteering,
     ExistingEvent,
@@ -260,8 +256,6 @@ struct CudaSearchExecutorConfiguration {
     bool useLegacyMutationPipelineForTesting = false;
     bool captureBestState = true;
     std::optional<CudaSearchIncumbent> incumbent;
-    std::shared_ptr<const cuda::specialization::SessionModule>
-            sessionSpecialization;
 };
 
 enum class CudaSearchStatus : std::uint32_t {

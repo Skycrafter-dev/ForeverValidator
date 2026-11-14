@@ -130,6 +130,13 @@ public:
     virtual bool UpdateConditionTimes(double lastImprovementTimeSeconds,
                                       double lastRestartTimeSeconds) noexcept = 0;
     virtual const TwinSearchHostMetrics &LastMetrics() const noexcept = 0;
+    // The search's baseline promoted: the same scene, branch, target and
+    // settings with the promoted best as the baseline. False (and nothing
+    // changed): the session is made anew instead.
+    virtual bool Rebaseline(const CudaSearchExecutorConfiguration &,
+                            const TwinSearchExecutorSource &, std::string *) noexcept {
+        return false;
+    }
 };
 
 // Defined in src/twin/fv/twin_search_executor.cpp when the twin is built;

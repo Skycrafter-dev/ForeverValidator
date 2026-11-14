@@ -90,6 +90,7 @@
 #include "twin_world_build.h"
 #if FOREVERVALIDATOR_TWIN_GPU
 #include "tw_gpu_session.h"
+#include "tw_gpu_world.h"
 #include "twin_search_device.h"
 #include "twin_world_packs.h"
 #endif
@@ -124,6 +125,58 @@ std::uint64_t Tsc() {
             std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count());
 #endif
 }
+
+
+// FOREVERVALIDATOR_TWIN_WORLD_CACHE=0: every twin session compiles its world again (to compare).
+bool KeepsTwinWorlds() {
+    static const bool keeps = [] {
+        const char *value = std::getenv("FOREVERVALIDATOR_TWIN_WORLD_CACHE");
+        return value == nullptr || std::strcmp(value, "0") != 0;
+    }();
+    return keeps;
+}
+
+// What a twin world is compiled from (tw::fv::BuildTwinWorld): the key it is
+// kept under in its session (ReplaySimulationSession::CachedTwinWorld). The
+// definition is the session's own (a sandbox makes both when it loads a
+// scenario); each executor gets a copy of it, so its address is not part of
+// the key.
+std::uint64_t TwinWorldKey(const tw::fv::TwinWorldSource &world, forevervalidator::TwinPolicy policy) {
+    std::uint64_t hash = 1469598103934665603ull;
+    const auto add = [&hash](const void *data, std::size_t size) {
+        const auto *bytes = static_cast<const unsigned char *>(data);
+        for (std::size_t i = 0; i < size; ++i) hash = (hash ^ bytes[i]) * 1099511628211ull;
+    };
+    const auto models = reinterpret_cast<std::uintptr_t>(world.models);
+    const auto collision = static_cast<int>(world.collision);
+    const auto policyValue = static_cast<int>(policy);
+    const unsigned char flags[3] = {world.shortcutMode, world.includeWorldEnclosure, world.excludeMovingPairCorpora};
+    add(&models, sizeof models);
+    add(&world.startSpawn, sizeof world.startSpawn);
+    add(&world.requiredLaps, sizeof world.requiredLaps);
+    add(flags, sizeof flags);
+    add(&collision, sizeof collision);
+    add(&policyValue, sizeof policyValue);
+    return hash;
+}
+
+#if FOREVERVALIDATOR_TWIN_GPU
+// The GPU's flat world (tw::gpu::BuildHostWorld) for a twin world, built once while that world lives: a search
+// starts its session again for every promoted best, on the same (kept) twin world.
+std::shared_ptr<const tw::gpu::HostWorld> GpuHostWorld(const std::shared_ptr<const experimental::twin::TwinWorld> &world,
+                                                       const tw::fv::TwinWorldPacks &packs, std::string *error) {
+    static std::mutex mutex;
+    static std::weak_ptr<const experimental::twin::TwinWorld> owner;
+    static std::shared_ptr<const tw::gpu::HostWorld> kept;
+    std::lock_guard<std::mutex> lock(mutex);
+    if (kept && owner.lock() == world && KeepsTwinWorlds()) return kept;
+    auto built = std::make_shared<tw::gpu::HostWorld>();
+    if (!tw::gpu::BuildHostWorld(packs.view, packs.shapes, built.get(), error)) return nullptr;
+    owner = world;
+    kept = built;
+    return built;
+}
+#endif
 
 double TscPerMillisecond() {
     const auto c0 = Clock::now();
@@ -593,7 +646,8 @@ public:
             return fail(programDiagnostic);
         }
         maximize_ = twin_search::MaximizesSearchScore(kind, config_.evaluator.optionFlags);
-        tscPerMs_ = TscPerMillisecond();
+        static const double tscPerMs = TscPerMillisecond();   // a 5 ms measurement: once
+        tscPerMs_ = tscPerMs;
         delegate_ = source_.options.debugDelegateToOptimizedCpu;
         // The branch: the sandbox session's current state.
         branch_ = source_.session->CaptureRuntimeClone();
@@ -612,8 +666,17 @@ public:
             world.collision = source_.options.collision;
             replayPlayMode_ = static_cast<std::uint32_t>(world.shortcutMode ? EChallengePlayMode::Shortcut
                                                                             : EChallengePlayMode::Race);
-            twinWorld_ = tw::fv::BuildTwinWorld(world, source_.options.policy, tw::fv::TwinWorldLabel{}, &build);
-            if (!twinWorld_) return fail("world build: " + build);
+            // Compiled once per scene: a search starts this session again for every promoted best.
+            const std::uint64_t worldKey = TwinWorldKey(world, source_.options.policy);
+            if (KeepsTwinWorlds()) {
+                twinWorld_ = std::static_pointer_cast<const experimental::twin::TwinWorld>(
+                        source_.session->CachedTwinWorld(worldKey));
+            }
+            if (!twinWorld_) {
+                twinWorld_ = tw::fv::BuildTwinWorld(world, source_.options.policy, tw::fv::TwinWorldLabel{}, &build);
+                if (!twinWorld_) return fail("world build: " + build);
+                if (KeepsTwinWorlds()) source_.session->KeepTwinWorld(worldKey, twinWorld_);
+            }
             tw::model::TwinState start;
             if (!tw::fv::ImportFvClone(*twinWorld_, *branch_, source_.validationSeed, &start, &build)) {
                 return fail("branch state import: " + build);
@@ -680,7 +743,13 @@ public:
                 verifierBackend_ = "optimized_cpu";
             }
         }
-        // The incumbent seed, as CudaSearchExecutor::Create.
+        SeedIncumbent();
+        metrics_.verificationBackend = verifierBackend_;
+        return true;
+    }
+
+    // The incumbent seed, as CudaSearchExecutor::Create.
+    void SeedIncumbent() {
         globalBest_ = DeviceSample{};
         globalBest_.logicalOrder = 0u;
         if (config_.incumbent) {
@@ -706,9 +775,110 @@ public:
             baselineEvaluated_ = true;
         } else {
             std::memset(static_cast<void *>(&globalBest_), 0, sizeof(globalBest_));
+            baselineEvaluated_ = false;
         }
-        metrics_.verificationBackend = verifierBackend_;
-        return true;
+        globalBestStateValid_ = false;
+    }
+
+    // The search's baseline promoted (PromotePhysicsSandboxCudaSearchSession): what follows from the baseline is made
+    // again (the mutation program, the baseline's snapshots, the device's starts and generation, the incumbent); the
+    // compiled world, the threads, their runners and the device's world and buffers stay.
+    bool Rebaseline(const CudaSearchExecutorConfiguration &configuration, const TwinSearchExecutorSource &source,
+                    std::string *diagnostic) noexcept override {
+        try {
+            auto fail = [&](std::string message) {
+                if (diagnostic) *diagnostic = "twin search (promotion): " + message;
+                return false;
+            };
+            // what the session was made for: otherwise it is made anew (as with FOREVERVALIDATOR_TWIN_REBASELINE=0, to compare)
+            static const bool rebaselines = [] {
+                const char *value = std::getenv("FOREVERVALIDATOR_TWIN_REBASELINE");
+                return value == nullptr || std::strcmp(value, "0") != 0;
+            }();
+            if (!rebaselines || delegate_ || source.session != source_.session || source.branchCursor != source_.branchCursor ||
+                configuration.branchTimeMs != config_.branchTimeMs ||
+                configuration.evaluator.kind != config_.evaluator.kind ||
+                configuration.maximumBatchSize > config_.maximumBatchSize || configuration.condition.has_value() != config_.condition.has_value() ||
+                source.options.gpu != source_.options.gpu || source.options.branchAtFirstChange != source_.options.branchAtFirstChange ||
+                source.options.verifyWinners || recorder_ != nullptr || checkBranching_) {
+                return fail("not the same search");
+            }
+            const std::uint32_t evaluationTicks = static_cast<std::uint32_t>(
+                    (configuration.evaluationEndTimeMs - configuration.evaluationStartTimeMs) / configuration.tickDurationMs + 1);
+            if (configuration.evaluationEndTimeMs < configuration.evaluationStartTimeMs || configuration.baselineTicks.empty() ||
+                source.branchCursor + configuration.baselineTicks.size() > source.timeline.size() ||
+                (configuration.incumbent && configuration.incumbent->evaluationTick >= evaluationTicks)) {
+                return fail("invalid promoted search window");
+            }
+            // the batches run ahead mutate the old baseline
+            const auto t0 = Clock::now();
+            std::string error;
+#if FOREVERVALIDATOR_TWIN_GPU
+            if (gpu_) {
+                DropAhead();
+                for (std::size_t k = 0; ahead_.valid && k < ahead_.jobs.size(); ++k) {
+                    tw::gpu::SearchStats st;
+                    gpu_->Collect(ahead_.sets[k], &st, &error);
+                }
+                ahead_ = GpuBatch{};
+            }
+#endif
+            const auto t1 = Clock::now();
+            twin_search::MutationProgram program;
+            std::string programDiagnostic;
+            if (!twin_search::PrepareMutationProgram(configuration, &program, &programDiagnostic)) return fail(programDiagnostic);
+            config_ = configuration;
+            source_ = source;
+            program_ = std::move(program);
+            for (auto &worker : workers_) worker->generator.Fit();
+            if (config_.evaluator.kind == CudaSearchEvaluatorKind::Distance && !config_.aroundWallsTables.empty()) {
+                aroundWalls_ = config_.aroundWallsTables.data();
+                config_.evaluator.aroundWalls = aroundWalls_;
+            }
+            if (const std::optional<ReplaySimulationStateView> state = source_.session->CurrentState()) race_ = state->race;
+            evaluationTickCount_ = evaluationTicks;
+            timelineTickCount_ = static_cast<std::uint32_t>(config_.baselineTicks.size());
+            snapControls_.clear();
+            snapStates_.clear();
+            snapEvents_.clear();
+            const auto t2 = Clock::now();
+            if (source_.options.branchAtFirstChange && !BuildSnapshots(diagnostic)) return false;
+            const auto t3 = Clock::now();
+#if FOREVERVALIDATOR_TWIN_GPU
+            if (gpu_) {
+                std::vector<tw::model::TwinState> starts;
+                starts.reserve(1u + snapStates_.size());
+                starts.push_back(experimental::twin::internal::ToModel(twinBranch_));
+                for (const experimental::twin::TwinState &state : snapStates_) {
+                    starts.push_back(experimental::twin::internal::ToModel(state));
+                }
+                if (!gpu_->SetStarts(starts.data(), starts.size(), &error)) return fail(error);
+                if (gpuTargets_) {
+                    const std::vector<CudaSearchConditionInstruction> none;
+                    const std::vector<CudaSearchConditionInstruction> &condition =
+                            config_.condition ? config_.condition->instructions : none;
+                    if (!gpu_->SetTargets(&config_.evaluator, sizeof config_.evaluator,
+                                          offsetof(CudaSearchEvaluatorConfiguration, aroundWalls), aroundWalls_,
+                                          aroundWalls_ != nullptr ? config_.aroundWallsTables.size() : 0u, condition.data(),
+                                          sizeof(CudaSearchConditionInstruction) * condition.size(), &error)) {
+                        return fail(error);
+                    }
+                }
+                if (gpuGen_ && !InitDeviceGeneration(false, &error)) return fail(error);
+            }
+#endif
+            SeedIncumbent();
+            ++programVersion_;
+            lastBatchChanged_ = true;
+            if (trace_) {
+                std::fprintf(stderr, "twin rebaseline: ahead dropped %.3f ms, program %.3f ms, snapshots %.3f ms, device %.3f ms\n",
+                             Ms(t0, t1), Ms(t1, t2), Ms(t2, t3), Ms(t3, Clock::now()));
+            }
+            return true;
+        } catch (const std::exception &e) {
+            if (diagnostic) *diagnostic = std::string("twin search (promotion): ") + e.what();
+            return false;
+        }
     }
 
     CudaSearchBatchExecution EvaluateBaseline(const std::function<bool()> &cancel) noexcept override {
@@ -1720,6 +1890,58 @@ private:
     // near-best ticks are re-judged here (exact); a job whose device run is not the CPU's (raw contacts past the
     // device buffer, more near-best Pose ticks than the device keeps) runs again on the CPU. Duplicates take their
     // original's result with their own identity (the same trajectory and prefix give the same samples).
+#if FOREVERVALIDATOR_TWIN_GPU
+    // The per-candidate work on the device for the current program, baseline and snapshots; engine: the GPU engine's job
+    // sets and buffers too (at InitGpu; a promoted baseline keeps them).
+    bool InitDeviceGeneration(bool engine, std::string *error) {
+        const CudaSearchEvaluatorKind kind = config_.evaluator.kind;
+        std::vector<std::uint32_t> actionBits(timelineTickCount_);
+        for (std::uint32_t t = 0; t < timelineTickCount_; ++t) {
+            actionBits[t] = TwinPhysics::ToTwinControl(ReplayVehicleControlState{}, source_.timeline[source_.branchCursor + t].actions);
+        }
+        const std::uint32_t snapCount = snapControls_.empty() ? 0u
+                                                              : static_cast<std::uint32_t>(std::min(snapControls_.size(), snapStates_.size()));
+        DeviceSample none{};
+        TickJudge fresh(*this, 0u, 0u, false, 0u, none);
+        EvaluationView view;
+        TwinPhysics::ReadState(twinBranch_, nullptr, &view);
+        tw::gpu::JudgeState initial;
+        fresh.Start(*view.state);
+        fresh.Export(&initial);
+        // a job set per batch in flight: this one and those run ahead (2 at least: a batch's chunks alternate)
+        const int sets = std::max(2, static_cast<int>(gpuAhead_ ? gpuDepth_ : 0u) + 1);
+        if (!engine && gpuGen_) {   // a promoted baseline: the generator's buffers stay
+            if (!gpuGen_->Rebase(program_, config_.branchTimeMs, actionBits.data(), timelineTickCount_, snapControls_.data(), snapCount,
+                                 initial, error)) {
+                return false;
+            }
+        } else {
+            auto g = std::make_unique<twin_search::DeviceGeneration>();
+            if (!g->Init(program_, config_.branchTimeMs, actionBits.data(), timelineTickCount_, snapControls_.data(), snapCount, initial,
+                         kind == CudaSearchEvaluatorKind::Pose, error)) {
+                return false;
+            }
+            gpuGen_ = std::move(g);
+            if (engine && !gpu_->SetSets(sets, error)) return false;
+            gpuGen_->SetSets(sets);
+        }
+        // every set's buffers now (allocation synchronizes the device and is slow: not in the first batch), for a group of
+        // batches in one chunk
+        const std::uint32_t group = gpuAhead_ && kind != CudaSearchEvaluatorKind::FinishTime ? gpuGroup_ : 1u;
+        const std::uint64_t groupSlots = static_cast<std::uint64_t>(config_.maximumBatchSize) * group;
+        const std::uint32_t most = static_cast<std::uint32_t>(std::max<std::uint64_t>(
+                1u, std::min<std::uint64_t>(gpuChunk_ == 0u ? groupSlots : std::min<std::uint64_t>(gpuChunk_, groupSlots), groupSlots)));
+        if (!gpuGen_->Reserve(most, error) || (engine && !gpu_->ReserveJobs(most, error))) return false;
+        if (trace_) {
+            std::fprintf(stderr, "twin gpu device generation: %u slots, capacity %u events (%zu baseline), %u ticks, %u generator threads, "
+                         "%d job sets of %.1f MB (generation) + %.1f MB (lanes, results), %u groups of %u batches run ahead\n", most,
+                         program_.eventCapacity, program_.baselineInputs.size(), timelineTickCount_, gpuGen_->GeneratorThreads(), sets,
+                         double(gpuGen_->SetBytes()) / 1048576.0, double(gpu_->SetBytes()) / 1048576.0, gpuAhead_ ? gpuDepth_ : 0u, group);
+        }
+        return true;
+    }
+#endif
+
     bool InitGpu(std::string *diagnostic) {
         const char *engine = std::getenv("FOREVERVALIDATOR_TWIN_SEARCH_ENGINE");
         if (engine != nullptr && std::strcmp(engine, "cpu") == 0) return true;   // the CPU twin even when asked for the GPU
@@ -1754,8 +1976,10 @@ private:
         std::string error;
         auto engine_ = std::make_unique<tw::gpu::SearchEngine>();
         const tw::fv::TwinWorldPacks &p = *world.packs;
+        const std::shared_ptr<const tw::gpu::HostWorld> hostWorld = GpuHostWorld(twinWorld_, p, &error);
+        if (!hostWorld) return fail(error);
         if (!engine_->Init(*world.model.car, world.model.water, *world.model.race, p.view, p.shapes, starts.data(), starts.size(),
-                           &error)) {
+                           &error, hostWorld.get())) {
             return fail(error);
         }
         gpu_ = std::move(engine_);
@@ -1798,42 +2022,7 @@ private:
         const char *gen = std::getenv("FOREVERVALIDATOR_TWIN_SEARCH_GPU_GEN");
         if (!gpuTargets_ && (gen == nullptr || std::strcmp(gen, "host") != 0) &&
             (schedule == nullptr || std::strcmp(schedule, "tick") != 0)) {
-            std::vector<std::uint32_t> actionBits(timelineTickCount_);
-            for (std::uint32_t t = 0; t < timelineTickCount_; ++t) {
-                actionBits[t] = TwinPhysics::ToTwinControl(ReplayVehicleControlState{}, source_.timeline[source_.branchCursor + t].actions);
-            }
-            const std::uint32_t snapCount = snapControls_.empty() ? 0u
-                                                                  : static_cast<std::uint32_t>(std::min(snapControls_.size(), snapStates_.size()));
-            DeviceSample none{};
-            TickJudge fresh(*this, 0u, 0u, false, 0u, none);
-            EvaluationView view;
-            TwinPhysics::ReadState(twinBranch_, nullptr, &view);
-            tw::gpu::JudgeState initial;
-            fresh.Start(*view.state);
-            fresh.Export(&initial);
-            auto g = std::make_unique<twin_search::DeviceGeneration>();
-            if (!g->Init(program_, config_.branchTimeMs, actionBits.data(), timelineTickCount_, snapControls_.data(), snapCount, initial,
-                         kind == CudaSearchEvaluatorKind::Pose, &error)) {
-                return fail(error);
-            }
-            gpuGen_ = std::move(g);
-            // a job set per batch in flight: this one and those run ahead (2 at least: a batch's chunks alternate)
-            const int sets = std::max(2, static_cast<int>(gpuAhead_ ? gpuDepth_ : 0u) + 1);
-            if (!gpu_->SetSets(sets, &error)) return fail(error);
-            gpuGen_->SetSets(sets);
-            // every set's buffers now (allocation synchronizes the device and is slow: not in the first batch), for a group of
-            // batches in one chunk
-            const std::uint32_t group = gpuAhead_ && kind != CudaSearchEvaluatorKind::FinishTime ? gpuGroup_ : 1u;
-            const std::uint64_t groupSlots = static_cast<std::uint64_t>(config_.maximumBatchSize) * group;
-            const std::uint32_t most = static_cast<std::uint32_t>(std::max<std::uint64_t>(
-                    1u, std::min<std::uint64_t>(gpuChunk_ == 0u ? groupSlots : std::min<std::uint64_t>(gpuChunk_, groupSlots), groupSlots)));
-            if (!gpuGen_->Reserve(most, &error) || !gpu_->ReserveJobs(most, &error)) return fail(error);
-            if (trace_) {
-                std::fprintf(stderr, "twin gpu device generation: %u slots, capacity %u events (%zu baseline), %u ticks, %u generator threads, "
-                             "%d job sets of %.1f MB (generation) + %.1f MB (lanes, results), %u groups of %u batches run ahead\n", most,
-                             program_.eventCapacity, program_.baselineInputs.size(), timelineTickCount_, gpuGen_->GeneratorThreads(), sets,
-                             double(gpuGen_->SetBytes()) / 1048576.0, double(gpu_->SetBytes()) / 1048576.0, gpuAhead_ ? gpuDepth_ : 0u, group);
-            }
+            if (!InitDeviceGeneration(true, &error)) return fail(error);
         }
         return true;
 #else

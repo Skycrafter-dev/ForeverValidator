@@ -1,6 +1,7 @@
 // Twin GPU engine: C's collision (tw_gpu_stages.cuh, tw_gpu_collide.cuh).
 #include "tw_gpu_collide.cuh"
 #include "tw_gpu_stages.cuh"
+#include "tw_gpu_arch.cuh"
 
 namespace tw::gpu::dev {
 

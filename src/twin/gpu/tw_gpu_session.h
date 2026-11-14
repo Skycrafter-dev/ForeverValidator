@@ -26,6 +26,8 @@ struct CarShapes;
 
 namespace tw::gpu {
 
+struct HostWorld;
+
 // The twin search session (src/twin/fv/twin_search_executor.cpp) on the device: a batch's candidates one per thread,
 // each from its start state (the branch or a baseline snapshot) over its controls from its first changed tick, the
 // session's per-tick judge after every tick (TickJudge::OnTick: FV's CUDA EvaluateState and the finish refinement)
@@ -105,9 +107,12 @@ public:
     ~SearchEngine();
     SearchEngine(const SearchEngine &) = delete;
     SearchEngine &operator=(const SearchEngine &) = delete;
+    // world: BuildHostWorld's result for view and shapes, made earlier (null: built here)
     bool Init(const model::CarForceConsts &car, const model::WaterZone *water, const race::TwRaceMap &race,
               const world::WorldPackView &view, const collide::CarShapes &shapes, const model::TwinState *starts,
-              std::size_t startCount, std::string *error);
+              std::size_t startCount, std::string *error, const HostWorld *world = nullptr);
+    // Other start states (a promoted baseline's branch and snapshots): no set in flight.
+    bool SetStarts(const model::TwinState *starts, std::size_t startCount, std::string *error);
     // Asynchronous job sets (Sets() in flight, each on its own stream, so a set's kernel overlaps the host's work on
     // the next and the previous set's tail): fill Jobs(set, n) and Controls(set, count) (pinned host memory, valid
     // until the set's next Jobs/Controls call), Submit, later Collect (waits; the results stay valid until the set's

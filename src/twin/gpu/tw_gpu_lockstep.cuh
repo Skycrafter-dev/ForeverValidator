@@ -39,6 +39,7 @@
 #include "tw_gpu_finish.h"
 #include "tw_gpu_tick.cuh"
 #include "tw_gpu_util.cuh"
+#include "tw_gpu_arch.cuh"
 
 namespace tw::gpu::dev {
 

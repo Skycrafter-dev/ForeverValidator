@@ -36,34 +36,6 @@ struct HipPackedSceneHeader {
     HipSceneSection accelerationCells{};
 };
 
-#if defined(__HIPCC__) && \
-        defined(FOREVERVALIDATOR_HIP_RESEARCH_CONSTANT_SCENE)
-namespace hip::research {
-
-__device__ __constant__ HipPackedSceneHeader StaticScene;
-__device__ __constant__ std::uint64_t StaticSceneBase;
-
-}  // namespace hip::research
-#endif
-
-#if defined(__HIPCC__) && \
-        defined(FOREVERVALIDATOR_HIP_RESEARCH_SESSION_LTO)
-namespace hip::research {
-
-extern "C" __device__ std::uint64_t
-ForeverValidatorSessionSceneBase();
-extern "C" __device__ const unsigned char *
-ForeverValidatorSessionSceneBytes();
-extern __device__ __constant__ HipPackedSceneHeader StaticScene;
-extern __device__ __constant__ std::uint64_t StaticSceneBase;
-
-__device__ inline std::uint64_t SessionSceneBase() {
-    return ForeverValidatorSessionSceneBase();
-}
-
-}  // namespace hip::research
-#endif
-
 struct HipSceneTransferMetrics {
     bool success = false;
     std::uint64_t hostPackedBytes = 0u;

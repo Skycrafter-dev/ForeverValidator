@@ -28,7 +28,9 @@ tmp="$out.partial.o"
   | grep -v -x -F "$entry" | sort -u | awk -v s="$suffix" '{print $1 " " $1 s}' > "$out.redefine"
 "$objcopy" --redefine-syms="$out.redefine" "$tmp" "$out"
 rm -f "$tmp"
-if ! "$nm" --defined-only -g "$out" | awk '{print $NF}' | grep -q -x -F "$entry"; then
+# grep reads everything (not -q): with pipefail, a grep that quits at its
+# match makes nm die of SIGPIPE, and the check fail at random
+if ! "$nm" --defined-only -g "$out" | awk '{print $NF}' | grep -x -F "$entry" >/dev/null; then
   echo "isolate_variant: $entry is not defined in $out" >&2; exit 1
 fi
 leaked=$("$nm" --defined-only -g "$out" | awk '{print $NF}' | grep -v -x -F "$entry" | grep -v -F -- "$suffix" | head -3 || true)

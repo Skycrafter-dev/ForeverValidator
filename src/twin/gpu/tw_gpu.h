@@ -35,6 +35,8 @@ struct CarShapes;
 
 namespace tw::gpu {
 
+struct HostWorld;
+
 // The device the engine uses (device 0), or why there is none.
 bool DeviceInfo(std::string *info);
 
@@ -113,7 +115,9 @@ public:
     ~CollisionPacks();
     CollisionPacks(const CollisionPacks &) = delete;
     CollisionPacks &operator=(const CollisionPacks &) = delete;
-    bool Upload(const world::WorldPackView &view, const collide::CarShapes &car, std::string *error);
+    // built: BuildHostWorld's result for this view and car, made earlier (null: built here)
+    bool Upload(const world::WorldPackView &view, const collide::CarShapes &car, std::string *error,
+                const HostWorld *built = nullptr);
     std::size_t Bytes() const;
     // TW_GPU_DETECT_STATS at Upload: the tick's detections' per-warp counters since then (tw_gpu_k_detect.cu DetectAt)
     static constexpr int kDetectStats = 32;   // TW_GPU_DETECT_STATS counters (tw_gpu_k_detect.cu DetectAt)

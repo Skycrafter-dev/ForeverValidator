@@ -59,6 +59,8 @@ class CandidateGenerator {
 public:
     explicit CandidateGenerator(const MutationProgram &program);
     ~CandidateGenerator();
+    // Its scratch for the program's event capacity again (the program changed: a promoted baseline).
+    void Fit();
     CandidateGenerator(const CandidateGenerator &) = delete;
     CandidateGenerator &operator=(const CandidateGenerator &) = delete;
 

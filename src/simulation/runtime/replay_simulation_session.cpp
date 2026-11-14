@@ -8,6 +8,7 @@
 #include <cstring>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <new>
 #include <string>
 #include <tuple>
@@ -52,7 +53,6 @@
 #include "simulation/backends/vulkan/vulkan_timeline_executor.h"
 #if FOREVERVALIDATOR_HAS_CUDA
 #include <cuda_runtime.h>
-#include "simulation/backends/cuda/cuda_session_specialization.h"
 #endif
 #include "simulation/backends/speculative_ticking/speculative_ticking_backend.h"
 #include "simulation/runtime/replay_environment.h"
@@ -948,6 +948,16 @@ struct ReplaySimulationInstance {
 };
 
 struct ReplaySimulationSession::Impl {
+    // CachedTwinWorld / KeepTwinWorld
+    std::mutex twinWorldMutex;
+    std::uint64_t twinWorldKey = 0u;
+    std::shared_ptr<const void> twinWorld;
+
+    void DropTwinWorld() {
+        std::lock_guard<std::mutex> lock(twinWorldMutex);
+        twinWorld.reset();
+    }
+
     explicit Impl(forevervalidator::SimulationBackend requestedBackend)
         : backend(requestedBackend ==
                                   forevervalidator::SimulationBackend::Twin
@@ -1005,11 +1015,6 @@ struct ReplaySimulationSession::Impl {
     std::optional<forevervalidator::simulation::VulkanTransferMetrics>
             vulkanConfigurationTransfer;
     std::string cudaInitializationDiagnostic;
-    std::shared_ptr<forevervalidator::simulation::cuda::specialization::
-                            SessionModule>
-            cudaSearchSpecialization;
-    std::string cudaSearchSpecializationDiagnostic;
-    bool cudaSearchSpecializationAttempted = false;
     std::optional<forevervalidator::simulation::
                           CudaTimelineExecutionMetrics>
             cudaTimelineMetrics;
@@ -1570,14 +1575,12 @@ ReplaySimulationSession::ClonePrepared() const {
 }
 
 void ReplaySimulationSession::Reset() {
+    impl->DropTwinWorld();
     impl->ResetRuntime();
     impl->mapScene.Reset(impl->instance.race);
     impl->staticCollisionTriangles.reset();
     impl->checkpointTriggerSurfaces.reset();
     impl->staticRenderScene.reset();
-    impl->cudaSearchSpecialization.reset();
-    impl->cudaSearchSpecializationDiagnostic.clear();
-    impl->cudaSearchSpecializationAttempted = false;
     impl->cudaHostScene.Clear();
 #if FOREVERVALIDATOR_HAS_HIP
     impl->hipHostScene.Clear();
@@ -1603,12 +1606,25 @@ void ReplaySimulationSession::Reset() {
 
 bool ReplaySimulationSession::PreloadChallenge(
         CGameCtnChallengeConstruction &construction) {
+    impl->DropTwinWorld();
     return impl->mapScene.PreloadChallenge(construction) ==
            ReplayMapSceneResult::Ready;
 }
 
+std::shared_ptr<const void> ReplaySimulationSession::CachedTwinWorld(std::uint64_t key) const {
+    std::lock_guard<std::mutex> lock(impl->twinWorldMutex);
+    return impl->twinWorldKey == key ? impl->twinWorld : nullptr;
+}
+
+void ReplaySimulationSession::KeepTwinWorld(std::uint64_t key, std::shared_ptr<const void> world) const {
+    std::lock_guard<std::mutex> lock(impl->twinWorldMutex);
+    impl->twinWorldKey = key;
+    impl->twinWorld = std::move(world);
+}
+
 bool ReplaySimulationSession::InstallStaticScene(
         StaticSceneModelCollection models) {
+    impl->DropTwinWorld();
     std::vector<ReplayStaticCollisionTriangle> triangles;
     sandbox::PhysicsSandboxRenderSceneHandle renderScene =
             BuildStaticRenderScene(models);
@@ -2177,105 +2193,6 @@ ReplaySimulationSession::CaptureRuntimeClone() const {
     clone->randomState =
             tmnf::simulation::CaptureGameRandomState();
     return clone;
-}
-
-bool ReplaySimulationSession::PrepareCudaSearchSpecialization(
-        std::string *diagnostic) {
-#if !FOREVERVALIDATOR_HAS_CUDA
-    if (diagnostic != nullptr) {
-        *diagnostic = "CUDA support is not compiled into this build";
-    }
-    return false;
-#else
-    if (impl->backend != forevervalidator::SimulationBackend::Cuda ||
-        !impl->cudaDeviceScene.Ready() ||
-        !impl->cudaDeviceConfiguration.Ready()) {
-        impl->cudaSearchSpecializationDiagnostic =
-                "CUDA map data is not ready for fast mode";
-        if (diagnostic != nullptr) {
-            *diagnostic = impl->cudaSearchSpecializationDiagnostic;
-        }
-        return false;
-    }
-    if (impl->cudaSearchSpecialization &&
-        impl->cudaSearchSpecialization->Ready()) {
-        if (diagnostic != nullptr) {
-            diagnostic->clear();
-        }
-        return true;
-    }
-    if (impl->cudaSearchSpecializationAttempted) {
-        if (diagnostic != nullptr) {
-            *diagnostic = impl->cudaSearchSpecializationDiagnostic;
-        }
-        return false;
-    }
-    impl->cudaSearchSpecializationAttempted = true;
-
-    forevervalidator::simulation::CudaPackedStaticConfigurationHeader
-            configuration{};
-    forevervalidator::simulation::CudaPackedSceneHeader scene{};
-    cudaError_t error = cudaMemcpy(
-            &configuration,
-            impl->cudaDeviceConfiguration.DeviceData(),
-            sizeof(configuration),
-            cudaMemcpyDeviceToHost);
-    if (error == cudaSuccess) {
-        error = cudaMemcpy(
-                &scene,
-                impl->cudaDeviceScene.DeviceData(),
-                sizeof(scene),
-                cudaMemcpyDeviceToHost);
-    }
-    if (error != cudaSuccess) {
-        impl->cudaSearchSpecializationDiagnostic =
-                "Could not read CUDA map data for fast mode: " +
-                std::string(cudaGetErrorString(error));
-        if (diagnostic != nullptr) {
-            *diagnostic = impl->cudaSearchSpecializationDiagnostic;
-        }
-        return false;
-    }
-
-    auto module = std::make_shared<
-            forevervalidator::simulation::cuda::specialization::
-                    SessionModule>();
-    std::string buildDiagnostic;
-    if (!module->Build(
-                configuration,
-                reinterpret_cast<std::uintptr_t>(
-                        impl->cudaDeviceConfiguration.DeviceData()),
-                scene,
-                reinterpret_cast<std::uintptr_t>(
-                        impl->cudaDeviceScene.DeviceData()),
-                &buildDiagnostic)) {
-        impl->cudaSearchSpecializationDiagnostic =
-                buildDiagnostic.empty()
-                ? "The optional fast CUDA kernel could not be built"
-                : std::move(buildDiagnostic);
-        if (diagnostic != nullptr) {
-            *diagnostic = impl->cudaSearchSpecializationDiagnostic;
-        }
-        return false;
-    }
-    impl->cudaSearchSpecialization = std::move(module);
-    impl->cudaSearchSpecializationDiagnostic.clear();
-    if (diagnostic != nullptr) {
-        diagnostic->clear();
-    }
-    return true;
-#endif
-}
-
-std::shared_ptr<const forevervalidator::simulation::cuda::specialization::
-                        SessionModule>
-ReplaySimulationSession::CudaSearchSpecialization() const noexcept {
-    return impl->cudaSearchSpecialization;
-}
-
-const std::string &
-ReplaySimulationSession::CudaSearchSpecializationDiagnostic() const noexcept {
-    return impl->cudaSearchSpecializationDiagnostic;
 }
 
 std::unique_ptr<forevervalidator::simulation::CudaSearchExecutor>

@@ -33,6 +33,7 @@
 #define RunTick RunTickSession
 #include "tw_gpu_tick.cuh"
 #include "tw_gpu_lockstep.cuh"
+#include "tw_gpu_arch.cuh"
 #undef RunTick
 #undef RunSubstepK
 #undef RunSubstep
@@ -563,7 +564,7 @@ struct LaneJobs {
 
 // packs: the world's packs as a __grid_constant__ parameter (M round 6: the detection's DevWorld fields, the car shapes and
 // the world's pointers, are constant-bank operands instead of generic loads through a pointer)
-__global__ void SearchLanesKernel(const __grid_constant__ DevPacks packs, const __grid_constant__ JudgeConfig c, const SearchJob *jobs, std::uint32_t n,
+__global__ void SearchLanesKernel(const TW_GRID_CONSTANT DevPacks packs, const TW_GRID_CONSTANT JudgeConfig c, const SearchJob *jobs, std::uint32_t n,
                                   const model::TwinState *starts, const std::uint32_t *controls, SearchResult *results,
                                   KernelStats *stats, LaneRows rows, unsigned *next, std::uint32_t chunk, const std::uint32_t *count,
                                   TailRec tail) {
@@ -664,11 +665,16 @@ SearchEngine::~SearchEngine() {
     }
 }
 
+bool SearchEngine::SetStarts(const model::TwinState *starts, std::size_t startCount, std::string *error) {
+    if (!dev_) return *error = "twin gpu: the engine is not initialized", false;
+    return dev_->starts.Put(starts, sizeof(model::TwinState) * startCount, error);
+}
+
 bool SearchEngine::Init(const model::CarForceConsts &car, const model::WaterZone *water, const race::TwRaceMap &race,
                         const world::WorldPackView &view, const collide::CarShapes &shapes, const model::TwinState *starts,
-                        std::size_t startCount, std::string *error) {
+                        std::size_t startCount, std::string *error, const HostWorld *world) {
     auto d = std::make_unique<Dev>();
-    if (!d->car.Upload(car, water, race, error) || !d->collision.Upload(view, shapes, error) ||
+    if (!d->car.Upload(car, water, race, error) || !d->collision.Upload(view, shapes, error, world) ||
         !d->starts.Put(starts, sizeof(model::TwinState) * startCount, error))
         return false;
     {

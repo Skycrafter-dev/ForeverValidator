@@ -16,10 +16,6 @@
 
 namespace forevervalidator::simulation {
 
-namespace hip::specialization {
-class SessionModule;
-}
-
 enum class HipSearchModifierKind : std::uint32_t {
     RandomSteering,
     ExistingEvent,
@@ -262,8 +258,6 @@ struct HipSearchExecutorConfiguration {
     bool useLegacyMutationPipelineForTesting = false;
     bool captureBestState = true;
     std::optional<HipSearchIncumbent> incumbent;
-    std::shared_ptr<const hip::specialization::SessionModule>
-            sessionSpecialization;
 };
 
 enum class HipSearchStatus : std::uint32_t {

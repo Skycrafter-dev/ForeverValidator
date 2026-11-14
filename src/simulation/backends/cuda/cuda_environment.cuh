@@ -54,13 +54,9 @@ __device__ inline void BeginForcePass(
     GmVec3 accumulatedForce{};
     const float fieldScale =
             body.parameters.forceScale * body.parameters.mass;
-#if !defined(FOREVERVALIDATOR_CUDA_RESEARCH_NO_FORCE_FIELDS)
     const CudaForceField *fields =
             tuning::Section<CudaForceField>(
                     configuration, configuration->forceFields);
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_ONE_UNIFORM_FORCE_FIELD)
-    AddScaled(accumulatedForce, fields[0].vector, fieldScale);
-#else
     for (std::uint32_t index = 0u;
          index < configuration->forceFields.count; ++index) {
         GmVec3 value;
@@ -69,23 +65,15 @@ __device__ inline void BeginForcePass(
             AddScaled(accumulatedForce, value, fieldScale);
         }
     }
-#endif
-#else
-    (void)fieldScale;
-#endif
     AddScaled(
             accumulatedForce, body.current.linearSpeed,
             -configuration->zoneLinearDampingCoefficient *
                     body.parameters.linearDampingScale);
     body.current.force = accumulatedForce;
 
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_FULL_ANGULAR_DYNAMICS)
-    {
-#else
     if (body.dynamicType ==
         static_cast<std::uint32_t>(
                 CHmsDyna::EDynamicType_FullAngularDynamics)) {
-#endif
         GmVec3 dampingTorque = body.current.angularSpeed;
         const float scale =
                 -configuration->zoneAngularDampingCoefficient *

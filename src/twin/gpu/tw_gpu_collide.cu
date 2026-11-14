@@ -13,10 +13,9 @@
 #include "tw_gpu_packs.cuh"
 #include "tw_gpu_stages.cuh"
 #include "tw_gpu_util.cuh"
+#include "tw_gpu_arch.cuh"
 
 namespace tw::gpu {
-
-bool BuildHostWorld(const world::WorldPackView &view, const collide::CarShapes &car, HostWorld *w, std::string *error);
 
 namespace {
 
@@ -80,9 +79,14 @@ __global__ void BenchStatsKernel(DevWorld w, const DevWorld *gw, const DetectCas
 CollisionPacks::CollisionPacks() = default;
 CollisionPacks::~CollisionPacks() = default;
 
-bool CollisionPacks::Upload(const world::WorldPackView &view, const collide::CarShapes &car, std::string *error) {
+bool CollisionPacks::Upload(const world::WorldPackView &view, const collide::CarShapes &car, std::string *error,
+                            const HostWorld *built) {
     HostWorld h;
-    if (!BuildHostWorld(view, car, &h, error)) return false;
+    if (built != nullptr) {
+        h = *built;
+    } else if (!BuildHostWorld(view, car, &h, error)) {
+        return false;
+    }
     if (h.depth + 1u > static_cast<std::uint32_t>(dev::kStack / 16)) return *error = "gpu world: tree too deep for the walk's stack", false;
     if (h.stackNeed > static_cast<std::uint32_t>(dev::kStack)) h.root = 0u;   // the spatial tree too deep for the stack: the FV tree
     if (h.ranks >= (1u << 24)) return *error = "gpu world: more than 2^24 triangles (the candidate list's rank field)", false;
