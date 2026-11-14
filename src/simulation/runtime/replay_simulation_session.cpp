@@ -2102,7 +2102,16 @@ ReplaySimulationSession::CurrentState() const {
     result.cameraSupportUp = camera.cameraSupportUp;
     const CSceneVehicleCar::SConditionState condition =
             impl->instance.runtime->CurrentConditionState();
-    result.localSpeed = condition.localSpeed;
+    // The car's velocity in its own axes, from its body as the GPU and twin
+    // conditions compute it: the vehicle's frame history held 0 here, on
+    // every CPU backend (car.localvel read 0 everywhere).
+    const auto alongAxis = [&](const GmVec3 &axis) {
+        return result.frame.linearSpeed.x * axis.x + result.frame.linearSpeed.y * axis.y +
+               result.frame.linearSpeed.z * axis.z;
+    };
+    result.localSpeed = GmVec3{alongAxis(result.frame.rotation.basisX),
+                               alongAxis(result.frame.rotation.basisY),
+                               alongAxis(result.frame.rotation.basisZ)};
     result.freeWheeling = condition.freeWheeling;
     result.lateralContact = condition.lateralContact;
     result.sliding = condition.sliding;

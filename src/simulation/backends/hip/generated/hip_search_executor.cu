@@ -1902,8 +1902,9 @@ __device__ DeviceConditionValue ConditionSource(
         double currentTimeSeconds) {
     const CHmsDyna::CHmsStateDyna &current = state.body.current;
     const CHmsDyna::CHmsStateDyna &previous = state.body.temporary;
-    const GmVec3 currentLocal =
-            state.vehicle.frameHistory.physicsCurrent.localLinearSpeed;
+    // From the body, as the previous tick's: the vehicle's frame history
+    // held 0 (car.localvel read 0 everywhere).
+    const GmVec3 currentLocal = ConditionLocalSpeed(current);
     const GmVec3 previousLocal = ConditionLocalSpeed(previous);
     const auto vector = [](const GmVec3 &value) {
         return DeviceConditionValue{value.x, value.y, value.z, true};
