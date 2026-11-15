@@ -57,6 +57,7 @@
 #include <condition_variable>
 #include <functional>
 #include <optional>
+#include <unordered_set>
 #include <unordered_map>
 #include <cstddef>
 #include <cmath>
@@ -726,6 +727,7 @@ public:
             if (laneMin != nullptr && *laneMin != '\0') laneMin_ = std::max(1, std::atoi(laneMin));
         }
         if (!delegate_ && source_.options.branchAtFirstChange && !BuildSnapshots(diagnostic)) return false;
+        if (!delegate_) ReportFirstChanges("first");
         if (!delegate_ && !InitGpu(diagnostic)) return false;
         if (source_.options.verifyWinners) {
             verifier_ = std::make_unique<FvPhysics>();
@@ -815,6 +817,7 @@ public:
             std::string error;
 #if FOREVERVALIDATOR_TWIN_GPU
             if (gpu_) {
+                KeepNextBatch(configuration);
                 DropAhead();
                 for (std::size_t k = 0; ahead_.valid && k < ahead_.jobs.size(); ++k) {
                     tw::gpu::SearchStats st;
@@ -843,6 +846,7 @@ public:
             snapEvents_.clear();
             const auto t2 = Clock::now();
             if (source_.options.branchAtFirstChange && !BuildSnapshots(diagnostic)) return false;
+            ReportFirstChanges("promoted");
             const auto t3 = Clock::now();
 #if FOREVERVALIDATOR_TWIN_GPU
             if (gpu_) {
@@ -1344,6 +1348,102 @@ private:
     // The baseline once, without stopping: its controls and its state and
     // events after every tick (branchAtFirstChange). A failing tick ends the
     // snapshots there; a candidate that reaches it fails the same way.
+    // FOREVERVALIDATOR_TWIN_FIRST_CHANGE=1: for each baseline (the first and every promoted one), where candidates
+    // first change (the tick the twin starts from; it simulates from there to the evaluation end): sampled from the
+    // generator, for the whole program and for each pass alone.
+    void ReportFirstChanges(const char *when) {
+        static const bool on = std::getenv("FOREVERVALIDATOR_TWIN_FIRST_CHANGE") != nullptr;
+        if (!on || snapControls_.empty()) return;
+        const std::uint32_t ticks = timelineTickCount_;
+        auto sample = [&](const twin_search::MutationProgram &program, const char *name) {
+            twin_search::CandidateGenerator generator(program);
+            twin_search::GeneratedCandidate candidate;
+            std::vector<experimental::twin::TwinControl> controls;
+            constexpr std::uint32_t kSamples = 4096u;
+            std::uint32_t inactive = 0u, histogram[10] = {};
+            double firstSum = 0.0, mutationSum = 0.0;
+            for (std::uint32_t k = 0; k < kSamples; ++k) {
+                generator.Generate(1u + k * 7919u, false, &candidate);
+                if (!candidate.active) {
+                    ++inactive;
+                    continue;
+                }
+                BuildTwinControls(candidate.events, &controls);
+                const std::uint32_t same = static_cast<std::uint32_t>(std::min(controls.size(), snapControls_.size()));
+                std::uint32_t first = 0u;
+                while (first < same && controls[first] == snapControls_[first]) ++first;
+                firstSum += first;
+                mutationSum += candidate.mutationCount;
+                ++histogram[std::min<std::uint32_t>(9u, first * 10u / std::max(1u, ticks))];
+            }
+            const std::uint32_t active = kSamples - inactive;
+            std::string bins;
+            for (std::uint32_t b = 0; b < 10; ++b) bins += " " + std::to_string(histogram[b] * 100u / std::max(1u, active));
+            std::fprintf(stderr, "twin first change (%s) %s: mean tick %.1f of %u (%.1f simulated), %.1f changes, "
+                         "%.1f%% no change; %% per tenth:%s\n", when, name, active ? firstSum / active : 0.0, ticks,
+                         active ? ticks - firstSum / active : 0.0, active ? mutationSum / active : 0.0,
+                         100.0 * inactive / kSamples, bins.c_str());
+        };
+        std::uint32_t inWindow = 0u;
+        for (const CudaSearchInputEvent &event : program_.baselineInputs)
+            for (const CudaSearchModifierConfiguration &modifier : program_.modifiers)
+                if (event.timeMs >= modifier.window.minimumTimeMs && event.timeMs <= modifier.window.maximumTimeMs) {
+                    ++inWindow;
+                    break;
+                }
+        std::fprintf(stderr, "twin first change (%s): baseline %zu events, %u in the passes' windows\n", when,
+                     program_.baselineInputs.size(), inWindow);
+        sample(program_, "all passes");
+        // Shared beginnings: two candidates can share the simulation of tick t only when their controls match on every tick
+        // up to t, so one batch's least work is its number of distinct control prefixes (from each candidate's first
+        // change; before it, the baseline's snapshots). Exact duplicates fall out of the same count.
+        {
+            twin_search::CandidateGenerator generator(program_);
+            twin_search::GeneratedCandidate candidate;
+            std::vector<experimental::twin::TwinControl> controls;
+            const std::uint32_t batch = std::max(1u, config_.maximumBatchSize);
+            std::uint64_t simulated = 0u;
+            std::unordered_set<std::uint64_t> prefixes, finals;
+            prefixes.reserve(static_cast<std::size_t>(batch) * 32u);
+            std::vector<std::uint64_t> baseHash(snapControls_.size() + 1u, 0x9e3779b97f4a7c15ull);
+            auto mix = [](std::uint64_t h, std::uint64_t v) {
+                h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+                h *= 0xff51afd7ed558ccdull;
+                return h ^ (h >> 33);
+            };
+            for (std::size_t t = 0; t < snapControls_.size(); ++t) baseHash[t + 1] = mix(baseHash[t], snapControls_[t]);
+            std::uint32_t active = 0u;
+            for (std::uint32_t k = 0; k < batch; ++k) {
+                generator.Generate(1000000u + k, false, &candidate);
+                if (!candidate.active) continue;
+                ++active;
+                BuildTwinControls(candidate.events, &controls);
+                const std::uint32_t same = static_cast<std::uint32_t>(std::min(controls.size(), snapControls_.size()));
+                std::uint32_t first = 0u;
+                while (first < same && controls[first] == snapControls_[first]) ++first;
+                std::uint64_t h = baseHash[first];
+                for (std::uint32_t t = first; t < controls.size(); ++t) {
+                    h = mix(h, controls[t]);
+                    prefixes.insert(mix(h, t));
+                }
+                simulated += controls.size() - first;
+                finals.insert(h);
+            }
+            std::fprintf(stderr, "twin first change (%s) shared beginnings: a batch of %u (%u changed): %llu ticks simulated, "
+                         "%zu distinct prefixes (%.2fx less work); %.1f%% exact duplicates\n", when, batch, active,
+                         static_cast<unsigned long long>(simulated), prefixes.size(),
+                         prefixes.empty() ? 0.0 : double(simulated) / double(prefixes.size()),
+                         active ? 100.0 * (active - finals.size()) / active : 0.0);
+        }
+        for (std::size_t pass = 0; pass < program_.modifiers.size(); ++pass) {
+            twin_search::MutationProgram one = program_;
+            one.modifiers = {program_.modifiers[pass]};
+            const std::string name = "pass " + std::to_string(pass) + " (kind " +
+                                     std::to_string(static_cast<int>(program_.modifiers[pass].kind)) + ")";
+            sample(one, name.c_str());
+        }
+    }
+
     bool BuildSnapshots(std::string *diagnostic) {
         twin_search::CandidateGenerator generator(program_);
         twin_search::GeneratedCandidate baseline;
@@ -2565,9 +2665,74 @@ private:
     }
 
     // The batches run ahead, dropped (their sets' work waited for: the sets are free again).
+    // A promotion (Rebaseline) keeps the batch run ahead for the next ids: the device computed it from the old baseline, a
+    // complete and valid set of candidates. It is finished here with the old program (the host's reruns, the candidates' best's
+    // events) and handed to Execute when it asks for those ids, the device given the batch after it at once. Only the next
+    // batch is kept, which is always run ahead (except for the finish time and scripted targets: nothing kept), so what a
+    // search tries does not depend on timing. FOREVERVALIDATOR_TWIN_KEEP_AHEAD=0: dropped, as before.
+    struct KeptBatch {
+        std::uint64_t first = 0u;
+        std::vector<SlotResult> slots;
+    };
+    std::optional<KeptBatch> kept_;
+    void KeepNextBatch(const CudaSearchExecutorConfiguration &next) {
+        kept_.reset();
+        static const bool keeps = [] {
+            const char *value = std::getenv("FOREVERVALIDATOR_TWIN_KEEP_AHEAD");
+            return value == nullptr || std::strcmp(value, "0") != 0;
+        }();
+        if (!keeps || !gpuGen_ || devAhead_.empty() || config_.evaluator.kind == CudaSearchEvaluatorKind::FinishTime ||
+            config_.evaluator.kind == CudaSearchEvaluatorKind::Scripted ||
+            next.evaluationStartTimeMs != config_.evaluationStartTimeMs || next.evaluationEndTimeMs != config_.evaluationEndTimeMs) {
+            return;
+        }
+        DevBatch &b = devAhead_.front();
+        const std::uint32_t part = b.taken;
+        if (!b.valid || b.version != programVersion_ || b.sets.size() != 1u || part >= b.batches) return;
+        DeviceSample incumbent = globalBest_;
+        incumbent.logicalOrder = 0u;
+        incumbent.candidateSlot = InvalidCandidateSlot;
+        BuildPrefix(false, incumbent);
+        KeptBatch kept;
+        kept.first = b.first + static_cast<std::uint64_t>(part) * b.count;
+        kept.slots.resize(b.count);
+        std::vector<std::vector<std::uint32_t>> reruns(threads_);
+        DevTimes times;
+        DevFinish(b, 0u, incumbent, kept.slots, reruns, times, b.batches > 1u ? part : 0u);
+        const std::function<bool()> never;
+        Worker &w0 = *workers_[0];
+        for (const auto &list : reruns) {
+            for (const std::uint32_t slot : list) {   // the CPU's run, as DevEnd
+                std::vector<SlotWork> work(1u);
+                PrepareSlot(w0, kept.first, slot, false, incumbent, never, &kept.slots[slot], &work[0]);
+                if (work[0].physics) {
+                    JobDeal deal(std::vector<std::uint32_t>{0u}, 1u);
+                    RunJobs(w0, 0u, slot, kept.slots, work, deal, 1, never);
+                }
+            }
+        }
+        // the batch's best (Execute's pick over these slots can only be it or the incumbent): its events, from the old program
+        DeviceSample none{};
+        const DeviceSample *pick = &none;
+        for (const SlotResult &r : kept.slots)
+            if (BetterPicksRight(*pick, r.best, maximize_)) pick = &r.best;
+        if (pick != &none && pick->valid && pick->candidateSlot != InvalidCandidateSlot) {
+            SlotResult &r = kept.slots[pick->candidateSlot];
+            if (r.events.empty()) {
+                twin_search::GeneratedCandidate again;
+                w0.generator.Generate(kept.first + pick->candidateSlot, false, &again);
+                r.events = std::move(again.events);
+            }
+        }
+        if (trace_) std::fprintf(stderr, "twin rebaseline: kept the batch run ahead (ids %llu.., %zu slots)\n",
+                                 static_cast<unsigned long long>(kept.first), kept.slots.size());
+        kept_ = std::move(kept);
+    }
+
     void DropAhead() {
         std::string error;
         for (const DevBatch &d : devAhead_) {
+            if (d.waited) continue;
             for (int set : d.sets) {
                 tw::gpu::SearchStats st;
                 gpu_->Wait(set, &st, &error);
@@ -2940,13 +3105,29 @@ private:
 #if FOREVERVALIDATOR_TWIN_GPU
             // the device path's batch submitted before its slots are made (16,384 slots are 6 MB: the host's first touch of
             // them overlaps the device's generation instead of preceding it)
-            const bool devEarly = twinWorld_ && gpu_ && gpuGen_ && !baseline && !recording && !checkBranching_ && DevEarly(count);
-            if (devEarly) DevTake(first, count, incumbent, cancel, nullptr);
+            std::optional<KeptBatch> kept;
+            if (kept_) {   // a batch kept across a promotion: for these ids only
+                if (!baseline && kept_->first == first && kept_->slots.size() == count) kept = std::move(kept_);
+                kept_.reset();
+            }
+            const bool devEarly =
+                    twinWorld_ && gpu_ && gpuGen_ && !baseline && !recording && !checkBranching_ && DevEarly(count);
+            if (devEarly && !kept) DevTake(first, count, incumbent, cancel, nullptr);
 #else
             constexpr bool devEarly = false;
+            constexpr bool kept = false;
 #endif
             std::vector<SlotResult> slots(count);
-            if (devEarly) {
+            if (kept) {
+#if FOREVERVALIDATOR_TWIN_GPU
+                slots = std::move(kept->slots);
+                eventsOmitted_ = true;
+                // the device on the batch after it meanwhile (the next Execute takes it as run ahead)
+                if (devEarly && first <= std::numeric_limits<std::uint64_t>::max() - 2ull * count) {
+                    DevTake(first + count, count, incumbent, cancel, nullptr);
+                }
+#endif
+            } else if (devEarly) {
 #if FOREVERVALIDATOR_TWIN_GPU
                 DevAhead(count, incumbent);
                 DevEnd(first, incumbent, cancel, slots);
