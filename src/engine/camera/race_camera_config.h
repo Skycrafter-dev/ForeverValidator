@@ -57,8 +57,8 @@ struct Race2Config {
     std::uint32_t airborneValidationMs = 200u;
     std::uint32_t flyingCameraMoveDelayMs = 1000u;
     std::uint32_t flyingModeDelayMs = 1000u;
-    std::uint32_t steeringYawTriggerMs = 200u;
-    std::uint32_t steeringRollTriggerMs = 300u;
+    std::uint32_t steeringYawTriggerMs = 300u;
+    std::uint32_t steeringRollTriggerMs = 200u;
     std::uint32_t steeringInactiveResetMs = 150u;
     float orientationMinimumSpeed = 20.0f;
     float heightRate = 4.0f;
@@ -116,27 +116,39 @@ struct Race3Config {
 
 struct RaceResourceConfig {
     std::string sourceName;
+    std::uint32_t collectorIndex = 0xffffffffu;
     RaceConfig config;
 };
 
 struct Race2ResourceConfig {
     std::string sourceName;
+    std::uint32_t collectorIndex = 0xffffffffu;
     Race2Config config;
 };
 
 struct Race3ResourceConfig {
     std::string sourceName;
+    std::uint32_t collectorIndex = 0xffffffffu;
     Race3Config config;
+};
+
+struct InternalResourceConfig {
+    std::string sourceName;
+    std::uint32_t collectorIndex = 0xffffffffu;
+    CameraCommonConfig config;
 };
 
 struct EnvironmentConfig {
     std::string sourceName;
+    std::uint32_t defaultCollectorIndex = 0xffffffffu;
     std::optional<RaceConfig> race;
     std::optional<Race2Config> race2;
     std::optional<Race3Config> race3;
+    std::optional<CameraCommonConfig> internal;
     std::vector<RaceResourceConfig> raceResources;
     std::vector<Race2ResourceConfig> race2Resources;
     std::vector<Race3ResourceConfig> race3Resources;
+    std::vector<InternalResourceConfig> internalResources;
 };
 
 } // namespace forevervalidator::camera::detail

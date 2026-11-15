@@ -1,11 +1,13 @@
 #include "format/pack/installed_vehicle_asset_graph.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <new>
 #include <utility>
 
 #include "format/archive/archive_class_ids.h"
+#include "format/archive/archive_binary.h"
 #include "format/archive/tmnf_gbx_body_reader.h"
 #include "format/pack/installed/byte_buffer.h"
 #include "format/pack/installed/plug_file_pack.h"
@@ -14,6 +16,13 @@
 #include "format/vehicle_tuning/default_vehicle_archive_schema.h"
 
 namespace {
+
+using TmnfFormat::ArchiveBinary::ReadU32LE;
+
+constexpr u32 VehicleCollectorDefaultCameraChunk = 0x0301c006u;
+constexpr u32 VehicleCollectorCamerasChunk = 0x0301c009u;
+constexpr u32 VehicleCollectorCameraArchiveVersion = 10u;
+constexpr u32 MaximumVehicleCollectorCameras = 64u;
 
 bool ParseReferenceTable(
         CPlugFilePack &pack,
@@ -159,22 +168,119 @@ bool ResolveUniqueDeclaredClass(
 }
 
 bool IsRaceCameraClass(u32 classId) {
-    return classId == TMNF_CLASS_CGameControlCameraTrackManiaRace ||
+    return classId == TMNF_CLASS_CGameControlCamera ||
+           classId == TMNF_CLASS_CGameControlCameraTrackManiaRace ||
            classId == TMNF_CLASS_CGameControlCameraTrackManiaRace2 ||
            classId == TMNF_CLASS_CGameControlCameraTrackManiaRace3;
+}
+
+bool ParseCollectorCameraIndices(
+        CPlugFilePack &pack,
+        const InstalledVehicleAssetReference &source,
+        const GbxBodyReferenceTable &references,
+        u32 *defaultCameraIndex,
+        std::vector<u32> *cameraNodeIndices) {
+    if (defaultCameraIndex == nullptr || cameraNodeIndices == nullptr ||
+        references.bodyOffset > UINT32_MAX || !source.IsValid()) {
+        return false;
+    }
+    ByteBuffer bytes;
+    if (!pack.ExtractPath(source.selectedPath.c_str(), &bytes) ||
+        references.bodyOffset > bytes.Size()) {
+        return false;
+    }
+
+    std::optional<std::size_t> camerasChunk;
+    for (std::size_t offset = references.bodyOffset;
+         offset + 12u <= bytes.Size(); ++offset) {
+        if (ReadU32LE(bytes.Data() + offset) !=
+                    VehicleCollectorCamerasChunk ||
+            ReadU32LE(bytes.Data() + offset + 4u) !=
+                    VehicleCollectorCameraArchiveVersion) {
+            continue;
+        }
+        const u32 count = ReadU32LE(bytes.Data() + offset + 8u);
+        const std::size_t payloadBytes = static_cast<std::size_t>(count) * 4u;
+        if (count == 0u || count > MaximumVehicleCollectorCameras ||
+            offset + 12u > bytes.Size() ||
+            payloadBytes > bytes.Size() - (offset + 12u)) {
+            continue;
+        }
+        bool valid = true;
+        for (u32 index = 0u; index < count; ++index) {
+            const u32 nodeIndex = ReadU32LE(
+                    bytes.Data() + offset + 12u + index * 4u);
+            const auto declared = std::find_if(
+                    references.externalReferences.begin(),
+                    references.externalReferences.end(),
+                    [nodeIndex](const GbxBodyExternalReference &reference) {
+                        return reference.nodeIndex == nodeIndex;
+                    });
+            if (declared == references.externalReferences.end()) {
+                valid = false;
+                break;
+            }
+        }
+        if (!valid || camerasChunk.has_value()) {
+            return false;
+        }
+        camerasChunk = offset;
+    }
+    if (!camerasChunk) {
+        return false;
+    }
+
+    std::optional<u32> decodedDefault;
+    for (std::size_t offset = references.bodyOffset;
+         offset + 8u <= *camerasChunk; ++offset) {
+        if (ReadU32LE(bytes.Data() + offset) !=
+                VehicleCollectorDefaultCameraChunk) {
+            continue;
+        }
+        const u32 value = ReadU32LE(bytes.Data() + offset + 4u);
+        if (decodedDefault.has_value()) {
+            return false;
+        }
+        decodedDefault = value;
+    }
+
+    const u32 count = ReadU32LE(bytes.Data() + *camerasChunk + 8u);
+    if (!decodedDefault || *decodedDefault >= count) {
+        return false;
+    }
+    cameraNodeIndices->clear();
+    cameraNodeIndices->reserve(count);
+    for (u32 index = 0u; index < count; ++index) {
+        cameraNodeIndices->push_back(ReadU32LE(
+                bytes.Data() + *camerasChunk + 12u + index * 4u));
+    }
+    *defaultCameraIndex = *decodedDefault;
+    return true;
 }
 
 bool ResolveDeclaredRaceCameras(
         CPlugFilePack &pack,
         const InstalledVehicleAssetReference &source,
         const GbxBodyReferenceTable &references,
+        const std::vector<u32> &cameraNodeIndices,
         std::vector<InstalledVehicleAssetReference> *out) {
     if (out == nullptr) {
         return false;
     }
     out->clear();
-    for (const GbxBodyExternalReference &reference :
-         references.externalReferences) {
+    for (std::size_t collectorIndex = 0u;
+         collectorIndex < cameraNodeIndices.size(); ++collectorIndex) {
+        const u32 nodeIndex = cameraNodeIndices[collectorIndex];
+        const auto foundReference = std::find_if(
+                references.externalReferences.begin(),
+                references.externalReferences.end(),
+                [nodeIndex](const GbxBodyExternalReference &reference) {
+                    return reference.nodeIndex == nodeIndex;
+                });
+        if (foundReference == references.externalReferences.end()) {
+            return false;
+        }
+        const GbxBodyExternalReference &reference = *foundReference;
         if (reference.IsResource()) {
             continue;
         }
@@ -196,6 +302,7 @@ bool ResolveDeclaredRaceCameras(
         camera.logicalPath = std::move(logicalPath);
         camera.selectedPath = selectedPath.data();
         camera.classId = file->classId;
+        camera.collectorIndex = static_cast<u32>(collectorIndex);
         out->push_back(std::move(camera));
     }
     return true;
@@ -208,6 +315,8 @@ InstalledVehicleAssetGraph::ResolveFromPack(CPlugFilePack &pack) {
     try {
         InstalledVehicleAssetGraph graph;
         GbxBodyReferenceTable collectorReferences;
+        std::vector<u32> cameraNodeIndices;
+        u32 defaultCameraIndex = 0xffffffffu;
         GbxBodyReferenceTable mobilReferences;
         GbxBodyReferenceTable materialReferences;
         GbxBodyReferenceTable bitmapReferences;
@@ -218,8 +327,12 @@ InstalledVehicleAssetGraph::ResolveFromPack(CPlugFilePack &pack) {
                         &graph.collector) &&
                 ParseReferenceTable(
                         pack, graph.collector, &collectorReferences) &&
+                ParseCollectorCameraIndices(
+                        pack, graph.collector, collectorReferences,
+                        &defaultCameraIndex, &cameraNodeIndices) &&
                 ResolveDeclaredRaceCameras(
                         pack, graph.collector, collectorReferences,
+                        cameraNodeIndices,
                         &graph.raceCameras) &&
                 ResolveUniqueDeclaredClass(
                         pack,
@@ -277,21 +390,26 @@ InstalledVehicleAssetGraph::ResolveFromPack(CPlugFilePack &pack) {
     }
 }
 
-std::optional<std::vector<InstalledVehicleAssetReference>>
+std::optional<InstalledVehicleCameraSet>
 InstalledVehicleAssetGraph::ResolveRaceCamerasFromPack(CPlugFilePack &pack) {
     try {
         InstalledVehicleAssetReference collector;
         GbxBodyReferenceTable references;
-        std::vector<InstalledVehicleAssetReference> cameras;
+        InstalledVehicleCameraSet cameraSet;
+        std::vector<u32> cameraNodeIndices;
         if (!FindUniquePackClass(
                     pack, TMNF_CLASS_CGameCtnCollectorVehicle, &collector) ||
             !ParseReferenceTable(pack, collector, &references) ||
+            !ParseCollectorCameraIndices(
+                    pack, collector, references,
+                    &cameraSet.defaultCameraIndex, &cameraNodeIndices) ||
             !ResolveDeclaredRaceCameras(
-                    pack, collector, references, &cameras) ||
-            cameras.empty()) {
+                    pack, collector, references, cameraNodeIndices,
+                    &cameraSet.cameras) ||
+            cameraSet.cameras.empty()) {
             return std::nullopt;
         }
-        return cameras;
+        return cameraSet;
     } catch (const std::bad_alloc &) {
         return std::nullopt;
     }

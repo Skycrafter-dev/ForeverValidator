@@ -68,6 +68,9 @@ struct GmSurf {
     static int ComputeCollision(const LocatedGmSurf &a,
                                 const LocatedGmSurf &b,
                                 CGmCollisionBuffer &collisionBuffer);
+    static bool ClipSegment3(const LocatedGmSurf &surface,
+                             const GmVec3 &start, const GmVec3 &delta,
+                             float &ratio, GmLocalMaterialIndex &material);
     void CreateDefaultData(void);
     void GetBoundingBox(GmBoxAligned &out) const;
     virtual int UsesSphereContactBuffer(void) const;
@@ -216,6 +219,8 @@ struct GmSurfMesh : GmSurf {
     void GetMeshBoundingBox(GmBoxAligned &out) const;
     void ComputePlane(unsigned long triangleIndex);
     void BuildOctree(void);
+    bool ClipSegment3(const GmVec3 &start, const GmVec3 &delta,
+                      float &ratio, GmLocalMaterialIndex &material) const;
 
     bool SetGeometry(std::vector<GmVec3> meshVertices,
                      std::vector<GmSurfMeshTriangle> meshTriangles,

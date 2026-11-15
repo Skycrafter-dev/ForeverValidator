@@ -6,7 +6,7 @@
 
 #include "simulation/backends/cuda/cuda_search_executor.h"
 
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) || defined(__HIPCC__)
 #define FOREVERVALIDATOR_CANDIDATE_HD __host__ __device__
 #else
 #define FOREVERVALIDATOR_CANDIDATE_HD

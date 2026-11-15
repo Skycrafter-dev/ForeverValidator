@@ -14,10 +14,6 @@
 
 namespace forevervalidator::simulation {
 
-namespace cuda::specialization {
-class SessionModule;
-}
-
 enum class CudaSearchModifierKind : std::uint32_t {
     RandomSteering,
     ExistingEvent,
@@ -69,6 +65,7 @@ enum class CudaSearchEvaluatorKind : std::uint32_t {
     ConditionTimeLatest,
     CheckpointEvent,
     CustomVolumeEntry,
+    Distance,
 };
 
 enum class CudaSearchConditionOpcode : std::uint32_t {
@@ -151,6 +148,12 @@ struct CudaSearchConditionInstruction {
 inline constexpr std::uint32_t CudaSearchMaximumScriptedObjectives = 16u;
 inline constexpr std::uint32_t CudaSearchMaximumScriptedInstructions = 256u;
 inline constexpr std::uint32_t CudaSearchMaximumCustomVolumeVertices = 256u;
+inline constexpr std::uint32_t CudaSearchMaximumDistanceTriangles = 1024u;
+inline constexpr std::uint32_t CudaSearchMaximumDistanceShapes = 16u;
+inline constexpr std::uint32_t CudaSearchMaximumDistanceTriggers = 128u;
+// optionFlags bits beyond each kind's own.
+inline constexpr std::uint32_t CudaSearchVelocityTowardsPoint = 4u;
+inline constexpr std::uint32_t CudaSearchEntrySpeed = 0x100u;
 
 struct CudaSearchScriptedObjective {
     std::uint32_t kind = 0u;
@@ -162,7 +165,10 @@ struct CudaSearchScriptedObjective {
 struct CudaSearchEvaluatorConfiguration {
     CudaSearchEvaluatorKind kind = CudaSearchEvaluatorKind::FinishTime;
     std::uint32_t optionFlags = 0u;
-    double values[10]{};
+    // Velocity: direction 0-2, minimum alignment 3, point 4-6.
+    // Pose: position 0-2, rotation 3-6, rotation weight 7, axis weights
+    // 8-13. Distance: the CheckpointEvent selectors 0-5, car radius 6.
+    double values[16]{};
     std::uint32_t scriptedObjectiveCount = 0u;
     CudaSearchScriptedObjective
             scriptedObjectives[CudaSearchMaximumScriptedObjectives]{};
@@ -170,6 +176,24 @@ struct CudaSearchEvaluatorConfiguration {
             scriptedInstructions[CudaSearchMaximumScriptedInstructions]{};
     std::uint32_t customVolumeVertexCount = 0u;
     double customVolumeVertices[CudaSearchMaximumCustomVolumeVertices][2]{};
+    // Distance: triggers (map slot or -1 for a finish line, first
+    // triangle, triangle count, box min xyz, box max xyz), their triangles
+    // (a, b, c) in world space, and the car's collision shapes, car-local
+    // (centre, rotation x y z w, radii).
+    std::uint32_t distanceTriggerCount = 0u;
+    std::uint32_t distanceTriangleCount = 0u;
+    std::uint32_t distanceShapeCount = 0u;
+    double distanceTriggers[CudaSearchMaximumDistanceTriggers][9]{};
+    double distanceTriangles[CudaSearchMaximumDistanceTriangles][9]{};
+    double distanceShapes[CudaSearchMaximumDistanceShapes][10]{};
+    // Distance around walls: the tables (device memory, set when uploaded;
+    // null measures straight), each trigger's byte offset into them, and
+    // the car's body sphere (car-local centre, radius) the tables were
+    // built for.
+    const unsigned char *aroundWalls = nullptr;
+    std::uint64_t aroundWallsOffsets[CudaSearchMaximumDistanceTriggers]{};
+    double bodyCenter[3]{};
+    double bodyRadius = 0.0;
 };
 
 struct CudaSearchConditionConfiguration {
@@ -178,7 +202,7 @@ struct CudaSearchConditionConfiguration {
     double lastRestartTimeSeconds = 0.0;
 };
 
-struct CudaSearchInputEvent {
+struct alignas(16) CudaSearchInputEvent {
     std::int32_t timeMs = 0;
     std::uint32_t action = 0u;
     std::uint32_t valueKind = 0u;
@@ -216,6 +240,11 @@ struct CudaSearchExecutorConfiguration {
     std::uint32_t changedSegmentCount = 1u;
     std::vector<double> smoothWeights;
     CudaSearchEvaluatorConfiguration evaluator{};
+    // The evaluator's around-walls tables, uploaded with it. Corners the
+    // batches need are filled on demand (around_walls_table.h); after each
+    // fill, aroundWallsFilled (if set) gets the table's index and bytes.
+    std::vector<unsigned char> aroundWallsTables;
+    std::function<void(std::uint32_t, const unsigned char *)> aroundWallsFilled;
     std::optional<CudaSearchConditionConfiguration> condition;
     std::uint32_t maximumBatchSize = 1u;
     std::uint32_t tickDurationMs = 10u;
@@ -227,8 +256,6 @@ struct CudaSearchExecutorConfiguration {
     bool useLegacyMutationPipelineForTesting = false;
     bool captureBestState = true;
     std::optional<CudaSearchIncumbent> incumbent;
-    std::shared_ptr<const cuda::specialization::SessionModule>
-            sessionSpecialization;
 };
 
 enum class CudaSearchStatus : std::uint32_t {
@@ -291,6 +318,9 @@ struct CudaSearchBatchExecution {
     double winnerReductionKernelMilliseconds = 0.0;
     double winnerStateCaptureKernelMilliseconds = 0.0;
     double finalizationKernelMilliseconds = 0.0;
+    // Around walls: times the batch ran again after filling the corners it
+    // needed (its time includes those runs and fills).
+    std::uint32_t aroundWallsReruns = 0u;
     std::uint32_t simulationThreadsPerBlock = 0u;
     std::uint32_t simulationRegistersPerThread = 0u;
     std::uint64_t simulationLocalBytesPerThread = 0u;

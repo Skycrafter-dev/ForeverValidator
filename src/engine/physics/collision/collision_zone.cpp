@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cmath>
 #include <memory>
+#include <limits>
 #include <utility>
 
 #include "engine/core/cmw_nod.h"
@@ -18,6 +20,89 @@
 #include "engine/scene/plug_solid.h"
 #include "engine/physics/geometry/plug_surface.h"
 #include "engine/rendering/plug_tree.h"
+
+namespace {
+
+bool IntersectSegmentTree3(
+        CPlugTree *tree, const GmIso4 &parent,
+        const GmVec3 &start, const GmVec3 &delta,
+        float &ratio, EPlugSurfaceMaterialId &material) {
+    if (tree == nullptr || !tree->HasWorldBox()) return false;
+    GmBoxAligned bounds;
+    bounds.SetMult(tree->Box(), parent);
+    if (!bounds.TestInterSegment(start, start.AddForCollision(delta))) return false;
+    GmIso4 location;
+    tree->ComposeCollisionIso(parent, location);
+    bool hit = false;
+    if (const CPlugSurface *surface = tree->Surface()) {
+        GmLocalMaterialIndex localMaterial;
+        if (GmSurf::ClipSegment3({surface->Geometry(), &location},
+                                start, delta, ratio, localMaterial)) {
+            material = surface->SurfaceMaterialIdFromLocalIndex(localMaterial);
+            hit = true;
+        }
+    }
+    for (u32 index = 0u; index < tree->GetChildCount(); ++index) {
+        float childRatio;
+        EPlugSurfaceMaterialId childMaterial;
+        if (IntersectSegmentTree3(tree->GetChild(index), location, start, delta,
+                                  childRatio, childMaterial) &&
+            (!hit || ratio > childRatio)) {
+            ratio = childRatio;
+            material = childMaterial;
+            hit = true;
+        }
+    }
+    return hit;
+}
+
+} // namespace
+
+bool CHmsCollisionManager::SZone::IntersectSegment3(
+        CHmsItem::ECollisionGroup groupId,
+        const GmVec3 &start, const GmVec3 &delta,
+        float &ratio, EPlugSurfaceMaterialId &material) const {
+    const u32 index = static_cast<u32>(groupId);
+    ratio = std::numeric_limits<float>::max();
+    if (index == 0u || index > CHmsCollisionManager_GroupCount) return false;
+    const SGroup &group = groups[index - 1u];
+    const GmVec3 end = start.AddForCollision(delta);
+    bool hit = false;
+    for (u32 cellIndex = 0u; cellIndex < group.staticTrees.GetCount();) {
+        const auto &cell = group.staticTrees[cellIndex];
+        if (!cell.Bounds().TestInterSegment(start, end)) {
+            cellIndex += cell.SubtreeEntryCount();
+            continue;
+        }
+        ++cellIndex;
+        if (!cell.ContainsSurface()) continue;
+        const auto &record = cell.SurfaceData();
+        float candidate;
+        GmLocalMaterialIndex localMaterial;
+        if (GmSurf::ClipSegment3({record.surface->Geometry(), &record.location},
+                                start, delta, candidate, localMaterial) &&
+            ratio > candidate) {
+            ratio = candidate;
+            material = record.surface->SurfaceMaterialIdFromLocalIndex(localMaterial);
+            hit = true;
+        }
+    }
+    for (u32 corpusIndex = 0u; corpusIndex < group.NonStaticCorpusCount(); ++corpusIndex) {
+        const CHmsCorpus *corpus = group.NonStaticCorpusAt(corpusIndex);
+        const GmIso4 *location = corpus->LocationIso();
+        float candidate;
+        EPlugSurfaceMaterialId candidateMaterial;
+        if (location != nullptr &&
+            IntersectSegmentTree3(corpus->CollisionTree(), *location,
+                                  start, delta, candidate, candidateMaterial) &&
+            ratio > candidate) {
+            ratio = candidate;
+            material = candidateMaterial;
+            hit = true;
+        }
+    }
+    return hit;
+}
 
 CSceneVehicleWaterZone::CSceneVehicleWaterZone(void)
         : enabled(false),

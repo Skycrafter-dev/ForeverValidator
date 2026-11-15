@@ -8,6 +8,70 @@
 #include "engine/physics/geometry/gmsurf_collision.h"
 #include "engine/physics/geometry/physics_tolerances.h"
 
+bool GmSurfMesh::ClipSegment3(
+        const GmVec3 &start, const GmVec3 &delta,
+        float &ratio, GmLocalMaterialIndex &material) const {
+    // GmSurfMesh::ClipSegment3 (008F1FC0) walks the authored octree in order;
+    // an equal-distance triangle replaces the earlier local material.
+    ratio = 2.0f;
+    const GmVec3 middle{start.x + delta.x * 0.5f,
+                        start.y + delta.y * 0.5f,
+                        start.z + delta.z * 0.5f};
+    GmLocalMaterialIndex nearestMaterial;
+    for (u32 cellIndex = 1u; cellIndex < OctreeCellCount();) {
+        const auto &cell = OctreeCell(cellIndex);
+        if (!cell.ContainsTriangle()) {
+            cellIndex += cell.Bounds().TestInterSegmentMiddleVector(middle, delta)
+                    ? 1u : cell.SubtreeEntryCount();
+            continue;
+        }
+        ++cellIndex;
+        const auto &triangle = Triangle(cell.TriangleIndex());
+        const auto &normal = triangle.normal;
+        const float planeDistance = normal.y * start.y + normal.x * start.x +
+                normal.z * start.z + triangle.planeDistance;
+        const float approach = -(delta.y * normal.y + normal.x * delta.x +
+                                 normal.z * delta.z);
+        if (planeDistance < 0.0f || approach < planeDistance ||
+            std::fabs(planeDistance) * 1.0e-5f >= std::fabs(approach)) continue;
+        const float intersection = planeDistance / approach;
+        if (ratio < intersection) continue;
+        const GmVec3 point{start.x + delta.x * intersection,
+                           start.y + delta.y * intersection,
+                           start.z + delta.z * intersection};
+        const auto &origin = Vertex(triangle.vertexIndex[0]);
+        const GmVec3 first = Vertex(triangle.vertexIndex[1]) - origin;
+        const GmVec3 second = Vertex(triangle.vertexIndex[2]) - origin;
+        const GmVec3 offset = point - origin;
+        GmAxis dominant = GmAxis::X;
+        if (std::fabs(normal.x) < std::fabs(normal.y)) dominant = GmAxis::Y;
+        if (std::fabs(normal.Component(dominant)) < std::fabs(normal.z)) {
+            dominant = GmAxis::Z;
+        }
+        const auto next = static_cast<GmAxis>((static_cast<u32>(dominant) + 1u) % 3u);
+        const auto other = static_cast<GmAxis>((static_cast<u32>(dominant) + 2u) % 3u);
+        const float determinant = first.Component(next) * second.Component(other) -
+                second.Component(next) * first.Component(other);
+        const float firstNumerator = second.Component(other) * offset.Component(next) -
+                second.Component(next) * offset.Component(other);
+        const float secondNumerator = offset.Component(other) * first.Component(next) -
+                first.Component(other) * offset.Component(next);
+        const float limit = std::fabs(determinant) * 100000.0f;
+        if (std::fabs(firstNumerator) >= limit ||
+            std::fabs(secondNumerator) >= limit) continue;
+        const float inverse = 1.0f / determinant;
+        const float firstWeight = firstNumerator * inverse;
+        const float secondWeight = inverse * secondNumerator;
+        if (firstWeight < 0.0f || secondWeight < 0.0f ||
+            firstWeight + secondWeight > 1.0f) continue;
+        ratio = intersection;
+        nearestMaterial = triangle.material;
+    }
+    if (!(ratio < 1.0f)) return false;
+    material = nearestMaterial;
+    return true;
+}
+
 struct SSphereMeshCollide {
     CGmCollisionBuffer *collisionBuffer;
     GmVec3 sphereCenterMesh;

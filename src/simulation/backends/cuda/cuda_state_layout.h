@@ -150,11 +150,7 @@ namespace cuda::facts {
 
 __device__ inline std::uint32_t WheelCount(
         const CudaVehicleState &vehicle) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_FOUR_WHEELS)
-    return 4u;
-#else
     return vehicle.wheels.count;
-#endif
 }
 
 }  // namespace cuda::facts

@@ -1,0 +1,15 @@
+# Twin golden hashes (tests/twin/golden/tw_golden_hash.cpp, design.md §7).
+# "<model-id> <key> <hash>". A change that moves a hash must bump the model id
+# (components: kComponentsId in tw_golden_hash.cpp; engine: kModelId in
+# src/twin/step/tw_step.cpp) and replace the lines, with the reason in the commit.
+# Every line was produced identically by the whole determinism matrix
+# (tests/twin/ci/determinism.sh).
+# components-1: 2026-11-08, gcc 15.2 / clang 21.1.8 x sse2/avx2/avx512, all equal
+components-1 components/state.lanes 200f8716ca3a8435
+components-1 components/race.controls 31d5ad01aba0b23d
+components-1 components/math.grid 70c3defe7cb6dee7
+components-1 components/math.canary 0000000000000001
+# engine (twin-stub-0): no goldens while TwinStep is the stub; M5/M9 add 12 scenarios x {fv, contact-full, contact, cap3}
+# isa: the tick path's ISA-variant selftest (isa/tw_isa_tick_entry.cpp: lane math at every width, exact-fast
+# test with AVX-512 packets); every variant in a binary and every build of the matrix must give it
+components-1 isa/selftest 2f9742378d9a08b3

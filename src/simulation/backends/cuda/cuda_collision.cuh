@@ -450,20 +450,8 @@ template<typename T>
 __device__ inline const T *SceneSection(
         const CudaPackedSceneHeader *scene,
         const CudaSceneSection &section) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_SESSION_LTO)
-    const auto *base =
-            reinterpret_cast<const std::byte *>(
-                    ::forevervalidator::simulation::cuda::
-                            research::SessionSceneBase());
-#elif defined(FOREVERVALIDATOR_CUDA_RESEARCH_CONSTANT_SCENE)
-    const auto *base =
-            reinterpret_cast<const std::byte *>(
-                    ::forevervalidator::simulation::cuda::
-                            research::StaticSceneBase);
-#else
     const auto *base =
             reinterpret_cast<const std::byte *>(scene);
-#endif
     return reinterpret_cast<const T *>(
             base + section.offset);
 }
@@ -1646,26 +1634,6 @@ __device__ inline GmIso4 BodyPose(
     return {body.current.rotation, body.current.position};
 }
 
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_EIGHT_ROOT_SHAPES)
-__device__ inline GmIso4 RootShapeWorldPose(
-        std::uint32_t shapeIndex,
-        const CudaVehicleCollisionShape *shapes,
-        const CudaCandidatePhysicsState &candidate,
-        const GmIso4 &bodyPose) {
-    GmIso4 shapeBodyPose;
-    if (shapeIndex < 4u) {
-        shapeBodyPose = shapes[shapeIndex].bodyPose;
-    } else {
-        const std::uint32_t wheelIndex =
-                (shapeIndex - 4u) ^
-                (shapeIndex >= 6u ? 1u : 0u);
-        shapeBodyPose =
-                candidate.vehicle.wheels.values[
-                        wheelIndex].currentPose;
-    }
-    return Compose(shapeBodyPose, bodyPose);
-}
-#endif
 
 __device__ inline GmIso4 ShapeBodyPose(
         const CudaVehicleCollisionShape &shape,
@@ -1964,20 +1932,10 @@ __device__ inline Status Detect(
     const CudaSceneAccelerationCell *acceleration =
             detail::SceneSection<CudaSceneAccelerationCell>(
                     scene, scene->accelerationCells);
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_SESSION_LTO)
-    const CudaVehicleCollisionShape *shapes =
-            reinterpret_cast<const CudaVehicleCollisionShape *>(
-                    research::
-                            ForeverValidatorSessionCollisionShapeBytes());
-#elif defined(FOREVERVALIDATOR_CUDA_RESEARCH_CONSTANT_COLLISION_SHAPES)
-    const CudaVehicleCollisionShape *shapes =
-            research::StaticCollisionShapes;
-#else
     const CudaVehicleCollisionShape *shapes =
             tuning::Section<CudaVehicleCollisionShape>(
                     configuration,
                     configuration->collisionShapes);
-#endif
     const GmIso4 bodyPose = detail::BodyPose(candidate.body);
 
     if constexpr (!TrackDiagnostics) {
@@ -2023,11 +1981,6 @@ __device__ inline Status Detect(
                 }
                 GmIso4 shapeWorld;
                 if constexpr (EightOrderedEllipsoids) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_EIGHT_ROOT_SHAPES)
-                    shapeWorld = detail::RootShapeWorldPose(
-                            shapeIndex, shapes,
-                            candidate, bodyPose);
-#else
                     const CudaVehicleCollisionShape &shape =
                             shapes[shapeIndex];
                     shapeWorld =
@@ -2044,7 +1997,6 @@ __device__ inline Status Detect(
                             : detail::ShapeWorldPose(
                                       shapeIndex, shapes,
                                       candidate, bodyPose);
-#endif
                 } else {
                     shapeWorld =
                             detail::CachedShapeWorldPose(
@@ -2107,17 +2059,10 @@ __device__ inline Status Detect(
                          traversal < collisionShapeCount;
                          ++traversal) {
                         GmIso4 shapeWorld;
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_EIGHT_ROOT_SHAPES)
-                        shapeWorld =
-                                detail::RootShapeWorldPose(
-                                        traversal, shapes,
-                                        candidate, bodyPose);
-#else
                         shapeWorld =
                                 detail::ShapeWorldPose(
                                         traversal, shapes,
                                         candidate, bodyPose);
-#endif
                         const GmBoxAligned movingBounds =
                                 detail::TransformBox(
                                         shapes[traversal].localBounds,
@@ -2364,20 +2309,6 @@ __device__ inline Status Detect(
                             shapes[firstTraversal];
                     const CudaVehicleCollisionShape &secondShape =
                             shapes[secondTraversal];
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_EIGHT_ROOT_SHAPES)
-                    const GmIso4 firstShapeWorld =
-                            detail::RootShapeWorldPose(
-                                    firstTraversal,
-                                    shapes,
-                                    candidate,
-                                    bodyPose);
-                    const GmIso4 secondShapeWorld =
-                            detail::RootShapeWorldPose(
-                                    secondTraversal,
-                                    shapes,
-                                    candidate,
-                                    bodyPose);
-#else
                     const GmIso4 firstShapeWorld =
                             detail::ShapeWorldPose(
                                     firstTraversal,
@@ -2390,7 +2321,6 @@ __device__ inline Status Detect(
                                     shapes,
                                     candidate,
                                     bodyPose);
-#endif
                     for (std::uint32_t hitIndex = 0u;
                          hitIndex < scratch.surfaceHitCount;
                          ++hitIndex) {
@@ -2535,15 +2465,9 @@ __device__ inline Status Detect(
                         shapes[shapeIndex];
                 GmIso4 shapeWorld;
                 if constexpr (EightOrderedEllipsoids) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_EIGHT_ROOT_SHAPES)
-                    shapeWorld = detail::RootShapeWorldPose(
-                            shapeIndex, shapes,
-                            candidate, bodyPose);
-#else
                     shapeWorld = detail::ShapeWorldPose(
                             shapeIndex, shapes,
                             candidate, bodyPose);
-#endif
                 } else {
                     shapeWorld =
                             detail::ShapeWorldAt(

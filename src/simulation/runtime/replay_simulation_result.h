@@ -17,6 +17,9 @@ enum class ReplaySimulationRunResult {
     CudaUnavailable,
     CudaInitializationFailed,
     CudaExecutionFailed,
+    TwinUnavailable,
+    TwinNotImplemented,
+    TwinExecutionFailed,
 };
 
 ReplaySimulationRunResult MapReplaySceneResult(

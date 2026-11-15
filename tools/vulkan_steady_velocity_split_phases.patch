@@ -23,7 +23,7 @@
                   ++traversal) {
                  const uint shapeIndex = traversal;
                  {
-@@ -4518,8 +4521,8 @@
+@@ -4518,7 +4521,7 @@
                      bool hasUnifiedMovingBounds = false;
                      GmVec3 unifiedLower;
                      GmVec3 unifiedUpper;
@@ -33,7 +33,6 @@
 +                         traversal < min(collisionShapeCount, traversalEnd);
                           ++traversal) {
                          GmIso4 shapeWorld;
- #if defined(FOREVERVALIDATOR_CUDA_RESEARCH_EIGHT_ROOT_SHAPES)
 @@ -4640,9 +4643,10 @@
                                  cell.surfaceIndex != UINT32_MAX &&
                                  cell.surfaceIndex <

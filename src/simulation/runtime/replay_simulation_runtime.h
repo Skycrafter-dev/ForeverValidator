@@ -95,6 +95,10 @@ public:
     ReplayDynaFrameState CurrentFrame() const;
     ReplayVehicleControlState CurrentControls() const;
     ReplayRaceCameraVehicleState CurrentRaceCameraState() const;
+    // The fraction along start..start+delta of the first static collision
+    // face the segment enters (the race cameras' query), if any.
+    std::optional<float> IntersectStaticSegment(
+            const GmVec3 &start, const GmVec3 &delta) const;
     CSceneVehicleCar::SConditionState CurrentConditionState() const;
     const ReplayRaceProgress &RaceProgress() const;
     std::optional<std::uint32_t> ApplyReplayStuntTimePenalty(

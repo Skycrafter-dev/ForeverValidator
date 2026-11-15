@@ -147,6 +147,16 @@ public:
     const GmIso4 &RespawnLocation() const;
     const ReplayRaceProgress &Progress() const { return progress_; }
     void ClearAcceptedCheckpointEvents() { acceptedCheckpointEvents_.clear(); }
+    // This lap's passed checkpoint slots as bits (slot n: bit n % 32 of
+    // words[n / 32]); slots beyond the words are left out.
+    void PassedCheckpointSlotBits(std::uint32_t *words, std::size_t count) const {
+        for (std::size_t slot = 0u;
+             slot < checkpointSlotsPassed_.size() && slot / 32u < count; ++slot) {
+            if (checkpointSlotsPassed_[slot] != 0u) {
+                words[slot / 32u] |= 1u << (slot % 32u);
+            }
+        }
+    }
     const std::vector<ReplayAcceptedCheckpointEvent> &AcceptedCheckpointEvents() const {
         return acceptedCheckpointEvents_;
     }

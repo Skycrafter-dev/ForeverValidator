@@ -80,7 +80,8 @@ bool ParseCommonConfig(
         const View &view,
         std::size_t bodyOffset,
         CameraCommonConfig *config,
-        std::string *error) {
+        std::string *error,
+        bool requireTarget = true) {
     const auto chunk = FindWord(
             view, bodyOffset, view.size, CommonChunk);
     if (!chunk || !view.Contains(*chunk + 4u, CommonPayloadSize)) {
@@ -98,6 +99,8 @@ bool ParseCommonConfig(
     config->initialFieldOfView = view.F32(payload + 40u);
     config->baseFieldOfView = view.F32(payload + 44u);
     config->ignoreTargetRotation = view.U32(payload + 100u) != 0u;
+
+    if (!requireTarget) return true;
 
     const auto target = FindWord(
             view, payload + CommonPayloadSize, view.size, TargetChunk);
@@ -272,11 +275,13 @@ bool DecodeRace2(
     std::size_t offset = payload + config.smoothers.size() * 12u;
     config.flyingLookRate = view.F32(offset);
     config.loadedAuxiliaryRate = view.F32(offset + 4u);
+    config.orientationMinimumSpeed = config.loadedAuxiliaryRate;
     config.airborneValidationMs = view.U32(offset + 8u);
     config.flyingCameraMoveDelayMs = view.U32(offset + 12u);
     config.flyingModeDelayMs = view.U32(offset + 16u);
-    config.steeringYawTriggerMs = view.U32(offset + 20u);
-    config.steeringRollTriggerMs = view.U32(offset + 24u);
+    // Native archive 0045db50 reads +0x2e4 before +0x2d0.
+    config.steeringRollTriggerMs = view.U32(offset + 20u);
+    config.steeringYawTriggerMs = view.U32(offset + 24u);
     config.steeringInactiveResetMs = view.U32(offset + 28u);
     config.heightRate = view.F32(offset + 32u);
     config.fieldOfViewRate = view.F32(offset + 36u);
@@ -287,9 +292,9 @@ bool DecodeRace2(
         !ParseCurve(view, roots[0], roots[1],
                     &config.flyingLookCurve, error) ||
         !ParseCurve(view, roots[1], roots[2],
-                    &config.yawFromSpeedCurve, error) ||
+                    &config.rollFromSpeedCurve, error) ||
         !ParseCurve(view, roots[2], *flags,
-                    &config.rollFromSpeedCurve, error)) {
+                    &config.yawFromSpeedCurve, error)) {
         return false;
     }
     if (*flags < 16u || !view.Contains(*flags - 16u, 16u)) {
@@ -401,6 +406,14 @@ bool DecodeRaceCameraProfileGbx(
     }
     const View view{bytes, byteCount};
     switch (classId) {
+    case TMNF_CLASS_CGameControlCamera: {
+        CameraCommonConfig config;
+        if (!ParseCommonConfig(view, bodyOffset, &config, error, false)) {
+            return false;
+        }
+        environment->internal = config;
+        return true;
+    }
     case TMNF_CLASS_CGameControlCameraTrackManiaRace:
         return DecodeRace(view, bodyOffset, environment, error);
     case TMNF_CLASS_CGameControlCameraTrackManiaRace2:

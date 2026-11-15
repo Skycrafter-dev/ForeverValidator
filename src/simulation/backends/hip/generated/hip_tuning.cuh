@@ -14,29 +14,8 @@ template<typename T>
 __device__ inline const T *Section(
         const HipPackedStaticConfigurationHeader *configuration,
         const HipStaticConfigurationSection &section) {
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_SESSION_LTO)
-    if constexpr (std::is_same_v<T, HipTuningCurveKey>) {
-        return reinterpret_cast<const T *>(
-                research::ForeverValidatorSessionCurveKeyBytes());
-    }
-#endif
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_CONSTANT_CURVE_KEYS)
-    if constexpr (std::is_same_v<T, HipTuningCurveKey>) {
-        return research::StaticCurveKeys;
-    }
-#endif
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_SESSION_LTO)
-    const auto *base =
-            reinterpret_cast<const unsigned char *>(
-                    research::SessionConfigurationBase());
-#elif defined(FOREVERVALIDATOR_HIP_RESEARCH_CONSTANT_CONFIGURATION)
-    const auto *base =
-            reinterpret_cast<const unsigned char *>(
-                    research::StaticConfigurationBase);
-#else
     const auto *base =
             reinterpret_cast<const unsigned char *>(configuration);
-#endif
     return reinterpret_cast<const T *>(base + section.offset);
 }
 

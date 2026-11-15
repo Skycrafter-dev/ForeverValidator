@@ -35,34 +35,6 @@ struct CudaPackedSceneHeader {
     CudaSceneSection accelerationCells{};
 };
 
-#if defined(__CUDACC__) && \
-        defined(FOREVERVALIDATOR_CUDA_RESEARCH_CONSTANT_SCENE)
-namespace cuda::research {
-
-__device__ __constant__ CudaPackedSceneHeader StaticScene;
-__device__ __constant__ std::uint64_t StaticSceneBase;
-
-}  // namespace cuda::research
-#endif
-
-#if defined(__CUDACC__) && \
-        defined(FOREVERVALIDATOR_CUDA_RESEARCH_SESSION_LTO)
-namespace cuda::research {
-
-extern "C" __device__ std::uint64_t
-ForeverValidatorSessionSceneBase();
-extern "C" __device__ const unsigned char *
-ForeverValidatorSessionSceneBytes();
-extern __device__ __constant__ CudaPackedSceneHeader StaticScene;
-extern __device__ __constant__ std::uint64_t StaticSceneBase;
-
-__device__ inline std::uint64_t SessionSceneBase() {
-    return ForeverValidatorSessionSceneBase();
-}
-
-}  // namespace cuda::research
-#endif
-
 struct CudaSceneTransferMetrics {
     bool success = false;
     std::uint64_t hostPackedBytes = 0u;

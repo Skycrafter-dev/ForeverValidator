@@ -9,35 +9,23 @@ namespace forevervalidator::simulation::cuda::dynamics {
 
 __device__ inline bool IsFrozen(
         const CudaDynamicBodyState &body) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_FULL_ANGULAR_DYNAMICS)
-    return false;
-#else
     return body.dynamicType ==
             static_cast<std::uint32_t>(
                     CHmsDyna::EDynamicType_Frozen);
-#endif
 }
 
 __device__ inline bool IsLinearOnly(
         const CudaDynamicBodyState &body) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_FULL_ANGULAR_DYNAMICS)
-    return false;
-#else
     return body.dynamicType ==
             static_cast<std::uint32_t>(
                     CHmsDyna::EDynamicType_LinearOnly);
-#endif
 }
 
 __device__ inline bool IsFullAngular(
         const CudaDynamicBodyState &body) {
-#if defined(FOREVERVALIDATOR_CUDA_RESEARCH_FULL_ANGULAR_DYNAMICS)
-    return true;
-#else
     return body.dynamicType ==
             static_cast<std::uint32_t>(
                     CHmsDyna::EDynamicType_FullAngularDynamics);
-#endif
 }
 
 namespace detail {

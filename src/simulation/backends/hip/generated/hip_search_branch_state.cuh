@@ -2,7 +2,7 @@
 #ifndef FOREVERVALIDATOR_HIP_SEARCH_BRANCH_STATE_CUH
 #define FOREVERVALIDATOR_HIP_SEARCH_BRANCH_STATE_CUH
 
-#if defined(__HIPCC__)
+#if defined(__HIPCC__) || defined(__HIPCC__)
 #include <hip/hip_runtime.h>
 #define FOREVERVALIDATOR_BRANCH_HD __host__ __device__
 #else

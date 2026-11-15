@@ -49,6 +49,9 @@ const char *ValidationErrorCodeName(ValidationErrorCode code) noexcept {
         return "hip_initialization_failed";
     case ValidationErrorCode::HipExecutionFailed:
         return "hip_execution_failed";
+    case ValidationErrorCode::TwinUnavailable: return "twin_unavailable";
+    case ValidationErrorCode::TwinExecutionFailed:
+        return "twin_execution_failed";
     }
     return "unexpected_failure";
 }
@@ -191,6 +194,11 @@ const char *ValidationFailureReasonName(
     REASON_NAME(HipExecutionFailed, "hip_execution_failed");
     REASON_NAME(HipUnsupportedSimulationScope,
                 "hip_unsupported_simulation_scope");
+    REASON_NAME(TwinNotCompiled, "twin_not_compiled");
+    REASON_NAME(TwinNotImplemented, "twin_not_implemented");
+    REASON_NAME(TwinUnsupportedSimulationScope,
+                "twin_unsupported_simulation_scope");
+    REASON_NAME(TwinExecutionFailed, "twin_execution_failed");
     REASON_NAME(SerializationFailed, "serialization_failed");
     REASON_NAME(UnexpectedFailure, "unexpected_failure");
     }
@@ -346,6 +354,8 @@ int ValidationErrorExitCode(const ValidationError &error) noexcept {
     case ValidationErrorCode::HipUnavailable: return 69;
     case ValidationErrorCode::HipInitializationFailed: return 70;
     case ValidationErrorCode::HipExecutionFailed: return 71;
+    case ValidationErrorCode::TwinUnavailable: return 69;
+    case ValidationErrorCode::TwinExecutionFailed: return 71;
     case ValidationErrorCode::SerializationFailed: return 22;
     case ValidationErrorCode::AllocationFailed:
         return error.stage == ValidationStage::Serialization ? 22 : 5;

@@ -1,18 +1,9 @@
 // Generated from src/simulation/backends/cuda/cuda_search_executor.cu by tools/hipify_backend.py. Do not edit.
 #include "hip/hip_runtime.h"
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_SESSION_LTO)
-#define FOREVERVALIDATOR_HIP_RESEARCH_WHEEL_FORCE_MODE 2u
-#define FOREVERVALIDATOR_HIP_RESEARCH_STEADY_INTEGRATION
-#define FOREVERVALIDATOR_HIP_RESEARCH_FULL_ANGULAR_DYNAMICS
-#define FOREVERVALIDATOR_HIP_RESEARCH_ONE_UNIFORM_FORCE_FIELD
-#define FOREVERVALIDATOR_HIP_RESEARCH_EIGHT_ROOT_SHAPES
-#define FOREVERVALIDATOR_HIP_RESEARCH_FOUR_WHEELS
-#define FOREVERVALIDATOR_HIP_RESEARCH_CANONICAL_WHEEL_FACTS
-#define FOREVERVALIDATOR_HIP_RESEARCH_WATER_ONLY
-#endif
 
 #include "simulation/backends/hip/generated/hip_search_executor.h"
 #include "simulation/backends/hip/hip_search_arch_adapter.h"
+#include <forevervalidator/experimental/around_walls_table.h>
 #include "simulation/backends/gpu_memory_budget.h"
 
 #include <hip/hip_runtime.h>
@@ -27,6 +18,7 @@
 #include <cstring>
 #include <limits>
 #include <new>
+#include <string>
 #include <thread>
 #include <tuple>
 #include <type_traits>
@@ -41,7 +33,6 @@
 #include "simulation/backends/hip/generated/hip_physics_step.cuh"
 #include "simulation/backends/hip/generated/hip_static_configuration.h"
 #include "simulation/backends/hip/generated/hip_scene_layout.h"
-#include "simulation/backends/hip/generated/hip_session_specialization.h"
 #include "simulation/backends/hip/generated/hip_search_branch_state.cuh"
 #include "simulation/backends/hip/generated/hip_search_segments.cuh"
 #include "simulation/backends/hip/generated/hip_search_winner_selection.cuh"
@@ -50,51 +41,17 @@
 
 namespace forevervalidator::simulation {
 
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_SESSION_LTO)
-extern "C" __device__
-HipPackedStaticConfigurationHeader
-ForeverValidatorSessionConfiguration();
-extern "C" __device__
-HipPackedSceneHeader ForeverValidatorSessionScene();
-#endif
 
 namespace {
 
 constexpr std::uint32_t SimulationBlockSize = 32u;
-constexpr std::uint32_t ThroughputKernelMinimumBlocksPerSm = 16u;
-constexpr std::uint32_t TailKernelMinimumBlocksPerSm = 17u;
-constexpr std::uint32_t DenseTailKernelMinimumBlocksPerSm = 24u;
+// One kernel for every batch size: within 1% of a 16-block (more registers)
+// build on full GPUs, and a third faster on small batches (warp-coherent
+// acceleration). Measured on Stadium, 4k-32k candidates.
+constexpr std::uint32_t SimulationKernelMinimumBlocksPerSm = 17u;
 // Keep the state immediately before the most recent unfinished tick. Exact
 // finish refinement then replays one tick instead of a long timeline suffix.
 constexpr std::uint32_t FinishCheckpointInvalidTick = UINT32_MAX;
-
-template<typename... Arguments, std::size_t... Indices>
-hipError_t LaunchDriverKernelImpl(
-        hipFunction_t function,
-        std::uint32_t blocks,
-        std::tuple<Arguments...> &arguments,
-        std::index_sequence<Indices...>) {
-    std::array<void *, sizeof...(Arguments)> pointers{
-            static_cast<void *>(&std::get<Indices>(arguments))...};
-    return hipModuleLaunchKernel(
-            function,
-            blocks, 1u, 1u,
-            SimulationBlockSize, 1u, 1u,
-            0u, nullptr, pointers.data(), nullptr);
-}
-
-template<typename... Arguments>
-hipError_t LaunchDriverKernel(
-        hipFunction_t function,
-        std::uint32_t blocks,
-        Arguments... arguments) {
-    std::tuple<Arguments...> storage(arguments...);
-    return LaunchDriverKernelImpl(
-            function,
-            blocks,
-            storage,
-            std::index_sequence_for<Arguments...>{});
-}
 
 template<typename... Arguments, std::size_t... Indices>
 hipError_t LaunchRuntimeKernelImpl(
@@ -158,6 +115,18 @@ struct DeviceBatchSummary {
     std::uint32_t bestMutationCount = 0u;
 };
 
+// Why the last allocation of this thread was refused (for the diagnostic).
+thread_local std::string lastAllocationRefusal;
+
+void RefuseAllocation(const char *what, std::size_t bytes, std::size_t available,
+                      std::size_t total, hipError_t error) {
+    char text[200];
+    std::snprintf(text, sizeof(text), "%s of %.1f MiB with %.1f of %.1f MiB free%s%s", what,
+                  bytes / 1048576.0, available / 1048576.0, total / 1048576.0,
+                  error != hipSuccess ? ": " : "", error != hipSuccess ? hipGetErrorString(error) : "");
+    lastAllocationRefusal = text;
+}
+
 template<typename T>
 class DeviceAllocation {
 public:
@@ -183,17 +152,21 @@ public:
             return true;
         }
         if (count > std::numeric_limits<std::size_t>::max() / sizeof(T)) {
+            RefuseAllocation("an impossible size", 0u, 0u, 0u, hipSuccess);
             return false;
         }
         std::size_t available = 0, total = 0;
-        if (hipMemGetInfo(&available, &total) != hipSuccess ||
+        const hipError_t info = hipMemGetInfo(&available, &total);
+        if (info != hipSuccess ||
             !GpuAllocationFitsBudget(count * sizeof(T), available, total)) {
+            RefuseAllocation("device memory", count * sizeof(T), available, total, info);
             return false;
         }
-        if (hipMalloc(
-                    reinterpret_cast<void **>(&data_),
-                    count * sizeof(T)) != hipSuccess) {
+        const hipError_t error = hipMalloc(
+                reinterpret_cast<void **>(&data_), count * sizeof(T));
+        if (error != hipSuccess) {
             data_ = nullptr;
+            RefuseAllocation("device memory", count * sizeof(T), available, total, error);
             return false;
         }
         count_ = count;
@@ -226,17 +199,29 @@ public:
 
     bool Allocate() {
         Reset();
-        if (hipHostAlloc(
-                    reinterpret_cast<void **>(&host_),
-                    sizeof(*host_),
-                    hipHostMallocMapped | hipHostMallocPortable) !=
-            hipSuccess) {
+        // The kernels poll it while they run: on AMD it must be fine-grained
+        // (coherent), else a kernel may read a cached 0 until it ends.
+#if defined(__HIP_PLATFORM_AMD__)
+        // hipHostMalloc: hipHostAlloc refuses the coherent flag (ROCm 7.2,
+        // "invalid argument")
+        const hipError_t error = hipHostMalloc(
+                reinterpret_cast<void **>(&host_), sizeof(*host_),
+                hipHostMallocMapped | hipHostMallocPortable | hipHostMallocCoherent);
+#else
+        const hipError_t error = hipHostAlloc(
+                reinterpret_cast<void **>(&host_), sizeof(*host_),
+                hipHostMallocMapped | hipHostMallocPortable);
+#endif
+        if (error != hipSuccess) {
+            host_ = nullptr;
+            RefuseAllocation("mapped host memory", sizeof(*host_), 0u, 0u, error);
             return false;
         }
-        if (hipHostGetDevicePointer(
-                    reinterpret_cast<void **>(&device_),
-                    host_, 0u) != hipSuccess) {
+        const hipError_t mapped = hipHostGetDevicePointer(
+                reinterpret_cast<void **>(&device_), host_, 0u);
+        if (mapped != hipSuccess) {
             Reset();
+            RefuseAllocation("mapping host memory", sizeof(*host_), 0u, 0u, mapped);
             return false;
         }
         *host_ = 0u;
@@ -1838,17 +1823,17 @@ __device__ bool SegmentEntry(
             }
             continue;
         }
-        double near =
+        double low =
                 (evaluator.values[axis] - fromValues[axis]) / delta;
-        double far =
+        double high =
                 (evaluator.values[axis + 3u] - fromValues[axis]) / delta;
-        if (near > far) {
-            const double swap = near;
-            near = far;
-            far = swap;
+        if (low > high) {
+            const double swap = low;
+            low = high;
+            high = swap;
         }
-        enter = enter > near ? enter : near;
-        leave = leave < far ? leave : far;
+        enter = enter > low ? enter : low;
+        leave = leave < high ? leave : high;
         if (enter > leave) {
             return false;
         }
@@ -1917,8 +1902,9 @@ __device__ DeviceConditionValue ConditionSource(
         double currentTimeSeconds) {
     const CHmsDyna::CHmsStateDyna &current = state.body.current;
     const CHmsDyna::CHmsStateDyna &previous = state.body.temporary;
-    const GmVec3 currentLocal =
-            state.vehicle.frameHistory.physicsCurrent.localLinearSpeed;
+    // From the body, as the previous tick's: the vehicle's frame history
+    // held 0 (car.localvel read 0 everywhere).
+    const GmVec3 currentLocal = ConditionLocalSpeed(current);
     const GmVec3 previousLocal = ConditionLocalSpeed(previous);
     const auto vector = [](const GmVec3 &value) {
         return DeviceConditionValue{value.x, value.y, value.z, true};
@@ -2148,10 +2134,226 @@ __device__ bool UpdateScriptedSample(
     return true;
 }
 
+// Speed at a fraction of the tick, as the interpolated entry time is.
+__device__ inline double EntrySpeed(const GmVec3 &previous,
+                                    const GmVec3 &current,
+                                    double fraction) {
+    const double x = previous.x + (current.x - previous.x) * fraction;
+    const double y = previous.y + (current.y - previous.y) * fraction;
+    const double z = previous.z + (current.z - previous.z) * fraction;
+    return sqrt((x * x + y * y) + z * z);
+}
+
+namespace distance_target {
+
+struct Vec {
+    double x;
+    double y;
+    double z;
+};
+
+__device__ inline Vec Add(Vec a, Vec b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+__device__ inline Vec Sub(Vec a, Vec b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+__device__ inline Vec Mul(Vec a, double s) { return {a.x * s, a.y * s, a.z * s}; }
+__device__ inline double Dot(Vec a, Vec b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+__device__ inline Vec Cross(Vec a, Vec b) {
+    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+
+// q * v * conjugate(q), q = (x, y, z, w).
+__device__ inline Vec Rotate(double qx, double qy, double qz, double qw, Vec v) {
+    const Vec axis{qx, qy, qz};
+    const Vec t = Mul(Cross(axis, v), 2.0);
+    return Add(Add(v, Mul(t, qw)), Cross(axis, t));
+}
+
+// Closest point of triangle abc to the origin (Ericson 5.1.5).
+__device__ inline Vec ClosestToOrigin(Vec a, Vec b, Vec c) {
+    const Vec ab = Sub(b, a);
+    const Vec ac = Sub(c, a);
+    const double d1 = -Dot(ab, a);
+    const double d2 = -Dot(ac, a);
+    if (d1 <= 0.0 && d2 <= 0.0) return a;
+    const double d3 = -Dot(ab, b);
+    const double d4 = -Dot(ac, b);
+    if (d3 >= 0.0 && d4 <= d3) return b;
+    const double vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0) return Add(a, Mul(ab, d1 / (d1 - d3)));
+    const double d5 = -Dot(ab, c);
+    const double d6 = -Dot(ac, c);
+    if (d6 >= 0.0 && d5 <= d6) return c;
+    const double vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0) return Add(a, Mul(ac, d2 / (d2 - d6)));
+    const double va = d3 * d6 - d5 * d4;
+    if (va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0) {
+        return Add(b, Mul(Sub(c, b), (d4 - d3) / ((d4 - d3) + (d5 - d6))));
+    }
+    const double denominator = 1.0 / (va + vb + vc);
+    return Add(a, Add(Mul(ab, vb * denominator), Mul(ac, vc * denominator)));
+}
+
+// One trigger's triangles against the car's collision shapes, each shape a
+// unit sphere once the triangles are moved into its frame and scaled by its
+// radii (distance_target_evaluator.cpp in ForeverTAS).
+__device__ inline double TriggerDistance(
+        const HipSearchEvaluatorConfiguration &evaluator,
+        const double *trigger,
+        const Vec &p,
+        const GmQuat &rotation) {
+    double best = 1e300;
+    const std::uint32_t first = static_cast<std::uint32_t>(trigger[1]);
+    const std::uint32_t count = static_cast<std::uint32_t>(trigger[2]);
+    for (std::uint32_t s = 0u; s < evaluator.distanceShapeCount; ++s) {
+        const double *shape = evaluator.distanceShapes[s];
+        const Vec center = Add(p, Rotate(rotation.x, rotation.y, rotation.z,
+                                         rotation.w, {shape[0], shape[1], shape[2]}));
+        // orientation = rotation * shape rotation
+        const double ax = rotation.x, ay = rotation.y, az = rotation.z, aw = rotation.w;
+        const double bx = shape[3], by = shape[4], bz = shape[5], bw = shape[6];
+        const double ox = aw * bx + ax * bw + ay * bz - az * by;
+        const double oy = aw * by - ax * bz + ay * bw + az * bx;
+        const double oz = aw * bz + ax * by - ay * bx + az * bw;
+        const double ow = aw * bw - ax * bx - ay * by - az * bz;
+        const Vec inverseRadii{1.0 / shape[7], 1.0 / shape[8], 1.0 / shape[9]};
+        for (std::uint32_t t = first; t < first + count; ++t) {
+            const double *triangle = evaluator.distanceTriangles[t];
+            Vec corners[3];
+            for (int c = 0; c < 3; ++c) {
+                const Vec local = Rotate(-ox, -oy, -oz, ow,
+                        Sub({triangle[c * 3], triangle[c * 3 + 1], triangle[c * 3 + 2]},
+                            center));
+                corners[c] = {local.x * inverseRadii.x, local.y * inverseRadii.y,
+                              local.z * inverseRadii.z};
+            }
+            const Vec closest = ClosestToOrigin(corners[0], corners[1], corners[2]);
+            const double length = sqrt(Dot(closest, closest));
+            if (length <= 1.0) return 0.0;
+            const Vec gap = Sub(closest, Mul(closest, 1.0 / length));
+            const Vec metres{gap.x * shape[7], gap.y * shape[8], gap.z * shape[9]};
+            best = fmin(best, sqrt(Dot(metres, metres)));
+        }
+    }
+    return best;
+}
+
+__device__ inline bool SlotPassed(const HipCheckpointSlots &slots,
+                                  std::uint32_t slot) {
+    return slot / 32u < HipCheckpointSlots::WordCount &&
+            ((slots.words[slot / 32u] >> (slot % 32u)) & 1u) != 0u;
+}
+
+// How far the car's shapes reach from its body centre along a unit
+// direction (support function of the ellipsoids; ForeverTAS's Reach).
+__device__ inline double BodyReach(const HipSearchEvaluatorConfiguration &evaluator,
+                                   const GmQuat &rotation, Vec direction) {
+    const Vec local = Rotate(-rotation.x, -rotation.y, -rotation.z, rotation.w, direction);
+    double farthest = 0.0;
+    for (std::uint32_t s = 0u; s < evaluator.distanceShapeCount; ++s) {
+        const double *shape = evaluator.distanceShapes[s];
+        const Vec inShape = Rotate(-shape[3], -shape[4], -shape[5], shape[6], local);
+        const Vec scaled{inShape.x * shape[7], inShape.y * shape[8], inShape.z * shape[9]};
+        const Vec offset{shape[0] - evaluator.bodyCenter[0], shape[1] - evaluator.bodyCenter[1],
+                         shape[2] - evaluator.bodyCenter[2]};
+        farthest = fmax(farthest, Dot(offset, local) + sqrt(Dot(scaled, scaled)));
+    }
+    return farthest;
+}
+
+// Around walls: the car's way to one trigger, never shorter than straight
+// (ForeverTAS's DistanceSession::Observe).
+__device__ inline double AroundDistance(const HipSearchEvaluatorConfiguration &evaluator,
+                                        std::uint32_t trigger, double straight,
+                                        const Vec &p, const GmQuat &rotation) {
+    const Vec body = Add(p, Rotate(rotation.x, rotation.y, rotation.z, rotation.w,
+                                   {evaluator.bodyCenter[0], evaluator.bodyCenter[1],
+                                    evaluator.bodyCenter[2]}));
+    const experimental::around_walls::Path path = experimental::around_walls::PathTo(
+            evaluator.aroundWalls + evaluator.aroundWallsOffsets[trigger], body.x, body.y,
+            body.z);
+    // Near a trigger in plain sight, the exact distance.
+    if (path.inSight && straight <= 4.0) return straight;
+    // The path starts at the sphere; the body reaches farther towards
+    // where it first bends (or the trigger).
+    const Vec toward = Sub({path.via[0], path.via[1], path.via[2]}, body);
+    const double span = sqrt(Dot(toward, toward));
+    const double reach = span > 1e-9 ? BodyReach(evaluator, rotation, Mul(toward, 1.0 / span))
+                                     : evaluator.bodyRadius;
+    const double around = path.length - fmin(span, fmax(0.0, reach - evaluator.bodyRadius));
+    return fmax(straight, around);
+}
+
+// The closest the car is to the target's triggers: the slot's, or with any
+// slot the checkpoints not taken yet this lap (all once every one is).
+// Far from a trigger its box stands in.
+__device__ inline double CarDistance(
+        const HipSearchEvaluatorConfiguration &evaluator,
+        const HipCheckpointSlots &passed,
+        const GmVec3 &position,
+        const GmQuat &rotation) {
+    const Vec p{position.x, position.y, position.z};
+    const bool anySlot = evaluator.values[0] == 0.0 && evaluator.values[3] < 0.0;
+    bool anyOpen = false;
+    for (std::uint32_t i = 0u; i < evaluator.distanceTriggerCount; ++i) {
+        const double slot = evaluator.distanceTriggers[i][0];
+        anyOpen |= slot < 0.0 || !SlotPassed(passed, static_cast<std::uint32_t>(slot));
+    }
+    double straight[HipSearchMaximumDistanceTriggers];
+    double best = 1e300;
+    for (std::uint32_t i = 0u; i < evaluator.distanceTriggerCount; ++i) {
+        const double *trigger = evaluator.distanceTriggers[i];
+        straight[i] = 1e300;
+        if (anySlot && anyOpen && trigger[0] >= 0.0 &&
+            SlotPassed(passed, static_cast<std::uint32_t>(trigger[0]))) {
+            continue;
+        }
+        const double dx = fmax(fmax(trigger[3] - p.x, 0.0), p.x - trigger[6]);
+        const double dy = fmax(fmax(trigger[4] - p.y, 0.0), p.y - trigger[7]);
+        const double dz = fmax(fmax(trigger[5] - p.z, 0.0), p.z - trigger[8]);
+        const double coarse = sqrt(dx * dx + dy * dy + dz * dz) - evaluator.values[6];
+        straight[i] = coarse > 4.0 ? coarse : TriggerDistance(evaluator, trigger, p, rotation);
+        best = fmin(best, straight[i]);
+    }
+    if (evaluator.aroundWalls == nullptr) return best;
+    // Around walls: straight-nearest first; the way around is never
+    // shorter, so a trigger straight-farther than the best way so far is
+    // not measured.
+    best = 1e300;
+    for (;;) {
+        std::uint32_t next = evaluator.distanceTriggerCount;
+        for (std::uint32_t i = 0u; i < evaluator.distanceTriggerCount; ++i) {
+            if (straight[i] < 1e300 &&
+                (next == evaluator.distanceTriggerCount || straight[i] < straight[next])) {
+                next = i;
+            }
+        }
+        if (next == evaluator.distanceTriggerCount || straight[next] >= best) break;
+        best = fmin(best, AroundDistance(evaluator, next, straight[next], p, rotation));
+        straight[next] = 1e300;
+    }
+    return best;
+}
+
+// Checkpoints (and finishes) still to come before the target.
+__device__ inline double EventsBeforeTarget(
+        const HipSearchEvaluatorConfiguration &evaluator,
+        const ReplayRaceProgress &progress) {
+    const double perLap = static_cast<double>(progress.requiredCheckpointCount) + 1.0;
+    const double target = (evaluator.values[2] - 1.0) * perLap +
+            (evaluator.values[0] != 0.0
+                     ? static_cast<double>(progress.requiredCheckpointCount)
+                     : evaluator.values[1]);
+    const double done = static_cast<double>(progress.completedLapCount) * perLap +
+            static_cast<double>(progress.currentLapCheckpointCount);
+    return fmax(target - done, 0.0);
+}
+
+}  // namespace distance_target
+
 __device__ DeviceSample EvaluateState(
         const HipSearchEvaluatorConfiguration &evaluator,
         const HipCandidatePhysicsState &state,
         const GmVec3 &previousPosition,
+        const GmVec3 &previousVelocity,
         double previousTimeMs,
         double currentTimeMs,
         std::uint32_t stuntsScore,
@@ -2166,22 +2368,35 @@ __device__ DeviceSample EvaluateState(
         const double y = velocity.y;
         const double z = velocity.z;
         const double speed = sqrt((x * x + y * y) + z * z);
+        double ax = evaluator.values[0];
+        double ay = evaluator.values[1];
+        double az = evaluator.values[2];
+        if ((evaluator.optionFlags & HipSearchVelocityTowardsPoint) != 0u) {
+            ax = evaluator.values[4] - static_cast<double>(position.x);
+            ay = evaluator.values[5] - static_cast<double>(position.y);
+            az = evaluator.values[6] - static_cast<double>(position.z);
+            const double length = sqrt((ax * ax + ay * ay) + az * az);
+            if (length <= 1e-12) {
+                ax = 0.0;
+                ay = 0.0;
+                az = 0.0;
+            } else {
+                ax /= length;
+                ay /= length;
+                az /= length;
+            }
+        }
         double alignment = 1.0;
         if ((evaluator.optionFlags & 3u) != 0u) {
             alignment = speed <= 1e-12
                     ? 0.0
-                    : (x * evaluator.values[0] +
-                       y * evaluator.values[1] +
-                       z * evaluator.values[2]) /
-                              speed;
+                    : (x * ax + y * ay + z * az) / speed;
             if (alignment < evaluator.values[3]) {
                 return result;
             }
         }
         result.score = (evaluator.optionFlags & 1u) != 0u
-                ? x * evaluator.values[0] +
-                          y * evaluator.values[1] +
-                          z * evaluator.values[2]
+                ? x * ax + y * ay + z * az
                 : speed;
         result.detail0 = speed;
         result.detail1 = alignment;
@@ -2207,15 +2422,37 @@ __device__ DeviceSample EvaluateState(
         const double z = static_cast<double>(position.z) -
                 evaluator.values[2];
         const double positionError =
-                sqrt((x * x + y * y) + z * z);
+                sqrt((evaluator.values[8] * x * x +
+                      evaluator.values[9] * y * y) +
+                     evaluator.values[10] * z * z);
+        // conjugate(target) * car, as a rotation vector in the target's
+        // axes: x pitch, y yaw, z roll (pose_target_evaluator.cpp).
         const GmQuat &rotation = state.body.current.rotationQuat;
-        double dot = fabs(
-                evaluator.values[3] * rotation.x +
-                evaluator.values[4] * rotation.y +
-                evaluator.values[5] * rotation.z +
-                evaluator.values[6] * rotation.w);
-        dot = dot < 0.0 ? 0.0 : (dot > 1.0 ? 1.0 : dot);
-        const double rotationError = 2.0 * acos(dot);
+        const double tx = -evaluator.values[3];
+        const double ty = -evaluator.values[4];
+        const double tz = -evaluator.values[5];
+        const double tw = evaluator.values[6];
+        double rx = tw * rotation.x + tx * rotation.w + ty * rotation.z - tz * rotation.y;
+        double ry = tw * rotation.y - tx * rotation.z + ty * rotation.w + tz * rotation.x;
+        double rz = tw * rotation.z + tx * rotation.y - ty * rotation.x + tz * rotation.w;
+        double rw = tw * rotation.w - tx * rotation.x - ty * rotation.y - tz * rotation.z;
+        if (rw < 0.0) {
+            rx = -rx;
+            ry = -ry;
+            rz = -rz;
+            rw = -rw;
+        }
+        const double sine = sqrt((rx * rx + ry * ry) + rz * rz);
+        double rotationError = 0.0;
+        if (sine > 1e-12) {
+            const double scale = 2.0 * atan2(sine, rw) / sine;
+            rx *= scale;
+            ry *= scale;
+            rz *= scale;
+            rotationError = sqrt((evaluator.values[12] * rx * rx +
+                                  evaluator.values[11] * ry * ry) +
+                                 evaluator.values[13] * rz * rz);
+        }
         result.score =
                 (1.0 - evaluator.values[7]) * positionError +
                 evaluator.values[7] * rotationError;
@@ -2237,7 +2474,10 @@ __device__ DeviceSample EvaluateState(
             *reported = true;
             result.timeMs = previousTimeMs +
                     fraction * (currentTimeMs - previousTimeMs);
-            result.score = result.timeMs;
+            result.score = (evaluator.optionFlags & HipSearchEntrySpeed) != 0u
+                    ? EntrySpeed(previousVelocity,
+                                 state.body.current.linearSpeed, fraction)
+                    : result.timeMs;
             result.valid = true;
         }
         break;
@@ -2253,7 +2493,23 @@ __device__ DeviceSample EvaluateState(
                     position.x, position.y, position.z, &fraction)) return result;
         *reported = true;
         result.timeMs = previousTimeMs + fraction * (currentTimeMs - previousTimeMs);
-        result.score = result.timeMs;
+        result.score = (evaluator.optionFlags & HipSearchEntrySpeed) != 0u
+                ? EntrySpeed(previousVelocity, state.body.current.linearSpeed,
+                             fraction)
+                : result.timeMs;
+        result.valid = true;
+        break;
+    }
+    case HipSearchEvaluatorKind::Distance: {
+        // Reaching the target is handled with the checkpoint counters
+        // before this; here only the closest distance so far counts.
+        const double distance = fmax(distance_target::CarDistance(
+                evaluator, state.race.checkpointSlotsPassed, position,
+                state.body.current.rotationQuat), 0.0);
+        result.score = 1e12 +
+                distance_target::EventsBeforeTarget(evaluator, state.race.progress) * 1e6 +
+                distance;
+        result.detail0 = distance;
         result.valid = true;
         break;
     }
@@ -2390,11 +2646,24 @@ __device__ bool CheckpointEventAccepted(
             CheckpointSlotOfBlock(scene, after.lastAcceptedBlockId) == slot;
 }
 
+// Whether this tick reached the Distance target: its selectors are the
+// CheckpointEvent ones.
+__device__ bool DistanceTargetReached(
+        const HipSearchEvaluatorConfiguration &evaluator,
+        const HipCandidatePhysicsState &state,
+        const CheckpointProgressBefore &before,
+        const HipPackedSceneHeader *scene) {
+    return CheckpointEventAccepted(evaluator, state, before, scene);
+}
+
 __host__ __device__ bool MaximizesScore(
-        HipSearchEvaluatorKind kind) {
+        HipSearchEvaluatorKind kind, std::uint32_t optionFlags) {
     return kind == HipSearchEvaluatorKind::Velocity ||
             kind == HipSearchEvaluatorKind::StuntPoints ||
-            kind == HipSearchEvaluatorKind::ConditionTimeLatest;
+            kind == HipSearchEvaluatorKind::ConditionTimeLatest ||
+            ((kind == HipSearchEvaluatorKind::VolumeEntry ||
+              kind == HipSearchEvaluatorKind::CustomVolumeEntry) &&
+             (optionFlags & HipSearchEntrySpeed) != 0u);
 }
 
 __global__ void SeedCandidateBestSamplesKernel(
@@ -2985,12 +3254,10 @@ __device__ State LoadSearchState(
 template <
         typename State,
         bool SimulateStunts,
-        bool SteadyTimeline,
-        HipHandlingSpecialization Handling,
-        std::uint32_t MinimumBlocksPerSm>
+        HipHandlingSpecialization Handling>
 __global__ FOREVERVALIDATOR_HIP_SEARCH_LAUNCH_BOUNDS(
         SimulationBlockSize,
-        MinimumBlocksPerSm) void SimulateSearchCandidatesKernel(
+        SimulationKernelMinimumBlocksPerSm) void SimulateSearchCandidatesKernel(
         const void *__restrict__ sceneData,
         const void *__restrict__ configurationData,
         const HipCandidateState *__restrict__ branchState,
@@ -3045,19 +3312,6 @@ __global__ FOREVERVALIDATOR_HIP_SEARCH_LAUNCH_BOUNDS(
         std::uint32_t scratchStride,
         std::uint32_t shapeCapacity,
         const std::uint32_t *__restrict__ cancellation) {
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_SESSION_LTO)
-    sceneData = reinterpret_cast<const HipPackedSceneHeader *>(
-            hip::research::ForeverValidatorSessionSceneBytes());
-    configurationData =
-            reinterpret_cast<
-                    const HipPackedStaticConfigurationHeader *>(
-                    hip::research::
-                            ForeverValidatorSessionConfigurationBytes());
-#elif defined(FOREVERVALIDATOR_HIP_RESEARCH_WATER_ONLY)
-    sceneData = &hip::research::StaticScene;
-    configurationData =
-            &hip::research::StaticConfiguration;
-#endif
     const std::uint32_t slot =
             blockIdx.x * blockDim.x + threadIdx.x;
     if (slot >= candidateCount || !activeCandidates[slot]) {
@@ -3116,7 +3370,7 @@ __global__ FOREVERVALIDATOR_HIP_SEARCH_LAUNCH_BOUNDS(
             responseOrderScratch;
     DeviceControlState controlState = *mutableBoundaryControls;
     bool evaluatorReported = false;
-    const bool maximize = MaximizesScore(configuredEvaluator.kind);
+    const bool maximize = MaximizesScore(configuredEvaluator.kind, configuredEvaluator.optionFlags);
     DeviceSample localBest;
     std::uint32_t evaluationIndex = 0u;
     if (finishCheckpointTicks != nullptr) {
@@ -3154,6 +3408,7 @@ __global__ FOREVERVALIDATOR_HIP_SEARCH_LAUNCH_BOUNDS(
             }
         }
         const GmVec3 previousPosition = state.body.current.position;
+        const GmVec3 previousVelocity = state.body.current.linearSpeed;
         const CheckpointProgressBefore checkpointBefore{
                 state.race.progress.currentLapCheckpointCount,
                 state.race.progress.totalCheckpointEventCount,
@@ -3161,49 +3416,39 @@ __global__ FOREVERVALIDATOR_HIP_SEARCH_LAUNCH_BOUNDS(
                 state.race.progress.finishCount};
         ApplyControlPrefix(state, tick);
         if (!state.firstStep) {
-            if constexpr (SteadyTimeline) {
-                hip::transition::PrepareSteadyStep(state, tick);
-            } else {
-                hip::transition::PrepareStep(
-                        state, tick,
-                        static_cast<const
-                                HipPackedStaticConfigurationHeader *>(
-                                configurationData));
-            }
+            hip::transition::PrepareStep(
+                    state, tick,
+                    static_cast<const
+                            HipPackedStaticConfigurationHeader *>(
+                            configurationData));
         }
         state.vehicle.mobil.absorbContactEnabled = true;
-        if constexpr (SteadyTimeline) {
-            state.vehicle.mobil.physicsUpdatesEnabled = true;
-        } else {
-            state.vehicle.mobil.physicsUpdatesEnabled =
-                    (tick.actionFlags &
-                     HipControlActionSuppressVehicleForceCallbacks) ==
-                    0u;
-            for (std::uint32_t respawn = 0u;
-                 respawn < tick.respawnAtCheckpointCount; ++respawn) {
-                if (hip::transition::Respawn(
-                            state,
-                            static_cast<const
-                                    HipPackedStaticConfigurationHeader *>(
-                                    configurationData))) {
-                    ++state.incrementalRespawnCount;
-                    if constexpr (SimulateStunts) {
-                        hip::stunts::ApplyRespawnPenalty(
-                                state.stunts);
-                    }
+        state.vehicle.mobil.physicsUpdatesEnabled =
+                (tick.actionFlags &
+                 HipControlActionSuppressVehicleForceCallbacks) ==
+                0u;
+        for (std::uint32_t respawn = 0u;
+             respawn < tick.respawnAtCheckpointCount; ++respawn) {
+            if (hip::transition::Respawn(
+                        state,
+                        static_cast<const
+                                HipPackedStaticConfigurationHeader *>(
+                                configurationData))) {
+                ++state.incrementalRespawnCount;
+                if constexpr (SimulateStunts) {
+                    hip::stunts::ApplyRespawnPenalty(
+                            state.stunts);
                 }
             }
         }
         const hip::physics::Status physicsStatus =
                 hip::physics::Step<
                         false,
-                        (MinimumBlocksPerSm >
-                         1u),
                         true,
                         true,
                         true,
-                        (MinimumBlocksPerSm !=
-                         ThroughputKernelMinimumBlocksPerSm),
+                        true,
+                        true,
                         SimulateStunts,
                         Handling>(
                         static_cast<const HipPackedSceneHeader *>(
@@ -3265,6 +3510,31 @@ __global__ FOREVERVALIDATOR_HIP_SEARCH_LAUNCH_BOUNDS(
             continue;
         }
         if (configuredEvaluator.kind ==
+                    HipSearchEvaluatorKind::Distance &&
+            DistanceTargetReached(
+                    configuredEvaluator, state, checkpointBefore,
+                    static_cast<const HipPackedSceneHeader *>(sceneData))) {
+            DeviceSample sample{};
+            sample.score = static_cast<double>(publicTime);
+            sample.timeMs = static_cast<double>(publicTime);
+            sample.candidateId = candidateId;
+            sample.candidateSlot = slot;
+            sample.evaluationTick = evaluationIndex;
+            sample.eventCount = eventCount;
+            sample.logicalOrder =
+                    1u +
+                    static_cast<std::uint64_t>(slot) *
+                            evaluationTickCount +
+                    evaluationIndex;
+            sample.mutation = !baseline;
+            sample.valid = true;
+            if (StrictlyBetter(sample, localBest, maximize)) {
+                localBest = sample;
+            }
+            candidateBestSamples[slot + 1u] = localBest;
+            return;
+        }
+        if (configuredEvaluator.kind ==
             HipSearchEvaluatorKind::CheckpointEvent) {
             if (CheckpointEventAccepted(
                         configuredEvaluator, state, checkpointBefore,
@@ -3296,7 +3566,7 @@ __global__ FOREVERVALIDATOR_HIP_SEARCH_LAUNCH_BOUNDS(
             stuntsScore = state.stunts.stuntsScore;
         }
         DeviceSample sample = EvaluateState(
-                configuredEvaluator, state, previousPosition,
+                configuredEvaluator, state, previousPosition, previousVelocity,
                 static_cast<double>(publicTime - tickDurationMs),
                 static_cast<double>(publicTime),
                 stuntsScore,
@@ -3918,7 +4188,6 @@ struct HipSearchExecutor::Impl {
     bool needsTemporaryEvents = true;
     bool needsPassBaselineEvents = true;
     bool needsEligibleIndices = true;
-    bool steadyTimeline = false;
     std::uint32_t compactInputCount = 0u;
     std::uint32_t sharedEligibleCount = 0u;
     std::uint32_t editCapacity = 0u;
@@ -3927,11 +4196,7 @@ struct HipSearchExecutor::Impl {
     std::uint32_t multiprocessorCount = 0u;
     HipHandlingSpecialization handlingSpecialization =
             HipHandlingSpecialization::Generic;
-    SimulationKernelMetrics throughputKernelMetrics;
-    SimulationKernelMetrics tailKernelMetrics;
-    SimulationKernelMetrics denseTailKernelMetrics;
-    std::shared_ptr<const hip::specialization::SessionModule>
-            specializedModule;
+    SimulationKernelMetrics simulationKernelMetrics;
 
     DeviceAllocation<HipCandidateState> branchState;
     DeviceAllocation<DeviceControlState> mutableBoundaryControls;
@@ -3941,6 +4206,9 @@ struct HipSearchExecutor::Impl {
     DeviceAllocation<HipSearchMutationSegment> mutationSegments;
     DeviceAllocation<double> smoothWeights;
     DeviceAllocation<HipSearchEvaluatorConfiguration> evaluator;
+    DeviceAllocation<unsigned char> aroundWallsTables;
+    // The global best as it was before a batch, for running it again.
+    DeviceAllocation<std::byte> globalBestBackup;
     DeviceAllocation<HipSearchConditionInstruction> condition;
     DeviceAllocation<HipCandidateState> capturedWinnerState;
     DeviceAllocation<DeviceSample> candidateBestSamples;
@@ -3998,6 +4266,7 @@ struct HipSearchExecutor::Impl {
         ADD_BYTES(mutationSegments);
         ADD_BYTES(smoothWeights);
         ADD_BYTES(evaluator);
+        ADD_BYTES(aroundWallsTables);
         ADD_BYTES(condition);
         ADD_BYTES(capturedWinnerState);
         ADD_BYTES(candidateBestSamples);
@@ -4197,19 +4466,8 @@ struct HipSearchExecutor::Impl {
                         configuration.maximumEventCount)};
     }
 
-    template <
-            std::uint32_t MinimumBlocksPerSm,
-            HipHandlingSpecialization Handling>
+    template <HipHandlingSpecialization Handling>
     const void *SimulationKernel() const {
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_WATER_ONLY)
-        return reinterpret_cast<const void *>(
-                SimulateSearchCandidatesKernel<
-                        HipCandidatePhysicsState,
-                        false,
-                        true,
-                        Handling,
-                        MinimumBlocksPerSm>);
-#else
         if (configuration.branchState.stuntsEnabled &&
             configuration.evaluator.kind !=
                     HipSearchEvaluatorKind::FinishTime) {
@@ -4217,57 +4475,22 @@ struct HipSearchExecutor::Impl {
                     SimulateSearchCandidatesKernel<
                             HipCandidateState,
                             true,
-                            false,
-                            Handling,
-                            MinimumBlocksPerSm>);
+                            Handling>);
         }
-        return steadyTimeline
-                ? reinterpret_cast<const void *>(
-                          SimulateSearchCandidatesKernel<
-                                  HipCandidatePhysicsState,
-                                  false,
-                                  true,
-                                  Handling,
-                                  MinimumBlocksPerSm>)
-                : reinterpret_cast<const void *>(
-                          SimulateSearchCandidatesKernel<
-                                  HipCandidatePhysicsState,
-                                  false,
-                                  false,
-                                  Handling,
-                                  MinimumBlocksPerSm>);
-#endif
+        return reinterpret_cast<const void *>(
+                SimulateSearchCandidatesKernel<
+                        HipCandidatePhysicsState,
+                        false,
+                        Handling>);
     }
 
-    template <std::uint32_t MinimumBlocksPerSm>
     const void *SelectedSimulationKernel() const {
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_WATER_ONLY)
-        return SimulationKernel<
-                MinimumBlocksPerSm,
-                HipHandlingSpecialization::GearedDriveWater>();
-#else
-        switch (handlingSpecialization) {
-        case HipHandlingSpecialization::Legacy:
-            return SimulationKernel<
-                    MinimumBlocksPerSm,
-                    HipHandlingSpecialization::Legacy>();
-        case HipHandlingSpecialization::GearedDriveDry:
-            return SimulationKernel<
-                    MinimumBlocksPerSm,
-                    HipHandlingSpecialization::GearedDriveDry>();
-        case HipHandlingSpecialization::GearedDriveWater:
-            return SimulationKernel<
-                    MinimumBlocksPerSm,
-                    HipHandlingSpecialization::GearedDriveWater>();
-        case HipHandlingSpecialization::Generic:
-            return SimulationKernel<
-                    MinimumBlocksPerSm,
-                    HipHandlingSpecialization::Generic>();
-        }
-        return SimulationKernel<
-                MinimumBlocksPerSm,
-                HipHandlingSpecialization::Generic>();
-#endif
+        return handlingSpecialization ==
+                        HipHandlingSpecialization::GearedDriveWater
+                ? SimulationKernel<
+                          HipHandlingSpecialization::GearedDriveWater>()
+                : SimulationKernel<
+                          HipHandlingSpecialization::Generic>();
     }
 
     bool LoadSimulationKernelMetrics(
@@ -4332,55 +4555,11 @@ struct HipSearchExecutor::Impl {
         multiprocessorCount =
                 static_cast<std::uint32_t>(
                         properties.multiProcessorCount);
-        if (specializedModule && specializedModule->Ready()) {
-            const auto load =
-                    [&](std::uint32_t minimumBlocks,
-                        SimulationKernelMetrics *metrics) {
-                const hip::specialization::KernelMetrics &source =
-                        specializedModule->Metrics(minimumBlocks);
-                metrics->registersPerThread =
-                        source.registersPerThread;
-                metrics->localBytesPerThread =
-                        source.localBytesPerThread;
-                metrics->activeBlocksPerMultiprocessor =
-                        source.activeBlocksPerMultiprocessor;
-                metrics->theoreticalOccupancy =
-                        properties.maxThreadsPerMultiProcessor == 0
-                        ? 0.0
-                        : static_cast<double>(
-                                  source.activeBlocksPerMultiprocessor *
-                                  SimulationBlockSize) /
-                                  properties.maxThreadsPerMultiProcessor;
-            };
-            load(ThroughputKernelMinimumBlocksPerSm,
-                 &throughputKernelMetrics);
-            load(TailKernelMinimumBlocksPerSm,
-                 &tailKernelMetrics);
-            load(DenseTailKernelMinimumBlocksPerSm,
-                 &denseTailKernelMetrics);
-            if (diagnostic != nullptr) {
-                diagnostic->clear();
-            }
-            return true;
-        }
         return LoadSimulationKernelMetrics(
-                       SelectedSimulationKernel<
-                               ThroughputKernelMinimumBlocksPerSm>(),
-                       properties,
-                       &throughputKernelMetrics,
-                       diagnostic) &&
-               LoadSimulationKernelMetrics(
-                       SelectedSimulationKernel<
-                               TailKernelMinimumBlocksPerSm>(),
-                       properties,
-                       &tailKernelMetrics,
-                       diagnostic) &&
-               LoadSimulationKernelMetrics(
-                       SelectedSimulationKernel<
-                               DenseTailKernelMinimumBlocksPerSm>(),
-                       properties,
-                       &denseTailKernelMetrics,
-                       diagnostic);
+                SelectedSimulationKernel(),
+                properties,
+                &simulationKernelMetrics,
+                diagnostic);
     }
 
     bool ReserveBatchCapacity(
@@ -4585,7 +4764,7 @@ struct HipSearchExecutor::Impl {
                 nextCandidateBestSamples.Get(), reducedBest.Get(),
                 winnerSlots,
                 BetterSample{
-                        MaximizesScore(configuration.evaluator.kind)},
+                        MaximizesScore(configuration.evaluator.kind, configuration.evaluator.optionFlags)},
                 DeviceSample{});
         if (error != hipSuccess ||
             !nextReductionTemporary.Allocate(reductionBytes)) {
@@ -4642,6 +4821,139 @@ struct HipSearchExecutor::Impl {
             diagnostic->clear();
         }
         return true;
+    }
+
+    // Fills the around-walls corners the last batch marked missed, on the
+    // host copy and the device's; how many (0: the batch needed none).
+    std::uint64_t FillMissedAroundWallsCorners(std::string *diagnostic) {
+        namespace around_walls = forevervalidator::experimental::around_walls;
+        std::vector<unsigned char> &host = configuration.aroundWallsTables;
+        std::uint64_t total = 0u;
+        for (std::uint32_t trigger = 0u;
+             trigger < configuration.evaluator.distanceTriggerCount; ++trigger) {
+            const std::uint64_t offset = configuration.evaluator.aroundWallsOffsets[trigger];
+            around_walls::Header header;
+            std::memcpy(&header, host.data() + offset, sizeof header);
+            unsigned char *device = aroundWallsTables.Get() + offset;
+            std::uint32_t any = 0u;
+            hipError_t error = hipMemcpy(&any, device + header.missed, sizeof any,
+                                           hipMemcpyDeviceToHost);
+            if (error == hipSuccess && any == 0u) continue;
+            const std::uint64_t missedBytes = around_walls::MissedBytes(header.cornerCount);
+            std::vector<std::uint32_t> words(missedBytes / 4u);
+            if (error == hipSuccess) {
+                error = hipMemcpy(words.data(), device + header.missed, missedBytes,
+                                   hipMemcpyDeviceToHost);
+            }
+            if (error == hipSuccess) error = hipMemset(device + header.missed, 0, missedBytes);
+            if (error != hipSuccess) {
+                *diagnostic = HipFailure("reading HIP around-walls missed corners", error);
+                return 0u;
+            }
+            const auto *corners = reinterpret_cast<const around_walls::Corner *>(
+                    host.data() + offset + header.corners);
+            std::vector<std::uint64_t> missed;
+            for (std::size_t word = 1u; word < words.size(); ++word) {
+                for (std::uint32_t bit = 0u; words[word] != 0u && bit < 32u; ++bit) {
+                    const std::uint64_t corner = (word - 1u) * 32u + bit;
+                    if ((words[word] >> bit & 1u) != 0u &&
+                        corners[corner].direct == around_walls::kCornerUnfilled) {
+                        missed.push_back(corner);
+                    }
+                }
+            }
+            if (missed.empty()) continue;
+            std::atomic<std::size_t> next{0u};
+            const auto fill = [&] {
+                for (std::size_t i; (i = next.fetch_add(1u)) < missed.size();) {
+                    around_walls::FillCorner(host.data() + offset, missed[i]);
+                }
+            };
+            const unsigned helpers = static_cast<unsigned>(std::min<std::size_t>(
+                    std::max(1u, std::thread::hardware_concurrency()) - 1u, missed.size() / 8u));
+            std::vector<std::thread> threads;
+            for (unsigned i = 0u; i < helpers; ++i) threads.emplace_back(fill);
+            fill();
+            for (std::thread &thread : threads) thread.join();
+            error = hipMemcpy(device + header.corners, host.data() + offset + header.corners,
+                               header.cornerCount * sizeof(around_walls::Corner),
+                               hipMemcpyHostToDevice);
+            if (error != hipSuccess) {
+                *diagnostic = HipFailure("uploading HIP around-walls corners", error);
+                return 0u;
+            }
+            if (configuration.aroundWallsFilled) {
+                configuration.aroundWallsFilled(trigger, host.data() + offset);
+            }
+            total += missed.size();
+        }
+        return total;
+    }
+
+    // Copies the global best (sample, state, inputs, counts) to or from
+    // the backup.
+    hipError_t CopyGlobalBest(bool restore) {
+        const std::pair<std::byte *, std::size_t> parts[] = {
+                {reinterpret_cast<std::byte *>(globalBestSample.Get()), globalBestSample.Bytes()},
+                {reinterpret_cast<std::byte *>(globalBestState.Get()), globalBestState.Bytes()},
+                {reinterpret_cast<std::byte *>(globalBestInputs.Get()), globalBestInputs.Bytes()},
+                {reinterpret_cast<std::byte *>(globalBestEventCount.Get()),
+                 globalBestEventCount.Bytes()},
+                {reinterpret_cast<std::byte *>(globalBestMutationCount.Get()),
+                 globalBestMutationCount.Bytes()}};
+        std::size_t total = 0u;
+        for (const auto &part : parts) total += part.second;
+        if (globalBestBackup.Bytes() != total && !globalBestBackup.Allocate(total)) {
+            return hipErrorOutOfMemory;
+        }
+        std::size_t offset = 0u;
+        for (const auto &part : parts) {
+            std::byte *backup = globalBestBackup.Get() + offset;
+            const hipError_t error = hipMemcpy(restore ? part.first : backup,
+                                                 restore ? backup : part.first, part.second,
+                                                 hipMemcpyDeviceToDevice);
+            if (error != hipSuccess) return error;
+            offset += part.second;
+        }
+        return hipSuccess;
+    }
+
+    // A batch, run again while it needed around-walls corners not filled
+    // yet, from the global best it started with: its answers are those of
+    // tables filled in full.
+    HipSearchBatchExecution ExecuteFilled(
+            std::uint64_t firstCandidateId,
+            std::uint32_t candidateCount,
+            bool baseline,
+            const std::function<bool()> &cancellationRequested) {
+        const bool tables = !configuration.aroundWallsTables.empty();
+        std::uint32_t reruns = 0u;
+        for (bool rerun = false;; rerun = true, ++reruns) {
+            const hipError_t backup = tables ? CopyGlobalBest(rerun) : hipSuccess;
+            if (backup != hipSuccess) {
+                HipSearchBatchExecution result;
+                result.status = HipSearchStatus::DeviceFailure;
+                result.firstCandidateId = firstCandidateId;
+                result.candidateCount = candidateCount;
+                result.diagnostic = HipFailure("saving the HIP global best", backup);
+                return result;
+            }
+            HipSearchBatchExecution result = Execute(
+                    firstCandidateId, candidateCount, baseline, cancellationRequested);
+            result.aroundWallsReruns = reruns;
+            if (result.status != HipSearchStatus::Success || !tables) {
+                return result;
+            }
+            std::string diagnostic;
+            const std::uint64_t filled = FillMissedAroundWallsCorners(&diagnostic);
+            if (!diagnostic.empty()) {
+                result.status = HipSearchStatus::DeviceFailure;
+                result.diagnostic = diagnostic;
+                return result;
+            }
+            if (filled == 0u) return result;
+            if (baseline) baselineEvaluated = false;
+        }
     }
 
     HipSearchBatchExecution Execute(
@@ -4803,39 +5115,8 @@ struct HipSearchExecutor::Impl {
         hipEventRecord(mutationsGenerated.Get());
         const std::uint32_t simulationBlocks =
                 (candidateCount - 1u) / SimulationBlockSize + 1u;
-        const auto residentWaves =
-                [&](const SimulationKernelMetrics &metrics) {
-            const std::uint64_t residentBlocks =
-                    static_cast<std::uint64_t>(
-                            metrics.activeBlocksPerMultiprocessor) *
-                    multiprocessorCount;
-            return residentBlocks == 0u
-                    ? UINT64_MAX
-                    : (simulationBlocks + residentBlocks - 1u) /
-                              residentBlocks;
-        };
-        std::uint32_t selectedMinimumBlocks =
-                ThroughputKernelMinimumBlocksPerSm;
         const SimulationKernelMetrics *simulationMetrics =
-                &throughputKernelMetrics;
-        std::uint64_t selectedWaves =
-                residentWaves(*simulationMetrics);
-        const auto considerKernel =
-                [&](std::uint32_t minimumBlocks,
-                    const SimulationKernelMetrics &metrics) {
-            const std::uint64_t waves = residentWaves(metrics);
-            if (waves < selectedWaves) {
-                selectedMinimumBlocks = minimumBlocks;
-                simulationMetrics = &metrics;
-                selectedWaves = waves;
-            }
-        };
-        considerKernel(
-                TailKernelMinimumBlocksPerSm,
-                tailKernelMetrics);
-        considerKernel(
-                DenseTailKernelMinimumBlocksPerSm,
-                denseTailKernelMetrics);
+                &simulationKernelMetrics;
         const std::uint32_t conditionInstructionCount =
                 configuration.condition
                 ? static_cast<std::uint32_t>(
@@ -4854,150 +5135,69 @@ struct HipSearchExecutor::Impl {
                         std::chrono::system_clock::now().time_since_epoch())
                         .count();
         result.evaluationCurrentTimeSeconds = currentTimeSeconds;
-        if (specializedModule) {
-            const hipError_t simulationLaunch = LaunchDriverKernel(
-                    specializedModule->Kernel(selectedMinimumBlocks),
-                    simulationBlocks,
-                    configuration.deviceScene,
-                    configuration.deviceStaticConfiguration,
-                    branchState.Get(),
-                    mutableBoundaryControls.Get(),
-                    baselineTicks.Get(),
-                    timelineTickCount,
-                    evaluator.Get(),
-                    condition.Get(),
-                    conditionInstructionCount,
-                    lastImprovementTimeSeconds,
-                    lastRestartTimeSeconds,
-                    currentTimeSeconds,
-                    configuration.tickDurationMs,
-                    configuration.prestartDurationMs,
-                    configuration.branchTimeMs,
-                    mutableFromTimeMs,
-                    configuration.evaluationStartTimeMs,
-                    evaluationTickCount,
-                    firstCandidateId,
-                    candidateCount,
-                    baseline,
-                    static_cast<std::uint32_t>(
-                            configuration.maximumEventCount),
-                    candidateBestSamples.Get(),
-                    finishCheckpointStates.Get(),
-                    finishCheckpointTicks.Get(),
-                    baselineInputs.Get(),
-                    static_cast<std::uint32_t>(
-                            configuration.baselineInputs.size()),
-                    candidateEvents.Get(),
-                    candidateInputValues.Get(),
-                    compactInputOffsets.Get(),
-                    compactInputCount,
-                    compactRandomSteeringPipeline,
-                    compactEditPipeline,
-                    sparseMutationPipeline,
-                    CandidateEdits(candidateCount),
-                    SparseCandidateEvents(candidateCount),
-                    eventCounts.Get(),
-                    statuses.Get(),
-                    activeCandidates.Get(),
-                    collisionScratch.Get(),
-                    shapeCollisionScratch.Get(),
-                    shapeWorldScratch.Get(),
-                    movingBoundsScratch.Get(),
-                    surfaceHitScratch.Get(),
-                    meshRangeScratch.Get(),
-                    meshCellScratch.Get(),
-                    responseOrderScratch.Get(),
-                    static_cast<std::uint32_t>(
-                            configuration.maximumBatchSize),
-                    collisionShapeCount,
-                    cancellation.Get());
-            if (simulationLaunch != hipSuccess) {
-                const char *message = nullptr;
-                hipDrvGetErrorString(simulationLaunch, &message);
-                result.status = HipSearchStatus::DeviceFailure;
-                result.diagnostic =
-                        "launching specialized HIP simulation kernel: " +
-                        std::string(
-                                message == nullptr ? "unknown" : message);
-                return result;
-            }
-        } else {
-            const void *simulationKernel = nullptr;
-            if (selectedMinimumBlocks ==
-                DenseTailKernelMinimumBlocksPerSm) {
-                simulationKernel = SelectedSimulationKernel<
-                        DenseTailKernelMinimumBlocksPerSm>();
-            } else if (selectedMinimumBlocks ==
-                       TailKernelMinimumBlocksPerSm) {
-                simulationKernel = SelectedSimulationKernel<
-                        TailKernelMinimumBlocksPerSm>();
-            } else {
-                simulationKernel = SelectedSimulationKernel<
-                        ThroughputKernelMinimumBlocksPerSm>();
-            }
-            const hipError_t simulationLaunch = LaunchRuntimeKernel(
-                    simulationKernel,
-                    simulationBlocks,
-                    configuration.deviceScene,
-                    configuration.deviceStaticConfiguration,
-                    branchState.Get(),
-                    mutableBoundaryControls.Get(),
-                    baselineTicks.Get(),
-                    timelineTickCount,
-                    evaluator.Get(),
-                    condition.Get(),
-                    conditionInstructionCount,
-                    lastImprovementTimeSeconds,
-                    lastRestartTimeSeconds,
-                    currentTimeSeconds,
-                    configuration.tickDurationMs,
-                    configuration.prestartDurationMs,
-                    configuration.branchTimeMs,
-                    mutableFromTimeMs,
-                    configuration.evaluationStartTimeMs,
-                    evaluationTickCount,
-                    firstCandidateId,
-                    candidateCount,
-                    baseline,
-                    static_cast<std::uint32_t>(
-                            configuration.maximumEventCount),
-                    candidateBestSamples.Get(),
-                    finishCheckpointStates.Get(),
-                    finishCheckpointTicks.Get(),
-                    baselineInputs.Get(),
-                    static_cast<std::uint32_t>(
-                            configuration.baselineInputs.size()),
-                    candidateEvents.Get(),
-                    candidateInputValues.Get(),
-                    compactInputOffsets.Get(),
-                    compactInputCount,
-                    compactRandomSteeringPipeline,
-                    compactEditPipeline,
-                    sparseMutationPipeline,
-                    CandidateEdits(candidateCount),
-                    SparseCandidateEvents(candidateCount),
-                    eventCounts.Get(),
-                    statuses.Get(),
-                    activeCandidates.Get(),
-                    collisionScratch.Get(),
-                    shapeCollisionScratch.Get(),
-                    shapeWorldScratch.Get(),
-                    movingBoundsScratch.Get(),
-                    surfaceHitScratch.Get(),
-                    meshRangeScratch.Get(),
-                    meshCellScratch.Get(),
-                    responseOrderScratch.Get(),
-                    static_cast<std::uint32_t>(
-                            configuration.maximumBatchSize),
-                    collisionShapeCount,
-                    cancellation.Get());
-            if (simulationLaunch != hipSuccess) {
-                result.status = HipSearchStatus::DeviceFailure;
-                result.diagnostic = HipFailure(
-                        "launching HIP simulation kernel",
-                        simulationLaunch);
-                return result;
-            }
+        const void *simulationKernel = SelectedSimulationKernel();
+        const hipError_t simulationLaunch = LaunchRuntimeKernel(
+                simulationKernel,
+                simulationBlocks,
+                configuration.deviceScene,
+                configuration.deviceStaticConfiguration,
+                branchState.Get(),
+                mutableBoundaryControls.Get(),
+                baselineTicks.Get(),
+                timelineTickCount,
+                evaluator.Get(),
+                condition.Get(),
+                conditionInstructionCount,
+                lastImprovementTimeSeconds,
+                lastRestartTimeSeconds,
+                currentTimeSeconds,
+                configuration.tickDurationMs,
+                configuration.prestartDurationMs,
+                configuration.branchTimeMs,
+                mutableFromTimeMs,
+                configuration.evaluationStartTimeMs,
+                evaluationTickCount,
+                firstCandidateId,
+                candidateCount,
+                baseline,
+                static_cast<std::uint32_t>(
+                        configuration.maximumEventCount),
+                candidateBestSamples.Get(),
+                finishCheckpointStates.Get(),
+                finishCheckpointTicks.Get(),
+                baselineInputs.Get(),
+                static_cast<std::uint32_t>(
+                        configuration.baselineInputs.size()),
+                candidateEvents.Get(),
+                candidateInputValues.Get(),
+                compactInputOffsets.Get(),
+                compactInputCount,
+                compactRandomSteeringPipeline,
+                compactEditPipeline,
+                sparseMutationPipeline,
+                CandidateEdits(candidateCount),
+                SparseCandidateEvents(candidateCount),
+                eventCounts.Get(),
+                statuses.Get(),
+                activeCandidates.Get(),
+                collisionScratch.Get(),
+                shapeCollisionScratch.Get(),
+                shapeWorldScratch.Get(),
+                movingBoundsScratch.Get(),
+                surfaceHitScratch.Get(),
+                meshRangeScratch.Get(),
+                meshCellScratch.Get(),
+                responseOrderScratch.Get(),
+                static_cast<std::uint32_t>(
+                        configuration.maximumBatchSize),
+                collisionShapeCount,
+                cancellation.Get());
+        if (simulationLaunch != hipSuccess) {
+            result.status = HipSearchStatus::DeviceFailure;
+            result.diagnostic = HipFailure(
+                    "launching HIP simulation kernel",
+                    simulationLaunch);
+            return result;
         }
         hipEventRecord(simulationFinished.Get());
         if (configuration.evaluator.kind ==
@@ -5072,7 +5272,7 @@ struct HipSearchExecutor::Impl {
                     candidateBestSamples.Get(), reducedBest.Get(),
                     winnerCount,
                     BetterSample{
-                            MaximizesScore(configuration.evaluator.kind)},
+                            MaximizesScore(configuration.evaluator.kind, configuration.evaluator.optionFlags)},
                     DeviceSample{});
         }
         if (error != hipSuccess) {
@@ -5153,7 +5353,7 @@ struct HipSearchExecutor::Impl {
                 static_cast<std::uint32_t>(
                         configuration.maximumEventCount),
                 evaluationTickCount,
-                MaximizesScore(configuration.evaluator.kind),
+                MaximizesScore(configuration.evaluator.kind, configuration.evaluator.optionFlags),
                 configuration.evaluator.kind ==
                         HipSearchEvaluatorKind::Scripted,
                 baseline,
@@ -5433,261 +5633,6 @@ std::unique_ptr<HipSearchExecutor> HipSearchExecutor::Create(
             }
             return {};
         }
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_FOUR_WHEELS)
-        if (configuration.branchState.vehicle.wheels.count != 4u) {
-            if (diagnostic != nullptr) {
-                *diagnostic =
-                        "research wheel-count fact does not match";
-            }
-            return {};
-        }
-        for (std::uint32_t index = 0u; index < 4u; ++index) {
-            const HipWheelState &stateWheel =
-                    configuration.branchState.vehicle.wheels.
-                            values[index];
-            const VehicleWheelDefinition &definitionWheel =
-                    reinterpret_cast<
-                            const VehicleWheelDefinition *>(
-                            &packedConfiguration.wheels.wheels)[index];
-            const bool immutableFieldsMatch =
-                    stateWheel.killsLateralSpeedOnContact ==
-                            definitionWheel.
-                                    killsLateralSpeedOnContact &&
-                    stateWheel.axle ==
-                            static_cast<std::uint32_t>(
-                                    definitionWheel.axle) &&
-                    std::memcmp(
-                            &stateWheel.rollingRadius,
-                            &definitionWheel.rollingRadius,
-                            sizeof(float)) == 0 &&
-                    std::memcmp(
-                            &stateWheel.forceApplicationPoint,
-                            &definitionWheel.forceApplicationPoint,
-                            sizeof(GmVec3)) == 0 &&
-                    std::memcmp(
-                            &stateWheel.restPose,
-                            &definitionWheel.restSurfacePose,
-                            sizeof(GmIso4)) == 0;
-            if (!immutableFieldsMatch) {
-                if (diagnostic != nullptr) {
-                    *diagnostic =
-                            "research immutable wheel facts do not match";
-                }
-                return {};
-            }
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_CANONICAL_WHEEL_FACTS)
-            const GmMat3 identityRotation = {
-                    {1.0f, 0.0f, 0.0f},
-                    {0.0f, 1.0f, 0.0f},
-                    {0.0f, 0.0f, 1.0f},
-            };
-            const VehicleWheelDefinition &firstWheel =
-                    *reinterpret_cast<
-                            const VehicleWheelDefinition *>(
-                            &packedConfiguration.wheels.wheels);
-            const VehicleWheelAxle expectedAxle =
-                    index < 2u
-                    ? VehicleWheelAxle::Front
-                    : VehicleWheelAxle::Rear;
-            const bool canonicalFactsMatch =
-                    definitionWheel.axle == expectedAxle &&
-                    definitionWheel.
-                            killsLateralSpeedOnContact &&
-                    std::memcmp(
-                            &definitionWheel.rollingRadius,
-                            &firstWheel.rollingRadius,
-                            sizeof(float)) == 0 &&
-                    std::memcmp(
-                            &definitionWheel.restSurfacePose.rotation,
-                            &identityRotation,
-                            sizeof(GmMat3)) == 0;
-            if (!canonicalFactsMatch) {
-                if (diagnostic != nullptr) {
-                    *diagnostic =
-                            "research canonical wheel facts do not match";
-                }
-                return {};
-            }
-#endif
-        }
-#endif
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_WATER_ONLY)
-        HipPackedSceneHeader packedScene{};
-        const hipError_t sceneCopyError = hipMemcpy(
-                &packedScene,
-                configuration.deviceScene,
-                sizeof(packedScene),
-                hipMemcpyDeviceToHost);
-        if (sceneCopyError != hipSuccess ||
-            packedScene.magic != HipPackedSceneHeader::Magic ||
-            packedScene.schemaVersion !=
-                    HipPackedSceneHeader::SchemaVersion) {
-            if (diagnostic != nullptr) {
-                *diagnostic = sceneCopyError != hipSuccess
-                        ? HipFailure(
-                                  "reading HIP scene header",
-                                  sceneCopyError)
-                        : "invalid HIP scene header";
-            }
-            return {};
-        }
-        const std::uint64_t sceneBase =
-                reinterpret_cast<std::uintptr_t>(
-                        configuration.deviceScene);
-        hipError_t researchConstantError =
-                hipMemcpyToSymbol(HIP_SYMBOL(
-                        hip::research::StaticSceneBase),
-                        &sceneBase,
-                        sizeof(sceneBase),
-                        0u,
-                        hipMemcpyHostToDevice);
-        if (researchConstantError == hipSuccess) {
-            researchConstantError = hipMemcpyToSymbol(HIP_SYMBOL(
-                    hip::research::StaticScene),
-                    &packedScene,
-                    sizeof(packedScene),
-                    0u,
-                    hipMemcpyHostToDevice);
-        }
-        if (researchConstantError != hipSuccess) {
-            if (diagnostic != nullptr) {
-                *diagnostic = HipFailure(
-                        "copying research HIP scene header",
-                        researchConstantError);
-            }
-            return {};
-        }
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_CONSTANT_COLLISION_SHAPES)
-        if (packedConfiguration.collisionShapes.count != 8u ||
-            packedConfiguration.collisionShapes.stride !=
-                    sizeof(HipVehicleCollisionShape)) {
-            if (diagnostic != nullptr) {
-                *diagnostic =
-                        "research collision shape facts do not match";
-            }
-            return {};
-        }
-        std::array<HipVehicleCollisionShape, 8u>
-                constantCollisionShapes{};
-        const auto *configurationBytes =
-                static_cast<const std::byte *>(
-                        configuration.deviceStaticConfiguration);
-        researchConstantError = hipMemcpy(
-                constantCollisionShapes.data(),
-                configurationBytes +
-                        packedConfiguration.collisionShapes.offset,
-                sizeof(constantCollisionShapes),
-                hipMemcpyDeviceToHost);
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_EIGHT_ROOT_SHAPES)
-        constexpr std::uint32_t ExpectedWheelIndices[] = {
-                UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX,
-                0u, 1u, 3u, 2u};
-        if (researchConstantError == hipSuccess) {
-            for (std::uint32_t index = 0u;
-                 index < constantCollisionShapes.size(); ++index) {
-                if (constantCollisionShapes[index].
-                                parentShapeIndex != UINT32_MAX ||
-                    constantCollisionShapes[index].wheelIndex !=
-                            ExpectedWheelIndices[index]) {
-                    if (diagnostic != nullptr) {
-                        *diagnostic =
-                                "research collision shape topology "
-                                "does not match";
-                    }
-                    return {};
-                }
-            }
-        }
-#endif
-        if (researchConstantError == hipSuccess) {
-            researchConstantError = hipMemcpyToSymbol(HIP_SYMBOL(
-                    hip::research::StaticCollisionShapes),
-                    constantCollisionShapes.data(),
-                    sizeof(constantCollisionShapes),
-                    0u,
-                    hipMemcpyHostToDevice);
-        }
-        if (researchConstantError != hipSuccess) {
-            if (diagnostic != nullptr) {
-                *diagnostic = HipFailure(
-                        "copying research HIP collision shapes",
-                        researchConstantError);
-            }
-            return {};
-        }
-#endif
-#if defined(FOREVERVALIDATOR_HIP_RESEARCH_CONSTANT_CURVE_KEYS)
-        if (packedConfiguration.curveKeys.count > 4096u ||
-            packedConfiguration.curveKeys.stride !=
-                    sizeof(HipTuningCurveKey)) {
-            if (diagnostic != nullptr) {
-                *diagnostic =
-                        "research tuning curve key facts do not match";
-            }
-            return {};
-        }
-        std::vector<HipTuningCurveKey> constantCurveKeys(
-                packedConfiguration.curveKeys.count);
-        researchConstantError = hipMemcpy(
-                constantCurveKeys.data(),
-                configurationBytes +
-                        packedConfiguration.curveKeys.offset,
-                constantCurveKeys.size() *
-                        sizeof(HipTuningCurveKey),
-                hipMemcpyDeviceToHost);
-        if (researchConstantError == hipSuccess &&
-            !constantCurveKeys.empty()) {
-            researchConstantError = hipMemcpyToSymbol(HIP_SYMBOL(
-                    hip::research::StaticCurveKeys),
-                    constantCurveKeys.data(),
-                    constantCurveKeys.size() *
-                            sizeof(HipTuningCurveKey),
-                    0u,
-                    hipMemcpyHostToDevice);
-        }
-        if (researchConstantError != hipSuccess) {
-            if (diagnostic != nullptr) {
-                *diagnostic = HipFailure(
-                        "copying research HIP tuning curve keys",
-                        researchConstantError);
-            }
-            return {};
-        }
-#endif
-        const std::uint64_t configurationBase =
-                reinterpret_cast<std::uintptr_t>(
-                        configuration.deviceStaticConfiguration);
-        const hipError_t constantBaseError =
-                hipMemcpyToSymbol(HIP_SYMBOL(
-                        hip::research::StaticConfigurationBase),
-                        &configurationBase,
-                        sizeof(configurationBase),
-                        0u,
-                        hipMemcpyHostToDevice);
-        if (constantBaseError != hipSuccess) {
-            if (diagnostic != nullptr) {
-                *diagnostic = HipFailure(
-                        "copying research HIP configuration base",
-                        constantBaseError);
-            }
-            return {};
-        }
-        const hipError_t constantConfigurationError =
-                hipMemcpyToSymbol(HIP_SYMBOL(
-                        hip::research::StaticConfiguration),
-                        &packedConfiguration,
-                        sizeof(packedConfiguration),
-                        0u,
-                        hipMemcpyHostToDevice);
-        if (constantConfigurationError != hipSuccess) {
-            if (diagnostic != nullptr) {
-                *diagnostic = HipFailure(
-                        "copying research HIP static configuration",
-                        constantConfigurationError);
-            }
-            return {};
-        }
-#endif
         const std::int64_t mutableFromTimeMs =
                 configuration.branchTimeMs +
                 configuration.tickDurationMs;
@@ -5856,30 +5801,16 @@ std::unique_ptr<HipSearchExecutor> HipSearchExecutor::Create(
 
         auto impl = std::make_unique<Impl>();
         impl->configuration = preparedConfiguration;
-        impl->specializedModule =
-                preparedConfiguration.sessionSpecialization;
-        switch (packedConfiguration.tuning.handlingModel) {
-        case static_cast<std::uint32_t>(
-                CSceneVehicleCarHandlingModel_Standard):
-        case static_cast<std::uint32_t>(
-                CSceneVehicleCarHandlingModel_Lateral):
-            impl->handlingSpecialization =
-                    HipHandlingSpecialization::Legacy;
-            break;
-        case static_cast<std::uint32_t>(
-                CSceneVehicleCarHandlingModel_GearedDrive):
-            impl->handlingSpecialization =
-                    packedConfiguration.water.present
-                    ? HipHandlingSpecialization::
-                              GearedDriveWater
-                    : HipHandlingSpecialization::
-                              GearedDriveDry;
-            break;
-        default:
-            impl->handlingSpecialization =
-                    HipHandlingSpecialization::Generic;
-            break;
-        }
+        // A kernel of its own only where it pays: the geared drive with
+        // water is a third faster than the generic kernel on full GPUs; dry,
+        // it is within 1% of it.
+        impl->handlingSpecialization =
+                packedConfiguration.tuning.handlingModel ==
+                                static_cast<std::uint32_t>(
+                                        CSceneVehicleCarHandlingModel_GearedDrive) &&
+                        packedConfiguration.water.present
+                ? HipHandlingSpecialization::GearedDriveWater
+                : HipHandlingSpecialization::Generic;
         impl->immutableInputPrefix =
                 std::move(inputPartition.immutablePrefix);
         impl->immutableInputTail =
@@ -5887,13 +5818,6 @@ std::unique_ptr<HipSearchExecutor> HipSearchExecutor::Create(
         impl->mutableFromTimeMs = mutableFromTimeMs;
         impl->timelineTickCount = static_cast<std::uint32_t>(
                 preparedConfiguration.baselineTicks.size());
-        impl->steadyTimeline = std::all_of(
-                preparedConfiguration.baselineTicks.begin(),
-                preparedConfiguration.baselineTicks.end(),
-                [](const HipControlTick &tick) {
-                    return tick.actionFlags == 0u &&
-                            tick.respawnAtCheckpointCount == 0u;
-                });
         impl->evaluationTickCount =
                 static_cast<std::uint32_t>(evaluationTicks);
         impl->collisionShapeCount =
@@ -6173,6 +6097,8 @@ std::unique_ptr<HipSearchExecutor> HipSearchExecutor::Create(
             !impl->smoothWeights.Allocate(
                     preparedConfiguration.smoothWeights.size()) ||
             !impl->evaluator.Allocate(1u) ||
+            !impl->aroundWallsTables.Allocate(
+                    preparedConfiguration.aroundWallsTables.size()) ||
             !impl->condition.Allocate(
                     preparedConfiguration.condition
                             ? preparedConfiguration.condition->instructions.size()
@@ -6247,7 +6173,8 @@ std::unique_ptr<HipSearchExecutor> HipSearchExecutor::Create(
             !impl->globalBestMutationCount.Allocate(1u) ||
             !impl->summary.Allocate(1u)) {
             if (diagnostic != nullptr) {
-                *diagnostic = "HIP resident search allocation rejected by memory headroom or allocator limits; reduce input density or use Optimized CPU";
+                *diagnostic = "HIP resident search allocation rejected by memory headroom or allocator limits (" +
+                        lastAllocationRefusal + "); reduce input density or use Optimized CPU";
             }
             return {};
         }
@@ -6258,8 +6185,7 @@ std::unique_ptr<HipSearchExecutor> HipSearchExecutor::Create(
                 impl->reducedBest.Get(),
                 winnerSampleSlots,
                 BetterSample{
-                        MaximizesScore(
-                                preparedConfiguration.evaluator.kind)},
+                        MaximizesScore(preparedConfiguration.evaluator.kind, preparedConfiguration.evaluator.optionFlags)},
                 DeviceSample{});
         if (error != hipSuccess ||
             !impl->reductionTemporary.Allocate(reductionBytes)) {
@@ -6346,11 +6272,19 @@ std::unique_ptr<HipSearchExecutor> HipSearchExecutor::Create(
         UPLOAD(impl->sharedEligibleIndices,
                sharedEligibleIndices,
                "uploading HIP shared eligible indices");
+        UPLOAD(impl->aroundWallsTables,
+               preparedConfiguration.aroundWallsTables,
+               "uploading HIP around-walls tables");
 #undef UPLOAD
+        HipSearchEvaluatorConfiguration uploadedEvaluator =
+                preparedConfiguration.evaluator;
+        uploadedEvaluator.aroundWalls =
+                preparedConfiguration.aroundWallsTables.empty()
+                ? nullptr : impl->aroundWallsTables.Get();
         error = hipMemcpy(
                 impl->evaluator.Get(),
-                &preparedConfiguration.evaluator,
-                sizeof(preparedConfiguration.evaluator),
+                &uploadedEvaluator,
+                sizeof(uploadedEvaluator),
                 hipMemcpyHostToDevice);
         if (error != hipSuccess) {
             if (diagnostic != nullptr) {
@@ -6472,7 +6406,7 @@ HipSearchBatchExecution HipSearchExecutor::EvaluateBaseline(
         return result;
     }
     HipSearchBatchExecution result =
-            impl_->Execute(0u, 1u, true, cancellationRequested);
+            impl_->ExecuteFilled(0u, 1u, true, cancellationRequested);
     result.hostToDeviceBytes += impl_->initialUploadBytes;
     return result;
 }
@@ -6508,7 +6442,7 @@ HipSearchBatchExecution HipSearchExecutor::RunBatch(
         result.diagnostic = "HIP candidate ID range overflow";
         return result;
     }
-    return impl_->Execute(
+    return impl_->ExecuteFilled(
             firstCandidateId, candidateCount, false,
             cancellationRequested);
 }

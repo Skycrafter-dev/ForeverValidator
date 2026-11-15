@@ -7,7 +7,7 @@
 
 #include "simulation/backends/hip/generated/hip_search_executor.h"
 
-#if defined(__HIPCC__)
+#if defined(__HIPCC__) || defined(__HIPCC__)
 #define FOREVERVALIDATOR_CANDIDATE_HD __host__ __device__
 #else
 #define FOREVERVALIDATOR_CANDIDATE_HD

@@ -21,8 +21,10 @@ FV_VOLUME_HD inline Point Project(const CudaSearchEvaluatorConfiguration &volume
     x -= volume.values[0];
     y -= volume.values[1];
     z -= volume.values[2];
-    if (volume.optionFlags == 0u) return {x, y, z};
-    if (volume.optionFlags == 1u) return {x, z, y};
+    // The plane is the low bits; CudaSearchEntrySpeed sits above them.
+    const std::uint32_t plane = volume.optionFlags & 0xffu;
+    if (plane == 0u) return {x, y, z};
+    if (plane == 1u) return {x, z, y};
     return {y, z, x};
 }
 

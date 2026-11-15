@@ -1,7 +1,7 @@
 #ifndef FOREVERVALIDATOR_CUDA_SEARCH_BRANCH_STATE_CUH
 #define FOREVERVALIDATOR_CUDA_SEARCH_BRANCH_STATE_CUH
 
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) || defined(__HIPCC__)
 #include <cuda_runtime.h>
 #define FOREVERVALIDATOR_BRANCH_HD __host__ __device__
 #else

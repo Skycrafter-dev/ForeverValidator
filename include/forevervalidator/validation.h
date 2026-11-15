@@ -21,6 +21,9 @@
 #ifndef FOREVERVALIDATOR_HAS_VULKAN
 #define FOREVERVALIDATOR_HAS_VULKAN 0
 #endif
+#ifndef FOREVERVALIDATOR_HAS_TWIN
+#define FOREVERVALIDATOR_HAS_TWIN 0
+#endif
 
 namespace forevervalidator {
 
@@ -46,6 +49,10 @@ enum class SimulationBackend : std::uint8_t {
     Cuda,
     Vulkan,
     Hip,
+    // Experimental twin engine (docs/twin/): same observable physics, not
+    // bit-exact with FV. Stadium/StadiumCar only. Built with
+    // -DFOREVERVALIDATOR_BUILD_TWIN=ON; otherwise it reports TwinNotCompiled.
+    Twin,
 };
 
 enum class VulkanBackendStatus : std::uint8_t {
@@ -111,21 +118,8 @@ struct CudaBackendDiagnostics {
         return major >= 5;
     }
 
-    static bool SupportsSessionSpecializationComputeCapability(
-            std::int32_t major,
-            std::int32_t minor) noexcept {
-        return major > 7 || (major == 7 && minor >= 5);
-    }
-
     bool IsReady() const noexcept {
         return status == CudaBackendStatus::Ready;
-    }
-
-    bool SupportsSessionSpecialization() const noexcept {
-        return IsReady() &&
-                SupportsSessionSpecializationComputeCapability(
-                        computeCapabilityMajor,
-                        computeCapabilityMinor);
     }
 };
 
@@ -165,11 +159,64 @@ struct HipBackendDiagnostics {
 
 HipBackendDiagnostics QueryHipBackendDiagnostics() noexcept;
 
+enum class TwinBackendStatus : std::uint8_t {
+    NotCompiled,         // built without -DFOREVERVALIDATOR_BUILD_TWIN=ON
+    StepNotImplemented,  // compiled, but the twin tick kernel is still a stub
+    Ready,
+};
+
+struct TwinBackendDiagnostics {
+    TwinBackendStatus status = TwinBackendStatus::NotCompiled;
+    std::string modelId;      // twin model id (changes with its golden hashes)
+    std::string diagnostic;   // what is missing, or how to enable it
+
+    bool IsReady() const noexcept {
+        return status == TwinBackendStatus::Ready;
+    }
+};
+
+TwinBackendDiagnostics QueryTwinBackendDiagnostics() noexcept;
+
+// Substep policy of the twin; part of its model id (docs/twin/design.md §7).
+// Only FvSubsteps passes the user's acceptance test (docs/twin/scoreboard.md,
+// "Verdict"); the others are opt-in and FAIL it.
+enum class TwinPolicy : std::uint8_t {
+    FvSubsteps,       // the default: FV's speed-based substep count (passes)
+    CappedSubsteps3,  // opt-in, fails the acceptance test: at most 3 substeps
+                      // per tick
+    ContactSubsteps,  // opt-in, fails the acceptance test: 1 substep unless the
+                      // contacts change, then min(n, 3) (FV's n at >= 900 km/h);
+                      // it changes trick behaviour (63/82 trick measures kept)
+    ContactSubstepsFull,  // opt-in, fails the acceptance test (1257/1260
+                          // ticks): 1 substep unless the contacts change over
+                          // a speculative substep, then FV's n (design.md §5.1)
+};
+
+// Collision stage of the twin (docs/twin/scoreboard.md). Both pass the
+// acceptance test with FvSubsteps. FOREVERVALIDATOR_TWIN_COLLIDE, when set,
+// overrides this for the whole process (src/twin/isa/tw_collision_choice.h).
+enum class TwinCollision : std::uint8_t {
+    Noise,  // the default: architect C's stage with the noise-level narrow
+            // phase (contacts within float noise of FV's); the fastest
+    Exact,  // the reference: B's ExactCollision, FV's contacts bit for bit
+};
+
+struct TwinValidationOptions {
+    TwinPolicy policy = TwinPolicy::FvSubsteps;
+    TwinCollision collision = TwinCollision::Noise;
+    // DEBUG ONLY. Runs the twin backend's FV-to-twin hand-off with FV
+    // optimized_cpu standing in for the twin after the prestart, so the
+    // routing can be tested end to end before the twin tick kernel exists.
+    // Reports are then optimized_cpu reports, not twin reports.
+    bool debugDelegateToOptimizedCpu = false;
+};
+
 struct ValidationOptions {
     std::uint32_t requestedSamples = 0xffffffffu;
     std::uint32_t controlTickMs = 10u;
     std::uint32_t validationPrestartMs = 2600u;
     SimulationBackend backend = SimulationBackend::Reference;
+    TwinValidationOptions twin{};  // used only by SimulationBackend::Twin
 };
 
 enum class ValidationStage : std::uint16_t {
@@ -217,6 +264,8 @@ enum class ValidationErrorCode : std::uint16_t {
     HipUnavailable = 17,
     HipInitializationFailed = 18,
     HipExecutionFailed = 19,
+    TwinUnavailable = 20,
+    TwinExecutionFailed = 21,
 };
 
 enum class ValidationFailureReason : std::uint16_t {
@@ -304,6 +353,10 @@ enum class ValidationFailureReason : std::uint16_t {
     HipInitializationFailed = 727,
     HipExecutionFailed = 728,
     HipUnsupportedSimulationScope = 729,
+    TwinNotCompiled = 730,
+    TwinNotImplemented = 731,
+    TwinUnsupportedSimulationScope = 732,
+    TwinExecutionFailed = 733,
     SerializationFailed = 900,
     UnexpectedFailure = 1000,
 };

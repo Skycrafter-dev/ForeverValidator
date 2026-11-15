@@ -1,9 +1,11 @@
 #include <forevervalidator/validation.h>
+#include <forevervalidator/experimental/around_walls_table.h>
 #include <forevervalidator/experimental/physics_sandbox.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <new>
@@ -23,6 +25,7 @@
 #include "simulation/runtime/replay_simulation_definition.h"
 #include "simulation/runtime/replay_simulation_session.h"
 #include "simulation/backends/simulation_backend.h"
+#include "simulation/backends/twin/twin_backend.h"
 #if FOREVERVALIDATOR_HAS_HIP
 #include "simulation/backends/hip/hip_state_bridge.h"
 #endif
@@ -30,6 +33,7 @@
 #include "validation/evaluation/replay_validation_session.h"
 #include "validation/api/physics_sandbox_static_scene_test_access.h"
 #include "validation/api/physics_sandbox_cuda_test_access.h"
+#include "validation/api/physics_sandbox_twin_test_access.h"
 #include "validation/planning/replay_asset_route.h"
 #include "validation/planning/replay_challenge_map_preload.h"
 #include "validation/planning/search_event_capacity.h"
@@ -163,6 +167,61 @@ ValidationError CudaScopeError(
             std::string(ReplayMapEnvironmentName(route.mapEnvironment)) +
             "/" + ReplayVehicleModelName(route.vehicleModel);
     return error;
+}
+
+// The twin models Stadium maps with the StadiumCar, outside Stunts mode
+// (docs/twin/design.md; Stunts is out of scope by the user's decision).
+bool IsTwinSupportedRoute(const ReplayAssetRoute &route) noexcept {
+    return route.mapEnvironment == route.decorationEnvironment &&
+           route.mapEnvironment == ReplayMapEnvironment::Stadium &&
+           route.vehicleModel == ReplayVehicleModel::StadiumCar &&
+           route.validationMode != ReplayValidationMode::Stunts;
+}
+
+ValidationError TwinScopeError(
+        const ReplayAssetRoute &route,
+        const ReplayIdentity &identity) {
+    const bool stunts = route.validationMode == ReplayValidationMode::Stunts;
+    ValidationError error = MakeError(
+            ValidationErrorCategory::Simulation,
+            ValidationErrorCode::TwinUnavailable,
+            ValidationStage::SimulationStartup,
+            ValidationFailureReason::TwinUnsupportedSimulationScope,
+            identity,
+            stunts ? "twin: Stunts mode is not supported"
+                   : "twin: only Stadium maps with the StadiumCar are supported");
+    error.relatedAsset =
+            std::string(ReplayMapEnvironmentName(route.mapEnvironment)) +
+            "/" + ReplayVehicleModelName(route.vehicleModel) +
+            (stunts ? "/Stunts" : "");
+    return error;
+}
+
+// Refuses the twin before any asset is loaded when it cannot run; the
+// debug delegate (TwinValidationOptions) needs only FV and always runs.
+std::optional<ValidationError> TwinAvailabilityError(
+        const ValidationOptions &options,
+        const ReplayIdentity &identity) {
+    if (options.twin.debugDelegateToOptimizedCpu) {
+        return std::nullopt;
+    }
+    const TwinBackendDiagnostics twin = QueryTwinBackendDiagnostics();
+    // Only a build without the twin refuses up front. A twin whose step is
+    // still incomplete runs FV's load and prestart, the hand-off and the
+    // world compile, and fails at the first tick it cannot run, with the
+    // timeline's diagnostic (src/twin/fv/twin_timeline.cpp).
+    if (twin.IsReady() || twin.status != TwinBackendStatus::NotCompiled) {
+        return std::nullopt;
+    }
+    return MakeError(
+            ValidationErrorCategory::Simulation,
+            ValidationErrorCode::TwinUnavailable,
+            ValidationStage::SimulationStartup,
+            twin.status == TwinBackendStatus::NotCompiled
+                    ? ValidationFailureReason::TwinNotCompiled
+                    : ValidationFailureReason::TwinNotImplemented,
+            identity,
+            twin.diagnostic.c_str());
 }
 
 ValidationStatus ToPublicStatus(ReplayValidationStatus status) {
@@ -632,6 +691,12 @@ ValidationFailureReason ExecutionReason(
         return backend == SimulationBackend::Hip
                 ? ValidationFailureReason::HipExecutionFailed
                 : ValidationFailureReason::CudaExecutionFailed;
+    case ReplayValidationExecutionResult::TwinUnavailable:
+        return ValidationFailureReason::TwinNotCompiled;
+    case ReplayValidationExecutionResult::TwinNotImplemented:
+        return ValidationFailureReason::TwinNotImplemented;
+    case ReplayValidationExecutionResult::TwinExecutionFailed:
+        return ValidationFailureReason::TwinExecutionFailed;
     }
     return ValidationFailureReason::UnexpectedFailure;
 }
@@ -687,6 +752,21 @@ ValidationError ExecutionError(
         diagnostic = hip ? "HIP backend execution failed"
                          : "CUDA backend execution failed";
         break;
+    case ReplayValidationExecutionResult::TwinUnavailable:
+        code = ValidationErrorCode::TwinUnavailable;
+        stage = ValidationStage::SimulationStartup;
+        diagnostic = "twin backend unavailable";
+        break;
+    case ReplayValidationExecutionResult::TwinNotImplemented:
+        code = ValidationErrorCode::TwinUnavailable;
+        stage = ValidationStage::SimulationStartup;
+        diagnostic = "twin backend is not implemented yet";
+        break;
+    case ReplayValidationExecutionResult::TwinExecutionFailed:
+        code = ValidationErrorCode::TwinExecutionFailed;
+        stage = ValidationStage::SimulationStep;
+        diagnostic = "twin backend execution failed";
+        break;
     case ReplayValidationExecutionResult::Success:
     case ReplayValidationExecutionResult::MissingInput:
     case ReplayValidationExecutionResult::InvalidPlan:
@@ -702,6 +782,14 @@ ValidationError ExecutionError(
     ValidationError error = MakeError(
             category, code, stage, ExecutionReason(result, backend),
             identity, diagnostic);
+    if (result == ReplayValidationExecutionResult::TwinUnavailable ||
+        result == ReplayValidationExecutionResult::TwinNotImplemented) {
+        const std::string twinDiagnostic =
+                QueryTwinBackendDiagnostics().diagnostic;
+        if (!twinDiagnostic.empty()) {
+            error.diagnostic = twinDiagnostic;
+        }
+    }
     if (result == ReplayValidationExecutionResult::CudaUnavailable ||
         result == ReplayValidationExecutionResult::CudaInitializationFailed ||
         result == ReplayValidationExecutionResult::CudaExecutionFailed) {
@@ -1078,6 +1166,18 @@ Result<ValidationReport> RunReplayValidation(
         return Result<ValidationReport>::Failure(
                 CudaScopeError(route, identity, options.backend));
     }
+    if (options.backend == SimulationBackend::Twin) {
+        if (!IsTwinSupportedRoute(route)) {
+            return Result<ValidationReport>::Failure(
+                    TwinScopeError(route, identity));
+        }
+        std::optional<ValidationError> unavailable =
+                TwinAvailabilityError(options, identity);
+        if (unavailable.has_value()) {
+            return Result<ValidationReport>::Failure(
+                    std::move(*unavailable));
+        }
+    }
 
     const ReplayValidationConfiguration configuration{
             options.requestedSamples,
@@ -1107,7 +1207,13 @@ Result<ValidationReport> RunReplayValidation(
     }
     const PreparedAssets prepared = preparedResult.Value();
 
+    // The twin backend's session runs FV optimized_cpu for loading and the
+    // prestart and hands the timeline to the twin (ExecuteTwinTimeline).
     ReplaySimulationSession simulationSession(options.backend);
+    if (options.backend == SimulationBackend::Twin) {
+        simulationSession.ConfigureTwinTimeline(
+                options.twin, options.validationPrestartMs);
+    }
     CGameCtnReplayChallengeMapPreload preload;
     const ReplayChallengePreloadResult preloadResult = preload.Preload(
             replayFile.MapInput(),
@@ -1148,6 +1254,10 @@ Result<ValidationReport> RunReplayValidation(
         ValidationError error =
                 ExecutionError(validation.Error(), identity,
                                options.backend);
+        if (options.backend == SimulationBackend::Twin &&
+            !simulationSession.TwinDiagnostic().empty()) {
+            error.diagnostic = simulationSession.TwinDiagnostic();
+        }
         if ((options.backend == SimulationBackend::Cuda ||
              options.backend == SimulationBackend::Hip ||
              options.backend == SimulationBackend::Vulkan) &&
@@ -1265,7 +1375,23 @@ PhysicsSandboxSceneView BuildSandboxScene(
         scene.collisionTriangles.push_back({
                 ToPublicVector(triangle.a),
                 ToPublicVector(triangle.b),
-                ToPublicVector(triangle.c)});
+                ToPublicVector(triangle.c),
+                triangle.material});
+    }
+
+    for (const ReplayCheckpointTriggerSurface &surface :
+         session.CheckpointTriggerSurfaces()) {
+        PhysicsSandboxCheckpointTrigger trigger;
+        trigger.role = surface.role;
+        trigger.checkpointSlot = surface.checkpointSlot;
+        trigger.triangles.reserve(surface.triangles.size());
+        for (const ReplayStaticCollisionTriangle &triangle :
+             surface.triangles) {
+            trigger.triangles.push_back({ToPublicVector(triangle.a),
+                                         ToPublicVector(triangle.b),
+                                         ToPublicVector(triangle.c)});
+        }
+        scene.checkpointTriggers.push_back(std::move(trigger));
     }
 
     const std::vector<VehicleCollisionShapeEntry> &shapes =
@@ -1764,6 +1890,8 @@ struct PhysicsSandbox::Impl {
         view.steering = state->controls.steering;
         view.checkpointsCollected = state->race.checkpointCount;
         view.checkpointsTotal = state->race.requiredCheckpointCount;
+        view.currentLapCheckpoints = state->race.currentLapCheckpointCount;
+        view.passedCheckpointSlots = state->passedCheckpointSlots;
         view.completedLaps = state->race.completedLapCount;
         view.totalLaps = state->race.requiredLapCount;
         view.raceCompleted = state->race.raceCompleted;
@@ -1807,6 +1935,8 @@ struct PhysicsSandbox::Impl {
 struct PhysicsSandboxCudaSearchSession::Impl {
     std::unique_ptr<simulation::CudaSearchExecutor> executor;
     std::unique_ptr<simulation::VulkanSearchExecutor> vulkanExecutor;
+    // Twin CPU search (configuration.twin, docs/twin/m13-search.md).
+    std::unique_ptr<simulation::TwinSearchExecutor> twinExecutor;
 #if FOREVERVALIDATOR_HAS_HIP
     std::unique_ptr<simulation::HipSearchExecutor> hipExecutor;
 #endif
@@ -1827,7 +1957,8 @@ struct PhysicsSandboxCudaSearchSession::Impl {
     SimulationBackend backend = SimulationBackend::Cuda;
 
     bool HasExecutor() const noexcept {
-        return executor != nullptr || vulkanExecutor != nullptr
+        return executor != nullptr || vulkanExecutor != nullptr ||
+                twinExecutor != nullptr
 #if FOREVERVALIDATOR_HAS_HIP
                 || hipExecutor != nullptr
 #endif
@@ -1836,6 +1967,9 @@ struct PhysicsSandboxCudaSearchSession::Impl {
 
     simulation::CudaSearchBatchExecution EvaluateBaseline(
             const std::function<bool()> &cancellationRequested) {
+        if (twinExecutor) {
+            return twinExecutor->EvaluateBaseline(cancellationRequested);
+        }
 #if FOREVERVALIDATOR_HAS_HIP
         if (hipExecutor) {
             return simulation::hip_bridge::ToCudaResult(
@@ -1851,6 +1985,10 @@ struct PhysicsSandboxCudaSearchSession::Impl {
             std::uint64_t firstCandidateId,
             std::uint32_t candidateCount,
             const std::function<bool()> &cancellationRequested) {
+        if (twinExecutor) {
+            return twinExecutor->RunBatch(
+                    firstCandidateId, candidateCount, cancellationRequested);
+        }
 #if FOREVERVALIDATOR_HAS_HIP
         if (hipExecutor) {
             return simulation::hip_bridge::ToCudaResult(
@@ -1871,6 +2009,10 @@ struct PhysicsSandboxCudaSearchSession::Impl {
     bool ReserveBatchCapacity(
             std::uint32_t candidateCount,
             std::string *diagnostic) {
+        if (twinExecutor) {
+            return twinExecutor->ReserveBatchCapacity(
+                    candidateCount, diagnostic);
+        }
 #if FOREVERVALIDATOR_HAS_HIP
         if (hipExecutor) {
             return hipExecutor->ReserveBatchCapacity(
@@ -1885,6 +2027,9 @@ struct PhysicsSandboxCudaSearchSession::Impl {
     }
 
     std::uint32_t BatchCapacity() const noexcept {
+        if (twinExecutor) {
+            return twinExecutor->BatchCapacity();
+        }
 #if FOREVERVALIDATOR_HAS_HIP
         if (hipExecutor) {
             return hipExecutor->BatchCapacity();
@@ -1896,6 +2041,7 @@ struct PhysicsSandboxCudaSearchSession::Impl {
     }
 
     bool UpdateChangedSegmentCount(std::uint32_t count) noexcept {
+        if (twinExecutor) return twinExecutor->UpdateChangedSegmentCount(count);
 #if FOREVERVALIDATOR_HAS_HIP
         if (hipExecutor) return hipExecutor->UpdateChangedSegmentCount(count);
 #endif
@@ -1905,6 +2051,10 @@ struct PhysicsSandboxCudaSearchSession::Impl {
     bool UpdateConditionTimes(
             double lastImprovementTimeSeconds,
             double lastRestartTimeSeconds) noexcept {
+        if (twinExecutor) {
+            return twinExecutor->UpdateConditionTimes(
+                    lastImprovementTimeSeconds, lastRestartTimeSeconds);
+        }
 #if FOREVERVALIDATOR_HAS_HIP
         if (hipExecutor) {
             return hipExecutor->UpdateConditionTimes(
@@ -2019,12 +2169,144 @@ simulation::CudaSearchModifierConfiguration CudaModifier(
             source);
 }
 
-simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
-        const PhysicsSandboxCudaEvaluator &source) {
-    return std::visit(
-            [](const auto &evaluator) {
+// The Distance evaluator's triggers, their triangles and the car shapes,
+// from the loaded map. False when the target is missing or too large for
+// the GPU.
+bool FillDistanceGeometry(
+        const ReplaySimulationSession &session,
+        const ReplaySimulationDefinition &definition,
+        simulation::CudaSearchEvaluatorConfiguration *configuration,
+        std::string *error) {
+    const bool finish = configuration->values[0] != 0.0;
+    const bool anySlot = configuration->values[3] < 0.0;
+    const auto slot = static_cast<std::uint32_t>(
+            anySlot ? 0.0 : configuration->values[3]);
+    std::uint32_t triggers = 0u;
+    std::uint32_t count = 0u;
+    for (const ReplayCheckpointTriggerSurface &surface :
+         session.CheckpointTriggerSurfaces()) {
+        const bool finishLine = surface.role !=
+                PhysicsSandboxCheckpointTriggerRole::Checkpoint;
+        if (finish != finishLine ||
+            (!finish && !anySlot && surface.checkpointSlot != slot)) {
+            continue;
+        }
+        if (triggers == simulation::CudaSearchMaximumDistanceTriggers) {
+            *error = "the target has too many triggers for the GPU";
+            return false;
+        }
+        double *trigger = configuration->distanceTriggers[triggers++];
+        trigger[0] = finishLine ? -1.0 : static_cast<double>(surface.checkpointSlot);
+        trigger[1] = count;
+        double minimum[3] = {1e300, 1e300, 1e300};
+        double maximum[3] = {-1e300, -1e300, -1e300};
+        for (const ReplayStaticCollisionTriangle &triangle :
+             surface.triangles) {
+            if (count == simulation::CudaSearchMaximumDistanceTriangles) {
+                *error = "the target's triggers have too many triangles for the GPU";
+                return false;
+            }
+            const GmVec3 *corners[3] = {&triangle.a, &triangle.b, &triangle.c};
+            for (std::size_t corner = 0u; corner < 3u; ++corner) {
+                const double point[3] = {corners[corner]->x, corners[corner]->y,
+                                         corners[corner]->z};
+                for (std::size_t axis = 0u; axis < 3u; ++axis) {
+                    configuration->distanceTriangles[count][corner * 3u + axis] =
+                            point[axis];
+                    minimum[axis] = std::min(minimum[axis], point[axis]);
+                    maximum[axis] = std::max(maximum[axis], point[axis]);
+                }
+            }
+            ++count;
+        }
+        trigger[2] = count - trigger[1];
+        for (std::size_t axis = 0u; axis < 3u; ++axis) {
+            trigger[3u + axis] = minimum[axis];
+            trigger[6u + axis] = maximum[axis];
+        }
+    }
+    if (count == 0u) {
+        *error = finish ? "this map has no finish"
+                        : "this map has no checkpoint at that map slot";
+        return false;
+    }
+    configuration->distanceTriggerCount = triggers;
+    configuration->distanceTriangleCount = count;
+    const PhysicsSandboxSceneView scene = BuildSandboxScene(session, definition);
+    double radius = 0.0;
+    std::uint32_t shapes = 0u;
+    for (const PhysicsSandboxEllipsoid &ellipsoid : scene.carEllipsoids) {
+        if (!(ellipsoid.radii.x > 0.0f) || !(ellipsoid.radii.y > 0.0f) ||
+            !(ellipsoid.radii.z > 0.0f)) {
+            continue;
+        }
+        if (shapes == simulation::CudaSearchMaximumDistanceShapes) {
+            *error = "the car has too many collision shapes for the GPU";
+            return false;
+        }
+        double *shape = configuration->distanceShapes[shapes++];
+        shape[0] = ellipsoid.position.x;
+        shape[1] = ellipsoid.position.y;
+        shape[2] = ellipsoid.position.z;
+        shape[3] = ellipsoid.rotationX;
+        shape[4] = ellipsoid.rotationY;
+        shape[5] = ellipsoid.rotationZ;
+        shape[6] = ellipsoid.rotationW;
+        shape[7] = ellipsoid.radii.x;
+        shape[8] = ellipsoid.radii.y;
+        shape[9] = ellipsoid.radii.z;
+        radius = std::max(radius,
+                          std::sqrt(shape[0] * shape[0] + shape[1] * shape[1] +
+                                    shape[2] * shape[2]) +
+                                  std::max({shape[7], shape[8], shape[9]}));
+    }
+    configuration->distanceShapeCount = shapes;
+    // The body sphere around walls: at the centre of the shapes' box, as
+    // wide as its smallest half size (ForeverTAS's MakeCarShape).
+    double low[3] = {1e300, 1e300, 1e300};
+    double high[3] = {-1e300, -1e300, -1e300};
+    for (std::uint32_t s = 0u; s < shapes; ++s) {
+        const double *shape = configuration->distanceShapes[s];
+        const double qx = shape[3], qy = shape[4], qz = shape[5], qw = shape[6];
+        const auto rotate = [&](double vx, double vy, double vz, double *out) {
+            const double tx = 2.0 * (qy * vz - qz * vy);
+            const double ty = 2.0 * (qz * vx - qx * vz);
+            const double tz = 2.0 * (qx * vy - qy * vx);
+            out[0] = vx + qw * tx + (qy * tz - qz * ty);
+            out[1] = vy + qw * ty + (qz * tx - qx * tz);
+            out[2] = vz + qw * tz + (qx * ty - qy * tx);
+        };
+        double ex[3], ey[3], ez[3];
+        rotate(shape[7], 0.0, 0.0, ex);
+        rotate(0.0, shape[8], 0.0, ey);
+        rotate(0.0, 0.0, shape[9], ez);
+        for (std::size_t axis = 0u; axis < 3u; ++axis) {
+            const double half = std::sqrt(ex[axis] * ex[axis] + ey[axis] * ey[axis] +
+                                          ez[axis] * ez[axis]);
+            low[axis] = std::min(low[axis], shape[axis] - half);
+            high[axis] = std::max(high[axis], shape[axis] + half);
+        }
+    }
+    if (shapes != 0u) {
+        configuration->bodyRadius = 1e300;
+        for (std::size_t axis = 0u; axis < 3u; ++axis) {
+            configuration->bodyCenter[axis] = (low[axis] + high[axis]) * 0.5;
+            configuration->bodyRadius = std::min(configuration->bodyRadius,
+                                                 (high[axis] - low[axis]) * 0.5);
+        }
+    }
+    configuration->values[6] = radius;
+    return true;
+}
+
+// Into result (default-constructed), not returned: the configuration is
+// ~90 KB (the Distance target's tables), too much to copy through a thread's
+// stack (1 MB on Windows).
+void FillCudaEvaluator(const PhysicsSandboxCudaEvaluator &source,
+                       simulation::CudaSearchEvaluatorConfiguration &result) {
+    std::visit(
+            [&result](const auto &evaluator) {
                 using T = std::decay_t<decltype(evaluator)>;
-                simulation::CudaSearchEvaluatorConfiguration result;
                 if constexpr (std::is_same_v<
                                       T,
                                       PhysicsSandboxCudaVelocityEvaluator>) {
@@ -2032,11 +2314,17 @@ simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
                             simulation::CudaSearchEvaluatorKind::Velocity;
                     result.optionFlags =
                             (evaluator.projected ? 1u : 0u) |
-                            (evaluator.alignmentEnabled ? 2u : 0u);
+                            (evaluator.alignmentEnabled ? 2u : 0u) |
+                            (evaluator.towardsPoint
+                                     ? simulation::CudaSearchVelocityTowardsPoint
+                                     : 0u);
                     result.values[0] = evaluator.direction.x;
                     result.values[1] = evaluator.direction.y;
                     result.values[2] = evaluator.direction.z;
                     result.values[3] = evaluator.minimumAlignment;
+                    result.values[4] = evaluator.point.x;
+                    result.values[5] = evaluator.point.y;
+                    result.values[6] = evaluator.point.z;
                 } else if constexpr (std::is_same_v<
                                              T,
                                              PhysicsSandboxCudaPointEvaluator>) {
@@ -2058,6 +2346,9 @@ simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
                     result.values[5] = evaluator.targetRotationZ;
                     result.values[6] = evaluator.targetRotationW;
                     result.values[7] = evaluator.rotationWeight;
+                    for (std::size_t axis = 0u; axis < 6u; ++axis) {
+                        result.values[8u + axis] = evaluator.axisWeights[axis];
+                    }
                 } else if constexpr (std::is_same_v<
                                              T,
                                              PhysicsSandboxCudaVolumeEntryEvaluator>) {
@@ -2069,11 +2360,18 @@ simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
                     result.values[3] = evaluator.maximum.x;
                     result.values[4] = evaluator.maximum.y;
                     result.values[5] = evaluator.maximum.z;
+                    result.optionFlags = evaluator.entrySpeed
+                            ? simulation::CudaSearchEntrySpeed
+                            : 0u;
                 } else if constexpr (std::is_same_v<
                                              T,
                                              PhysicsSandboxCudaCustomVolumeEntryEvaluator>) {
                     result.kind = simulation::CudaSearchEvaluatorKind::CustomVolumeEntry;
-                    result.optionFlags = static_cast<std::uint32_t>(evaluator.plane);
+                    result.optionFlags =
+                            static_cast<std::uint32_t>(evaluator.plane) |
+                            (evaluator.entrySpeed
+                                     ? simulation::CudaSearchEntrySpeed
+                                     : 0u);
                     result.values[0] = evaluator.origin.x;
                     result.values[1] = evaluator.origin.y;
                     result.values[2] = evaluator.origin.z;
@@ -2083,6 +2381,23 @@ simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
                         result.customVolumeVertices[i][0] = evaluator.polygon[i].x;
                         result.customVolumeVertices[i][1] = evaluator.polygon[i].y;
                     }
+                } else if constexpr (std::is_same_v<
+                                             T,
+                                             PhysicsSandboxCudaDistanceEvaluator>) {
+                    // The geometry comes from the session; see
+                    // FillDistanceGeometry.
+                    result.kind = simulation::CudaSearchEvaluatorKind::Distance;
+                    // The CheckpointEvent layout, so its matching applies.
+                    result.values[0] = evaluator.finish ? 1.0 : 0.0;
+                    result.values[1] = evaluator.checkpointIndex;
+                    result.values[2] = evaluator.lap;
+                    result.values[3] = evaluator.checkpointSlot
+                            ? static_cast<double>(*evaluator.checkpointSlot)
+                            : -1.0;
+                    result.values[4] = static_cast<double>(
+                            evaluator.eventIndex & 0xffffffffull);
+                    result.values[5] = static_cast<double>(
+                            evaluator.eventIndex >> 32u);
                 } else if constexpr (std::is_same_v<
                                              T,
                                              PhysicsSandboxCudaStuntPointsEvaluator>) {
@@ -2139,7 +2454,6 @@ simulation::CudaSearchEvaluatorConfiguration CudaEvaluator(
                     result.kind =
                             simulation::CudaSearchEvaluatorKind::FinishTime;
                 }
-                return result;
             },
             source);
 }
@@ -2430,16 +2744,7 @@ PhysicsSandboxResult<PhysicsSandboxStateView> PhysicsSandbox::LoadScenarioFile(
         impl_->controlPlan = SandboxControlPlanStorage::Full(
                 std::move(plan).Value());
         impl_->loaded = true;
-        PhysicsSandboxResult<PhysicsSandboxStateView> restarted =
-                impl_->Restart(0u);
-        if (restarted &&
-            impl_->options.backend == SimulationBackend::Cuda &&
-            impl_->options.prepareCudaSearchSpecialization) {
-            static_cast<void>(
-                    impl_->session->PrepareCudaSearchSpecialization(
-                            nullptr));
-        }
-        return restarted;
+        return impl_->Restart(0u);
     } catch (const std::bad_alloc &) {
         return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
                 SandboxError(PhysicsSandboxErrorCode::AllocationFailed,
@@ -2967,6 +3272,18 @@ PhysicsSandboxResult<PhysicsSandboxStateView> PhysicsSandbox::ReadState()
     }
 }
 
+std::optional<float> PhysicsSandbox::IntersectStaticSegment(
+        const Vector3 &start, const Vector3 &end) const noexcept {
+    if (!impl_ || !impl_->loaded || !impl_->session) return std::nullopt;
+    try {
+        return impl_->session->IntersectStaticSegment(
+                {start.x, start.y, start.z},
+                {end.x - start.x, end.y - start.y, end.z - start.z});
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
 PhysicsSandboxResult<PhysicsSandboxSceneView> PhysicsSandbox::ReadScene()
         const noexcept {
     try {
@@ -3038,6 +3355,16 @@ PhysicsSandboxResult<PhysicsSandbox> CreatePhysicsSandbox(
             return PhysicsSandboxResult<PhysicsSandbox>::Failure(
                     SandboxError(PhysicsSandboxErrorCode::InvalidRequest,
                                  "invalid sandbox creation request"));
+        }
+        if (options.backend == SimulationBackend::Twin) {
+            // design.md §8.2: the twin sandbox (AdvanceTicks etc. on a
+            // TwinState) is not built yet. Load on optimized_cpu and use
+            // <forevervalidator/experimental/twin.h>.
+            return PhysicsSandboxResult<PhysicsSandbox>::Failure(
+                    SandboxError(PhysicsSandboxErrorCode::InvalidRequest,
+                                 "the twin backend has no physics sandbox "
+                                 "yet; load the sandbox on optimized_cpu "
+                                 "and use experimental/twin.h"));
         }
         return PhysicsSandboxResult<PhysicsSandbox>::Success(PhysicsSandbox(
                 std::make_unique<PhysicsSandbox::Impl>(
@@ -3211,6 +3538,7 @@ PhysicsSandboxCudaSearchSession::Impl::Convert(
             execution.winnerStateCaptureKernelMilliseconds;
     result.metrics.finalizationKernelMilliseconds =
             execution.finalizationKernelMilliseconds;
+    result.metrics.aroundWallsReruns = execution.aroundWallsReruns;
     result.metrics.simulationThreadsPerBlock =
             execution.simulationThreadsPerBlock;
     result.metrics.simulationRegistersPerThread =
@@ -3221,6 +3549,26 @@ PhysicsSandboxCudaSearchSession::Impl::Convert(
             execution.simulationActiveBlocksPerMultiprocessor;
     result.metrics.simulationTheoreticalOccupancy =
             execution.simulationTheoreticalOccupancy;
+    if (twinExecutor) {
+        const simulation::TwinSearchHostMetrics &host =
+                twinExecutor->LastMetrics();
+        result.metrics.hostGenerationMilliseconds =
+                host.generationMilliseconds;
+        result.metrics.hostPhysicsMilliseconds = host.physicsMilliseconds;
+        result.metrics.hostEvaluationMilliseconds =
+                host.evaluationMilliseconds;
+        result.metrics.hostSelectionMilliseconds =
+                host.selectionMilliseconds;
+        result.metrics.hostVerificationMilliseconds =
+                host.verificationMilliseconds;
+        result.metrics.hostThreads = host.threads;
+        result.metrics.hostSimulatedTicks = host.simulatedTicks;
+        result.metrics.hostSharedPrefixTicks = host.sharedPrefixTicks;
+        result.metrics.winnerVerified = host.winnerVerified;
+        result.metrics.winnerVerificationMatched =
+                host.winnerVerificationMatched;
+        result.metrics.winnerVerifiedScore = host.winnerVerifiedScore;
+    }
     if (!execution.best.valid) {
         return PhysicsSandboxResult<
                 PhysicsSandboxCudaSearchBatch>::Success(
@@ -3293,6 +3641,7 @@ PhysicsSandboxCudaSearchSession::Impl::Convert(
     const ReplayRaceProgress &race = best.state.race.progress;
     view.checkpointsCollected = race.checkpointCount;
     view.checkpointsTotal = race.requiredCheckpointCount;
+    view.currentLapCheckpoints = race.currentLapCheckpointCount;
     view.completedLaps = race.completedLapCount;
     view.totalLaps = race.requiredLapCount;
     view.raceCompleted = race.raceCompleted;
@@ -3501,12 +3850,29 @@ PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>
 CreatePhysicsSandboxCudaSearchSession(
         PhysicsSandbox &sandbox,
         const PhysicsSandboxCudaSearchConfiguration &configuration) noexcept {
+    return PromotePhysicsSandboxCudaSearchSession(
+            sandbox, PhysicsSandboxCudaSearchSession(nullptr), configuration);
+}
+
+PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>
+PromotePhysicsSandboxCudaSearchSession(
+        PhysicsSandbox &sandbox,
+        PhysicsSandboxCudaSearchSession &&previous,
+        const PhysicsSandboxCudaSearchConfiguration &configuration) noexcept {
     try {
+        const bool useTwin = configuration.twin.has_value();
+        PhysicsSandboxCudaSearchSession previousSession(std::move(previous));
+        // only a twin session carries over; any other is closed before one is made
+        const bool keepPrevious = useTwin && previousSession.impl_ && previousSession.impl_->twinExecutor;
+        if (!keepPrevious) previousSession.impl_.reset();
         if (!sandbox.impl_ || !sandbox.impl_->loaded ||
             !sandbox.impl_->session ||
-            (sandbox.impl_->options.backend != SimulationBackend::Cuda &&
+            (!useTwin &&
+             sandbox.impl_->options.backend != SimulationBackend::Cuda &&
              sandbox.impl_->options.backend != SimulationBackend::Hip &&
              sandbox.impl_->options.backend != SimulationBackend::Vulkan) ||
+            (useTwin &&
+             sandbox.impl_->options.backend != SimulationBackend::OptimizedCpu) ||
             configuration.maximumBatchSize == 0u ||
             configuration.modifiers.empty()) {
             return PhysicsSandboxResult<
@@ -3516,9 +3882,9 @@ CreatePhysicsSandboxCudaSearchSession(
                             "invalid CUDA search session request"));
         }
         const PhysicsSandbox::Impl &source = *sandbox.impl_;
-        const bool useVulkan =
+        const bool useVulkan = !useTwin &&
                 source.options.backend == SimulationBackend::Vulkan;
-        const bool useHip =
+        const bool useHip = !useTwin &&
                 source.options.backend == SimulationBackend::Hip;
         if (useVulkan && !configuration.mutationSegments.empty()) {
             return PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>::Failure(
@@ -3619,7 +3985,10 @@ CreatePhysicsSandboxCudaSearchSession(
             }
             maximumEventCount = sourceInputs.size() + segments * perSegmentGrowth;
         }
-        simulation::CudaSearchExecutorConfiguration internal;
+        // On the heap: see FillCudaEvaluator.
+        const auto internalStorage =
+                std::make_unique<simulation::CudaSearchExecutorConfiguration>();
+        simulation::CudaSearchExecutorConfiguration &internal = *internalStorage;
         internal.changedSegmentCount = configuration.changedSegmentCount;
         for (const auto &segment : configuration.mutationSegments) {
             internal.mutationSegments.push_back(
@@ -3677,28 +4046,6 @@ CreatePhysicsSandboxCudaSearchSession(
                         configuration.incumbent->metricValues[i];
             }
             internal.incumbent = incumbent;
-        }
-        if (configuration.useSessionSpecialization &&
-            !useVulkan && !useHip) {
-            internal.sessionSpecialization =
-                    source.session->CudaSearchSpecialization();
-            if (!internal.sessionSpecialization) {
-                std::string specializationDiagnostic;
-                if (!source.session->PrepareCudaSearchSpecialization(
-                            &specializationDiagnostic)) {
-                    return PhysicsSandboxResult<
-                            PhysicsSandboxCudaSearchSession>::Failure(
-                            SearchError(
-                                    PhysicsSandboxErrorCode::
-                                            SimulationFailed,
-                                    specializationDiagnostic.empty()
-                                            ? "The optional fast CUDA kernel is unavailable"
-                                            : std::move(
-                                                      specializationDiagnostic)));
-                }
-                internal.sessionSpecialization =
-                        source.session->CudaSearchSpecialization();
-            }
         }
         internal.baselineTicks.reserve(endCursor - source.cursor);
         for (std::size_t index = source.cursor;
@@ -3829,7 +4176,86 @@ CreatePhysicsSandboxCudaSearchSession(
                                     "scripted GPU incumbent objective count differs"));
             }
         }
-        internal.evaluator = CudaEvaluator(configuration.evaluator);
+        FillCudaEvaluator(configuration.evaluator, internal.evaluator);
+        // The Vulkan shaders are generated from the CUDA sources and have not
+        // been regenerated for these options yet.
+        if (useVulkan) {
+            bool unsupported = false;
+            if (const auto *velocity = std::get_if<
+                        PhysicsSandboxCudaVelocityEvaluator>(
+                                &configuration.evaluator)) {
+                unsupported = velocity->towardsPoint;
+            } else if (const auto *pose = std::get_if<
+                               PhysicsSandboxCudaPoseEvaluator>(
+                                       &configuration.evaluator)) {
+                for (const double weight : pose->axisWeights) {
+                    unsupported |= weight != 1.0;
+                }
+            } else if (const auto *volume = std::get_if<
+                               PhysicsSandboxCudaVolumeEntryEvaluator>(
+                                       &configuration.evaluator)) {
+                unsupported = volume->entrySpeed;
+            }
+            if (unsupported) {
+                return PhysicsSandboxResult<
+                        PhysicsSandboxCudaSearchSession>::Failure(
+                        SearchError(PhysicsSandboxErrorCode::InvalidRequest,
+                                    "this target option is not available on Vulkan yet"));
+            }
+        }
+        if (std::holds_alternative<PhysicsSandboxCudaDistanceEvaluator>(
+                    configuration.evaluator)) {
+            std::string distanceError;
+            if (useVulkan) {
+                distanceError = "distance targets are not available on Vulkan";
+            }
+            if (!distanceError.empty() ||
+                !FillDistanceGeometry(*source.session, source.definition,
+                                      &internal.evaluator, &distanceError)) {
+                return PhysicsSandboxResult<
+                        PhysicsSandboxCudaSearchSession>::Failure(
+                        SearchError(PhysicsSandboxErrorCode::InvalidRequest,
+                                    distanceError));
+            }
+            const auto &tables = std::get<PhysicsSandboxCudaDistanceEvaluator>(
+                                         configuration.evaluator)
+                                         .aroundWalls;
+            if (!tables.empty()) {
+                if (tables.size() != internal.evaluator.distanceTriggerCount) {
+                    distanceError = "the around-walls tables do not match the target's triggers";
+                }
+                for (std::size_t i = 0u; i < tables.size() && distanceError.empty(); ++i) {
+                    if (!tables[i]) {
+                        distanceError = "an around-walls table is missing";
+                        break;
+                    }
+                    const std::lock_guard<std::mutex> lock(tables[i]->mutex);
+                    const std::vector<std::uint8_t> &bytes = tables[i]->bytes;
+                    if (!experimental::around_walls::Valid(bytes.data(), bytes.size())) {
+                        distanceError = "an around-walls table is not readable";
+                        break;
+                    }
+                    // Each table starts on a 16-byte boundary.
+                    internal.aroundWallsTables.resize(
+                            (internal.aroundWallsTables.size() + 15u) & ~std::size_t{15u});
+                    internal.evaluator.aroundWallsOffsets[i] = internal.aroundWallsTables.size();
+                    internal.aroundWallsTables.insert(internal.aroundWallsTables.end(),
+                                                      bytes.begin(), bytes.end());
+                }
+                // Corners the search fills go back to the caller's tables.
+                internal.aroundWallsFilled = [tables](std::uint32_t index,
+                                                      const unsigned char *bytes) {
+                    const std::lock_guard<std::mutex> lock(tables[index]->mutex);
+                    std::memcpy(tables[index]->bytes.data(), bytes, tables[index]->bytes.size());
+                };
+                if (!distanceError.empty()) {
+                    return PhysicsSandboxResult<
+                            PhysicsSandboxCudaSearchSession>::Failure(
+                            SearchError(PhysicsSandboxErrorCode::InvalidRequest,
+                                        distanceError));
+                }
+            }
+        }
         if (configuration.condition) {
             if (configuration.condition->instructions.empty() ||
                 configuration.condition->instructions.size() > 256u) {
@@ -3863,10 +4289,63 @@ CreatePhysicsSandboxCudaSearchSession(
         std::string diagnostic;
         std::unique_ptr<simulation::CudaSearchExecutor> executor;
         std::unique_ptr<simulation::VulkanSearchExecutor> vulkanExecutor;
+        std::unique_ptr<simulation::TwinSearchExecutor> twinExecutor;
 #if FOREVERVALIDATOR_HAS_HIP
         std::unique_ptr<simulation::HipSearchExecutor> hipExecutor;
 #endif
-        if (useVulkan) {
+        if (useTwin) {
+            simulation::TwinSearchExecutorSource twinSource;
+            twinSource.session = source.session.get();
+            const ReplaySimulationDefinition definition = source.definition;
+            const auto challenge = source.challengeMetadata;
+            const ReplayControlTick firstTick = source.controlPlan->Tick(0u);
+            const std::uint32_t seed = source.inputMetadata.validationSeed;
+            twinSource.startSession =
+                    [definition, challenge, firstTick, seed](
+                            ReplaySimulationSession &session) {
+                        session.ConfigureReplayRace(
+                                challenge.playMode.value_or(
+                                        EChallengePlayMode::Race),
+                                challenge.isLapRace,
+                                challenge.isLapRace ? challenge.lapCount
+                                                    : 1u);
+                        return session.StartIncremental(
+                                       definition, firstTick, seed) ==
+                               ReplaySimulationRunResult::Success;
+                    };
+            twinSource.timeline.reserve(endCursor);
+            for (std::size_t index = 0u; index < endCursor; ++index) {
+                twinSource.timeline.push_back(
+                        source.controlPlan->Tick(index));
+            }
+            twinSource.branchCursor = source.cursor;
+            twinSource.validationSeed = source.inputMetadata.validationSeed;
+            twinSource.options.threads = configuration.twin->threads;
+            twinSource.options.policy = configuration.twin->policy;
+            twinSource.options.collision = configuration.twin->collision;
+            twinSource.options.debugDelegateToOptimizedCpu =
+                    configuration.twin->debugDelegateToOptimizedCpu;
+            twinSource.options.debugAllowUnfinishedEngine =
+                    configuration.twin->debugAllowUnfinishedEngine;
+            twinSource.definition =
+                    std::make_shared<const ReplaySimulationDefinition>(
+                            source.definition);
+            twinSource.options.verifyWinners =
+                    configuration.twin->verifyWinners;
+            twinSource.options.gpu = configuration.twin->gpu;
+            twinSource.options.branchAtFirstChange =
+                    configuration.twin->branchAtFirstChange;
+            twinSource.replayName = source.identity.name;
+            if (keepPrevious &&
+                previousSession.impl_->twinExecutor->Rebaseline(internal, twinSource, &diagnostic)) {
+                twinExecutor = std::move(previousSession.impl_->twinExecutor);
+            } else {
+                previousSession.impl_.reset();
+                diagnostic.clear();
+                twinExecutor = simulation::CreateTwinSearchExecutor(
+                        std::move(internal), std::move(twinSource), &diagnostic);
+            }
+        } else if (useVulkan) {
             vulkanExecutor = source.session->CreateVulkanSearchExecutor(
                     std::move(internal), source.cursor, &diagnostic);
         } else if (useHip) {
@@ -3880,7 +4359,7 @@ CreatePhysicsSandboxCudaSearchSession(
             executor = source.session->CreateCudaSearchExecutor(
                     std::move(internal), source.cursor, &diagnostic);
         }
-        if (!executor && !vulkanExecutor
+        if (!executor && !vulkanExecutor && !twinExecutor
 #if FOREVERVALIDATOR_HAS_HIP
             && !hipExecutor
 #endif
@@ -3890,13 +4369,16 @@ CreatePhysicsSandboxCudaSearchSession(
                     SearchError(
                             PhysicsSandboxErrorCode::SimulationFailed,
                             diagnostic.empty()
-                                    ? "CUDA search session creation failed"
+                                    ? (useTwin
+                                       ? "twin search session creation failed"
+                                       : "CUDA search session creation failed")
                                     : diagnostic));
         }
         auto impl =
                 std::make_unique<PhysicsSandboxCudaSearchSession::Impl>();
         impl->executor = std::move(executor);
         impl->vulkanExecutor = std::move(vulkanExecutor);
+        impl->twinExecutor = std::move(twinExecutor);
 #if FOREVERVALIDATOR_HAS_HIP
         impl->hipExecutor = std::move(hipExecutor);
 #endif
@@ -4104,6 +4586,107 @@ std::size_t cuda_test::PhysicsSandboxCudaTestAccess::Cursor(
     return sandbox.impl_ && sandbox.impl_->loaded
             ? sandbox.impl_->cursor
             : 0u;
+}
+
+std::shared_ptr<const ReplaySimulationInstanceClone>
+twin_test::PhysicsSandboxTwinTestAccess::RuntimeClone(
+        const PhysicsSandboxState &state) noexcept {
+    return state.impl_ ? state.impl_->runtimeClone : nullptr;
+}
+
+const ReplaySimulationSession *twin_test::PhysicsSandboxTwinTestAccess::Session(
+        const PhysicsSandbox &sandbox) noexcept {
+    return sandbox.impl_ && sandbox.impl_->loaded ? sandbox.impl_->session.get() : nullptr;
+}
+
+const ReplaySimulationDefinition *twin_test::PhysicsSandboxTwinTestAccess::Definition(
+        const PhysicsSandbox &sandbox) noexcept {
+    return sandbox.impl_ && sandbox.impl_->loaded ? &sandbox.impl_->definition : nullptr;
+}
+
+namespace {
+// The control plan's tick at `cursor` (AdvanceControlPlan's choice between the replacement and the base).
+const ReplayControlTick *PlanTickAt(const SandboxControlPlanStorage &plan, std::size_t cursor) noexcept {
+    if (!plan.base || cursor >= plan.Size()) return nullptr;
+    if (!plan.replacement.empty() && cursor >= plan.replacementBegin &&
+        cursor - plan.replacementBegin < plan.replacement.size()) {
+        return &plan.replacement[cursor - plan.replacementBegin];
+    }
+    return &plan.base->ticks[cursor];
+}
+}  // namespace
+
+bool twin_test::PhysicsSandboxTwinTestAccess::NextTickControls(
+        const PhysicsSandbox &sandbox, TickControls *controls) noexcept {
+    if (controls == nullptr || !sandbox.impl_ || !sandbox.impl_->loaded ||
+        !sandbox.impl_->controlPlan) {
+        return false;
+    }
+    const ReplayControlTick *tick =
+            PlanTickAt(*sandbox.impl_->controlPlan, sandbox.impl_->cursor);
+    if (tick == nullptr) return false;
+    *controls = TickControls{tick->controls.lowSpeedGateA,
+                             tick->controls.lowSpeedGateB,
+                             tick->controls.steering};
+    return true;
+}
+
+PhysicsSandboxResult<PhysicsSandboxStateView>
+twin_test::PhysicsSandboxTwinTestAccess::AdvanceTickWithControls(
+        PhysicsSandbox &sandbox, const TickControls &controls) noexcept {
+    try {
+        auto &impl = sandbox.impl_;
+        const ReplayControlTick *planned =
+                impl && impl->loaded && impl->controlPlan && impl->session
+                ? PlanTickAt(*impl->controlPlan, impl->cursor)
+                : nullptr;
+        if (planned == nullptr) {
+            return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                    SandboxError(PhysicsSandboxErrorCode::InvalidRequest,
+                                 "invalid sandbox tick advance"));
+        }
+        std::vector<ReplayControlTick> ticks{*planned};
+        ticks[0].controls.lowSpeedGateA = controls.gateA;
+        ticks[0].controls.lowSpeedGateB = controls.gateB;
+        ticks[0].controls.steering = controls.steering;
+        tmnf::simulation::DeterministicExecutionScope deterministicScope;
+        if (!deterministicScope.Established()) {
+            return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                    SandboxError(PhysicsSandboxErrorCode::SimulationFailed,
+                                 "deterministic execution mode is unavailable"));
+        }
+        const ReplaySimulationTimelineResult result =
+                impl->session->AdvanceIncremental(ticks, 0u, 1u);
+        if (result.result != ReplaySimulationRunResult::Success ||
+            !deterministicScope.Restore()) {
+            return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                    SandboxError(PhysicsSandboxErrorCode::SimulationFailed,
+                                 "sandbox tick advance failed"));
+        }
+        ++impl->cursor;
+        return impl->ReadView();
+    } catch (...) {
+        return PhysicsSandboxResult<PhysicsSandboxStateView>::Failure(
+                SandboxError(PhysicsSandboxErrorCode::UnexpectedFailure,
+                             "unexpected sandbox advance failure"));
+    }
+}
+
+bool twin_test::PhysicsSandboxTwinTestAccess::ReplaceRuntimeClone(
+        PhysicsSandboxState &state,
+        const ReplaySimulationInstanceClone &clone) noexcept {
+    try {
+        if (!state.impl_ || !state.impl_->runtimeClone) {
+            return false;
+        }
+        auto impl = std::make_shared<PhysicsSandboxState::Impl>(*state.impl_);
+        impl->runtimeClone =
+                std::make_shared<const ReplaySimulationInstanceClone>(clone);
+        state = PhysicsSandboxState(std::move(impl));
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 std::optional<OptimizedCpuStaticSceneFingerprint>

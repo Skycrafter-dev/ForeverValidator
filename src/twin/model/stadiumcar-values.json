@@ -1,0 +1,5502 @@
+{
+ "meta": {
+  "source": "Stadium.pak (sha256 prefix 21d42e4ce6c794e9) + packlist.dat, workstation ~/tmuf/Packs",
+  "loader": "FV branch twin @ 6a51fdf: DefaultVehiclePackArchive::LoadFromPack, DefaultVehicleSolidArchive::LoadFromPack, BuildVehicleDynaDefinition, BuildVehicleWheelSetDefinition",
+  "tool": "workstation ~/collision-board-dump/values_dump.cpp + tuning_fields.inc (generated from src/engine/game/replay_vehicle_tuning_definition.h)",
+  "format": "path -> {type, value (decimal, %.9g round-trips binary32), bits (IEEE-754 binary32 hex for f32)}",
+  "defaults": "paths under 'default.' are FV's MakeDefaultVehicleTuningDefinition() values (replay_vehicle_tuning_definition.cpp:3-121), for comparison only; never use them for StadiumCar",
+  "date": "2026-11-08"
+ },
+ "values": {
+  "tuning.engineSpeedNorm": {
+   "type": "f32",
+   "value": 277.777802,
+   "bits": "0x438ae38f"
+  },
+  "tuning.lowSpeedFrictionMagnitude": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.lowSpeedLinearDamping": {
+   "type": "f32",
+   "value": 0.300000012,
+   "bits": "0x3e99999a"
+  },
+  "tuning.wheelForceMode": {
+   "type": "u32",
+   "value": 2
+  },
+  "tuning.handlingModel": {
+   "type": "u32",
+   "value": 5
+  },
+  "tuning.visual.wheelSpeedBase": {
+   "type": "f32",
+   "value": 2,
+   "bits": "0x40000000"
+  },
+  "tuning.visual.wheelSpeedScale": {
+   "type": "f32",
+   "value": 0.850000024,
+   "bits": "0x3f59999a"
+  },
+  "tuning.steering.slewRate": {
+   "type": "f32",
+   "value": 20,
+   "bits": "0x41a00000"
+  },
+  "tuning.steering.assistFullSpeed": {
+   "type": "f32",
+   "value": 30,
+   "bits": "0x41f00000"
+  },
+  "tuning.steering.slowDownScale": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "tuning.suspension.wheelSpringCoef": {
+   "type": "f32",
+   "value": 40,
+   "bits": "0x42200000"
+  },
+  "tuning.suspension.wheelDamperCoef": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.suspension.damperModulationMaxAbsorb": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.suspension.damperModulationMinAbsorb": {
+   "type": "f32",
+   "value": 0.699999988,
+   "bits": "0x3f333333"
+  },
+  "tuning.suspension.wheelRestDamperAbsorb": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "tuning.suspension.wheelStaticSpringScale": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "tuning.suspension.wheelAbsorbFollowCoef": {
+   "type": "f32",
+   "value": 5,
+   "bits": "0x40a00000"
+  },
+  "tuning.contactResponse.bodyImpactFeedbackHighThreshold": {
+   "type": "f32",
+   "value": 50,
+   "bits": "0x42480000"
+  },
+  "tuning.contactResponse.bodyImpactFeedbackLowThreshold": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "tuning.contactResponse.wheelImpactFeedbackHighThreshold": {
+   "type": "f32",
+   "value": 50,
+   "bits": "0x42480000"
+  },
+  "tuning.contactResponse.wheelImpactFeedbackLowThreshold": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "tuning.contactResponse.bodyContactTangentLimitOther": {
+   "type": "f32",
+   "value": 0.300000012,
+   "bits": "0x3e99999a"
+  },
+  "tuning.contactResponse.bodyContactTangentLimitMetal": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "tuning.contactResponse.bodyContactImpulseMetal": {
+   "type": "f32",
+   "value": -0.5,
+   "bits": "0xbf000000"
+  },
+  "tuning.contactResponse.bodyContactImpulseOther": {
+   "type": "f32",
+   "value": -0.5,
+   "bits": "0xbf000000"
+  },
+  "tuning.contactResponse.wheelContactImpulseOther": {
+   "type": "f32",
+   "value": -0.800000012,
+   "bits": "0xbf4ccccd"
+  },
+  "tuning.contactResponse.wheelContactImpulseMetal": {
+   "type": "f32",
+   "value": -0.800000012,
+   "bits": "0xbf4ccccd"
+  },
+  "tuning.contactResponse.pointImpulseAngularYScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.contactResponse.pointImpulseAngularScale": {
+   "type": "f32",
+   "value": 0.550000012,
+   "bits": "0x3f0ccccd"
+  },
+  "tuning.contactResponse.pointImpulseAngularSpeedMax": {
+   "type": "f32",
+   "value": 100,
+   "bits": "0x42c80000"
+  },
+  "tuning.contactResponse.pointImpulseLinearSpeedGrowthLimitSq": {
+   "type": "f32",
+   "value": 10000,
+   "bits": "0x461c4000"
+  },
+  "tuning.contactResponse.specialContactImpulseMagnitude": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "tuning.contactResponse.specialSolidFeedbackValue": {
+   "type": "f32",
+   "value": 0.100000001,
+   "bits": "0x3dcccccd"
+  },
+  "tuning.contactResponse.singleMaterial": {
+   "type": "u32",
+   "value": 9
+  },
+  "tuning.bodyAirResponse.solidPhysicalMass": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.bodyAirResponse.solidInertiaMass": {
+   "type": "f32",
+   "value": 5,
+   "bits": "0x40a00000"
+  },
+  "tuning.bodyAirResponse.solidInertiaBoxSize.x": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "tuning.bodyAirResponse.solidInertiaBoxSize.y": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "tuning.bodyAirResponse.solidInertiaBoxSize.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.bodyAirResponse.solidCenterZHalfExtentScale": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.bodyAirResponse.solidCenterYOffset": {
+   "type": "f32",
+   "value": 0.449999988,
+   "bits": "0x3ee66666"
+  },
+  "tuning.bodyAirResponse.solidPhysicalResponseCoefB": {
+   "type": "f32",
+   "value": 0.300000012,
+   "bits": "0x3e99999a"
+  },
+  "tuning.bodyAirResponse.airborneSolidFeedback0": {
+   "type": "f32",
+   "value": 0.0299999993,
+   "bits": "0x3cf5c28f"
+  },
+  "tuning.bodyAirResponse.airTorqueLinearCoef": {
+   "type": "f32",
+   "value": 0.400000006,
+   "bits": "0x3ecccccd"
+  },
+  "tuning.bodyAirResponse.airTorqueQuadraticCoef": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "tuning.bodyAirResponse.groundedSolidFeedback1": {
+   "type": "f32",
+   "value": 3,
+   "bits": "0x40400000"
+  },
+  "tuning.bodyAirResponse.airborneSolidFeedback1": {
+   "type": "f32",
+   "value": 2.5,
+   "bits": "0x40200000"
+  },
+  "tuning.bodyAirResponse.slopeAdherence1Min": {
+   "type": "f32",
+   "value": 0.300000012,
+   "bits": "0x3e99999a"
+  },
+  "tuning.bodyAirResponse.slopeAdherence1Max": {
+   "type": "f32",
+   "value": 0.699999988,
+   "bits": "0x3f333333"
+  },
+  "tuning.bodyAirResponse.slopeAdherence2Min": {
+   "type": "f32",
+   "value": 0.400000006,
+   "bits": "0x3ecccccd"
+  },
+  "tuning.bodyAirResponse.slopeAdherence2Max": {
+   "type": "f32",
+   "value": 0.699999988,
+   "bits": "0x3f333333"
+  },
+  "tuning.bodyAirResponse.airControlMemoryTickWindow": {
+   "type": "u32",
+   "value": 30000
+  },
+  "tuning.bodyAirResponse.airControlYSwitchThreshold": {
+   "type": "f32",
+   "value": 3.1400001,
+   "bits": "0x4048f5c3"
+  },
+  "tuning.radiusSteering.steerTorqueSpeedScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.radiusSteering.angularDampingLinear": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.radiusSteering.angularDampingQuadratic": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.radiusSteering.lateralFrictionLinear": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.radiusSteering.lateralFrictionQuadratic": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.radiusSteering.captureExitSideSpeedMax": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.radiusSteering.inputSteerRadiusScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.radiusSteering.slippingFrictionScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.radiusSteering.capturedAngleRate": {
+   "type": "f32",
+   "value": 0.00499999989,
+   "bits": "0x3ba3d70a"
+  },
+  "tuning.radiusSteering.capturedAngleRadiusScale": {
+   "type": "f32",
+   "value": 0.300000012,
+   "bits": "0x3e99999a"
+  },
+  "tuning.radiusSteering.steerAngleLimit": {
+   "type": "f32",
+   "value": 0.785398185,
+   "bits": "0x3f490fdb"
+  },
+  "tuning.radiusSteering.steerAngleFromInputScale": {
+   "type": "f32",
+   "value": 0.785398006,
+   "bits": "0x3f490fd8"
+  },
+  "tuning.slipResponse.slippingAccelScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.slipResponse.lateralSlowDownTickWindow": {
+   "type": "u32",
+   "value": 500
+  },
+  "tuning.slipResponse.rolloverTorqueCap": {
+   "type": "f32",
+   "value": 20,
+   "bits": "0x41a00000"
+  },
+  "tuning.slipResponse.steeringMemoryTicks": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.slipResponse.slipSlowdownEnabled": {
+   "type": "bool",
+   "value": false
+  },
+  "tuning.slipResponse.slipSlowdownTicks": {
+   "type": "u32",
+   "value": 0
+  },
+  "tuning.slipResponse.longitudinalTorqueScale": {
+   "type": "f32",
+   "value": 0.300000012,
+   "bits": "0x3e99999a"
+  },
+  "tuning.gearedDrive.forwardAccelBase": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.gearedDrive.forwardAccelSpeedCoef": {
+   "type": "f32",
+   "value": 1.75,
+   "bits": "0x3fe00000"
+  },
+  "tuning.gearedDrive.forwardAccelCapWhenSlipping": {
+   "type": "f32",
+   "value": 60,
+   "bits": "0x42700000"
+  },
+  "tuning.gearedDrive.forwardAccelCap": {
+   "type": "f32",
+   "value": 30,
+   "bits": "0x41f00000"
+  },
+  "tuning.gearedDrive.speedLimitForce": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "tuning.gearedDrive.forceZScale": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.gearedDrive.sideForceToDriveTorqueScale": {
+   "type": "f32",
+   "value": 0.0799999982,
+   "bits": "0x3da3d70a"
+  },
+  "tuning.gearedDrive.slippingSteerTorqueScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.gearedDrive.lateralForceScale": {
+   "type": "f32",
+   "value": 40,
+   "bits": "0x42200000"
+  },
+  "tuning.gearedDrive.slippingSideFrictionScale": {
+   "type": "f32",
+   "value": 0.349999994,
+   "bits": "0x3eb33333"
+  },
+  "tuning.gearedDrive.sideFrictionSlipBlend": {
+   "type": "f32",
+   "value": 0.0179999992,
+   "bits": "0x3c9374bc"
+  },
+  "tuning.gearedDrive.driveSideFrictionSlipBlend": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.gearedDrive.slipRatioScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.gearedDrive.currentForceTorqueMin": {
+   "type": "f32",
+   "value": 0.00999999978,
+   "bits": "0x3c23d70a"
+  },
+  "tuning.gearedDrive.currentTorqueXScale": {
+   "type": "f32",
+   "value": 0.0500000007,
+   "bits": "0x3d4ccccd"
+  },
+  "tuning.gearedDrive.currentTorqueZScale": {
+   "type": "f32",
+   "value": 0.0500000007,
+   "bits": "0x3d4ccccd"
+  },
+  "tuning.gearedDrive.perSlippingWheelAccelScale": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "tuning.gearedDrive.lowSpeedBSlippingGripScale": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "tuning.gearedDrive.forwardAccelCapWhenSlippingReverse": {
+   "type": "f32",
+   "value": 100,
+   "bits": "0x42c80000"
+  },
+  "tuning.gearedDrive.forwardAccelCapReverse": {
+   "type": "f32",
+   "value": 50,
+   "bits": "0x42480000"
+  },
+  "tuning.gearedDrive.dirtSlideSideForceScale": {
+   "type": "f32",
+   "value": -0.0500000007,
+   "bits": "0xbd4ccccd"
+  },
+  "tuning.gearedDrive.dirtSlideGateScale": {
+   "type": "f32",
+   "value": 0.0500000007,
+   "bits": "0x3d4ccccd"
+  },
+  "tuning.gearedDrive.dirtSlideForwardForceScale": {
+   "type": "f32",
+   "value": 90,
+   "bits": "0x42b40000"
+  },
+  "tuning.gearedDrive.dirtSlideForwardGateScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.gearedDrive.transmission.reverseSpeedNorm": {
+   "type": "f32",
+   "value": 138.611115,
+   "bits": "0x430a9c72"
+  },
+  "tuning.gearedDrive.transmission.gearSpeedRatio.size": {
+   "type": "u32",
+   "value": 6
+  },
+  "tuning.gearedDrive.transmission.gearSpeedRatio[0]": {
+   "type": "f32",
+   "value": 400,
+   "bits": "0x43c80000"
+  },
+  "tuning.gearedDrive.transmission.gearSpeedRatio[1]": {
+   "type": "f32",
+   "value": 370,
+   "bits": "0x43b90000"
+  },
+  "tuning.gearedDrive.transmission.gearSpeedRatio[2]": {
+   "type": "f32",
+   "value": 220,
+   "bits": "0x435c0000"
+  },
+  "tuning.gearedDrive.transmission.gearSpeedRatio[3]": {
+   "type": "f32",
+   "value": 160,
+   "bits": "0x43200000"
+  },
+  "tuning.gearedDrive.transmission.gearSpeedRatio[4]": {
+   "type": "f32",
+   "value": 110,
+   "bits": "0x42dc0000"
+  },
+  "tuning.gearedDrive.transmission.gearSpeedRatio[5]": {
+   "type": "f32",
+   "value": 85,
+   "bits": "0x42aa0000"
+  },
+  "tuning.gearedDrive.transmission.upshiftThreshold.size": {
+   "type": "u32",
+   "value": 6
+  },
+  "tuning.gearedDrive.transmission.upshiftThreshold[0]": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.gearedDrive.transmission.upshiftThreshold[1]": {
+   "type": "f32",
+   "value": 0.949999988,
+   "bits": "0x3f733333"
+  },
+  "tuning.gearedDrive.transmission.upshiftThreshold[2]": {
+   "type": "f32",
+   "value": 0.899999976,
+   "bits": "0x3f666666"
+  },
+  "tuning.gearedDrive.transmission.upshiftThreshold[3]": {
+   "type": "f32",
+   "value": 0.949999988,
+   "bits": "0x3f733333"
+  },
+  "tuning.gearedDrive.transmission.upshiftThreshold[4]": {
+   "type": "f32",
+   "value": 0.949999988,
+   "bits": "0x3f733333"
+  },
+  "tuning.gearedDrive.transmission.upshiftThreshold[5]": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.gearedDrive.transmission.downshiftThreshold.size": {
+   "type": "u32",
+   "value": 6
+  },
+  "tuning.gearedDrive.transmission.downshiftThreshold[0]": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.gearedDrive.transmission.downshiftThreshold[1]": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.gearedDrive.transmission.downshiftThreshold[2]": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "tuning.gearedDrive.transmission.downshiftThreshold[3]": {
+   "type": "f32",
+   "value": 0.569999993,
+   "bits": "0x3f11eb85"
+  },
+  "tuning.gearedDrive.transmission.downshiftThreshold[4]": {
+   "type": "f32",
+   "value": 0.550000012,
+   "bits": "0x3f0ccccd"
+  },
+  "tuning.gearedDrive.transmission.downshiftThreshold[5]": {
+   "type": "f32",
+   "value": 0.600000024,
+   "bits": "0x3f19999a"
+  },
+  "tuning.gearedDrive.transmission.rpmWanted.size": {
+   "type": "u32",
+   "value": 0
+  },
+  "tuning.gearedDrive.transmission.targetInputBias.size": {
+   "type": "u32",
+   "value": 6
+  },
+  "tuning.gearedDrive.transmission.targetInputBias[0]": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.gearedDrive.transmission.targetInputBias[1]": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.gearedDrive.transmission.targetInputBias[2]": {
+   "type": "f32",
+   "value": 694.486633,
+   "bits": "0x442d9f25"
+  },
+  "tuning.gearedDrive.transmission.targetInputBias[3]": {
+   "type": "f32",
+   "value": 1005.08069,
+   "bits": "0x447b452a"
+  },
+  "tuning.gearedDrive.transmission.targetInputBias[4]": {
+   "type": "f32",
+   "value": 1206.61792,
+   "bits": "0x4496d3c6"
+  },
+  "tuning.gearedDrive.transmission.targetInputBias[5]": {
+   "type": "f32",
+   "value": 777.387329,
+   "bits": "0x444258ca"
+  },
+  "tuning.gearedDrive.transmission.rpmDelta.size": {
+   "type": "u32",
+   "value": 6
+  },
+  "tuning.gearedDrive.transmission.rpmDelta[0]": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.gearedDrive.transmission.rpmDelta[1]": {
+   "type": "f32",
+   "value": 0.734727263,
+   "bits": "0x3f3c1716"
+  },
+  "tuning.gearedDrive.transmission.rpmDelta[2]": {
+   "type": "f32",
+   "value": 0.721250057,
+   "bits": "0x3f38a3d8"
+  },
+  "tuning.gearedDrive.transmission.rpmDelta[3]": {
+   "type": "f32",
+   "value": 0.731818199,
+   "bits": "0x3f3b5870"
+  },
+  "tuning.gearedDrive.transmission.rpmDelta[4]": {
+   "type": "f32",
+   "value": 0.794705808,
+   "bits": "0x3f4b71d7"
+  },
+  "tuning.gearedDrive.transmission.rpmDelta[5]": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.gearedDrive.burnout.reverseForceThreshold": {
+   "type": "f32",
+   "value": 200,
+   "bits": "0x43480000"
+  },
+  "tuning.gearedDrive.burnout.donutSpeedHigh": {
+   "type": "f32",
+   "value": 20.833334,
+   "bits": "0x41a6aaab"
+  },
+  "tuning.gearedDrive.burnout.donutSpeedLow": {
+   "type": "f32",
+   "value": 3,
+   "bits": "0x40400000"
+  },
+  "tuning.gearedDrive.burnout.lateralCorrectionScale": {
+   "type": "f32",
+   "value": 2,
+   "bits": "0x40000000"
+  },
+  "tuning.gearedDrive.burnout.angleTorqueScale": {
+   "type": "f32",
+   "value": 6,
+   "bits": "0x40c00000"
+  },
+  "tuning.gearedDrive.burnout.angularDampingLinear": {
+   "type": "f32",
+   "value": 2,
+   "bits": "0x40000000"
+  },
+  "tuning.gearedDrive.burnout.angleReturnQuadratic": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.gearedDrive.burnout.tangentAngularDamping": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "tuning.gearedDrive.burnout.radiusCorrectionScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.gearedDrive.burnout.radiusCorrectionSpeedScale": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "tuning.gearedDrive.burnout.radiusMin": {
+   "type": "f32",
+   "value": 20,
+   "bits": "0x41a00000"
+  },
+  "tuning.gearedDrive.burnout.tangentSpeedMax": {
+   "type": "f32",
+   "value": 20.833334,
+   "bits": "0x41a6aaab"
+  },
+  "tuning.gearedDrive.burnout.angleLimit": {
+   "type": "f32",
+   "value": 0.349999994,
+   "bits": "0x3eb33333"
+  },
+  "tuning.gearedDrive.burnout.angleLimitPositive": {
+   "type": "f32",
+   "value": 1.74530005,
+   "bits": "0x3fdf65fe"
+  },
+  "tuning.gearedDrive.burnout.angleLimitNegative": {
+   "type": "f32",
+   "value": 0.785000026,
+   "bits": "0x3f48f5c3"
+  },
+  "tuning.gearedDrive.burnout.durationTicks": {
+   "type": "u32",
+   "value": 500
+  },
+  "tuning.gearedDrive.burnout.driveFadeScale": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "tuning.gearedDrive.burnout.sideForceFadeScale": {
+   "type": "f32",
+   "value": 0.00999999978,
+   "bits": "0x3c23d70a"
+  },
+  "tuning.gearedDrive.burnout.exitDurationTicks": {
+   "type": "u32",
+   "value": 150
+  },
+  "tuning.gearedDrive.burnout.exitAccelFadeScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.gearedDrive.burnout.exitMinSpeed": {
+   "type": "f32",
+   "value": 5,
+   "bits": "0x40a00000"
+  },
+  "tuning.gearedDrive.burnout.exitSteerGripScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.gearedDrive.burnout.exitBonusAccelScale": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.gearedDrive.burnout.wheelAngularSpeedOverride": {
+   "type": "f32",
+   "value": 150,
+   "bits": "0x43160000"
+  },
+  "tuning.gearedDrive.burnout.exitSideFrictionScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.gearedDrive.input.engineInputMaximum": {
+   "type": "f32",
+   "value": 11000,
+   "bits": "0x462be000"
+  },
+  "tuning.gearedDrive.input.burnoutHoldInputRise": {
+   "type": "f32",
+   "value": 6000,
+   "bits": "0x45bb8000"
+  },
+  "tuning.gearedDrive.input.airborneInputRise": {
+   "type": "f32",
+   "value": 6000,
+   "bits": "0x45bb8000"
+  },
+  "tuning.gearedDrive.input.airborneInputFall": {
+   "type": "f32",
+   "value": 3000,
+   "bits": "0x453b8000"
+  },
+  "tuning.gearedDrive.input.groundInputBrake": {
+   "type": "f32",
+   "value": 17000,
+   "bits": "0x4684d000"
+  },
+  "tuning.gearedDrive.input.groundInputRise": {
+   "type": "f32",
+   "value": 11500,
+   "bits": "0x4633b000"
+  },
+  "tuning.gearedDrive.input.transitionInputRise": {
+   "type": "f32",
+   "value": 10000,
+   "bits": "0x461c4000"
+  },
+  "tuning.gearedDrive.input.groundInputFall": {
+   "type": "f32",
+   "value": 4000,
+   "bits": "0x457a0000"
+  },
+  "tuning.gearedDrive.input.forwardTransitionSpeedHigh": {
+   "type": "f32",
+   "value": 3,
+   "bits": "0x40400000"
+  },
+  "tuning.gearedDrive.input.forwardTransitionSpeedLow": {
+   "type": "f32",
+   "value": -2,
+   "bits": "0xc0000000"
+  },
+  "tuning.gearedDrive.input.reverseTransitionSpeedHigh": {
+   "type": "f32",
+   "value": 2,
+   "bits": "0x40000000"
+  },
+  "tuning.gearedDrive.input.reverseTransitionSpeedLow": {
+   "type": "f32",
+   "value": -3,
+   "bits": "0xc0400000"
+  },
+  "tuning.water.buoyancyForce": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.water.splashHorizontalSpeedThreshold": {
+   "type": "f32",
+   "value": 55.5555573,
+   "bits": "0x425e38e4"
+  },
+  "tuning.water.splashTotalSpeedThreshold": {
+   "type": "f32",
+   "value": 50,
+   "bits": "0x42480000"
+  },
+  "tuning.water.angularLinearDamping": {
+   "type": "f32",
+   "value": 0.100000001,
+   "bits": "0x3dcccccd"
+  },
+  "tuning.water.angularSpeedDamping": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "tuning.turbo.impulseScaleA": {
+   "type": "f32",
+   "value": 5,
+   "bits": "0x40a00000"
+  },
+  "tuning.turbo.impulseScaleB": {
+   "type": "f32",
+   "value": 20,
+   "bits": "0x41a00000"
+  },
+  "tuning.turbo.durationA": {
+   "type": "u32",
+   "value": 250
+  },
+  "tuning.turbo.durationB": {
+   "type": "u32",
+   "value": 100
+  },
+  "tuning.feedback.surfaceBaseRate": {
+   "type": "f32",
+   "value": -0.300000012,
+   "bits": "0xbe99999a"
+  },
+  "tuning.feedback.forceDivisor": {
+   "type": "f32",
+   "value": 5,
+   "bits": "0x40a00000"
+  },
+  "tuning.curves.lateralContactSlowDownFromSpeed.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.lateralContactSlowDownFromSpeed.interpolation": {
+   "type": "u32",
+   "value": 0
+  },
+  "tuning.curves.lateralContactSlowDownFromSpeed.keyCount": {
+   "type": "u32",
+   "value": 5
+  },
+  "tuning.curves.lateralContactSlowDownFromSpeed.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.lateralContactSlowDownFromSpeed.keys[0].value": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.lateralContactSlowDownFromSpeed.keys[1].position": {
+   "type": "f32",
+   "value": 50,
+   "bits": "0x42480000"
+  },
+  "tuning.curves.lateralContactSlowDownFromSpeed.keys[1].value": {
+   "type": "f32",
+   "value": 12,
+   "bits": "0x41400000"
+  },
+  "tuning.curves.lateralContactSlowDownFromSpeed.keys[2].position": {
+   "type": "f32",
+   "value": 100,
+   "bits": "0x42c80000"
+  },
+  "tuning.curves.lateralContactSlowDownFromSpeed.keys[2].value": {
+   "type": "f32",
+   "value": 24,
+   "bits": "0x41c00000"
+  },
+  "tuning.curves.lateralContactSlowDownFromSpeed.keys[3].position": {
+   "type": "f32",
+   "value": 200,
+   "bits": "0x43480000"
+  },
+  "tuning.curves.lateralContactSlowDownFromSpeed.keys[3].value": {
+   "type": "f32",
+   "value": 48,
+   "bits": "0x42400000"
+  },
+  "tuning.curves.lateralContactSlowDownFromSpeed.keys[4].position": {
+   "type": "f32",
+   "value": 400,
+   "bits": "0x43c80000"
+  },
+  "tuning.curves.lateralContactSlowDownFromSpeed.keys[4].value": {
+   "type": "f32",
+   "value": 70,
+   "bits": "0x428c0000"
+  },
+  "tuning.curves.maxSideFrictionFromSpeed.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.maxSideFrictionFromSpeed.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.maxSideFrictionFromSpeed.keyCount": {
+   "type": "u32",
+   "value": 6
+  },
+  "tuning.curves.maxSideFrictionFromSpeed.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.maxSideFrictionFromSpeed.keys[0].value": {
+   "type": "f32",
+   "value": 80,
+   "bits": "0x42a00000"
+  },
+  "tuning.curves.maxSideFrictionFromSpeed.keys[1].position": {
+   "type": "f32",
+   "value": 100,
+   "bits": "0x42c80000"
+  },
+  "tuning.curves.maxSideFrictionFromSpeed.keys[1].value": {
+   "type": "f32",
+   "value": 80,
+   "bits": "0x42a00000"
+  },
+  "tuning.curves.maxSideFrictionFromSpeed.keys[2].position": {
+   "type": "f32",
+   "value": 200,
+   "bits": "0x43480000"
+  },
+  "tuning.curves.maxSideFrictionFromSpeed.keys[2].value": {
+   "type": "f32",
+   "value": 75,
+   "bits": "0x42960000"
+  },
+  "tuning.curves.maxSideFrictionFromSpeed.keys[3].position": {
+   "type": "f32",
+   "value": 300,
+   "bits": "0x43960000"
+  },
+  "tuning.curves.maxSideFrictionFromSpeed.keys[3].value": {
+   "type": "f32",
+   "value": 67,
+   "bits": "0x42860000"
+  },
+  "tuning.curves.maxSideFrictionFromSpeed.keys[4].position": {
+   "type": "f32",
+   "value": 400,
+   "bits": "0x43c80000"
+  },
+  "tuning.curves.maxSideFrictionFromSpeed.keys[4].value": {
+   "type": "f32",
+   "value": 60,
+   "bits": "0x42700000"
+  },
+  "tuning.curves.maxSideFrictionFromSpeed.keys[5].position": {
+   "type": "f32",
+   "value": 500,
+   "bits": "0x43fa0000"
+  },
+  "tuning.curves.maxSideFrictionFromSpeed.keys[5].value": {
+   "type": "f32",
+   "value": 55,
+   "bits": "0x425c0000"
+  },
+  "tuning.curves.rolloverLateralFromSpeed.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.rolloverLateralFromSpeed.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.rolloverLateralFromSpeed.keyCount": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.rolloverLateralFromSpeed.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.rolloverLateralFromSpeed.keys[0].value": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.rolloverLateralCoefficientFromAngle.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.rolloverLateralCoefficientFromAngle.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.rolloverLateralCoefficientFromAngle.keyCount": {
+   "type": "u32",
+   "value": 4
+  },
+  "tuning.curves.rolloverLateralCoefficientFromAngle.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.rolloverLateralCoefficientFromAngle.keys[0].value": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.rolloverLateralCoefficientFromAngle.keys[1].position": {
+   "type": "f32",
+   "value": 0.400000006,
+   "bits": "0x3ecccccd"
+  },
+  "tuning.curves.rolloverLateralCoefficientFromAngle.keys[1].value": {
+   "type": "f32",
+   "value": 0.400000006,
+   "bits": "0x3ecccccd"
+  },
+  "tuning.curves.rolloverLateralCoefficientFromAngle.keys[2].position": {
+   "type": "f32",
+   "value": 0.800000012,
+   "bits": "0x3f4ccccd"
+  },
+  "tuning.curves.rolloverLateralCoefficientFromAngle.keys[2].value": {
+   "type": "f32",
+   "value": 0.800000012,
+   "bits": "0x3f4ccccd"
+  },
+  "tuning.curves.rolloverLateralCoefficientFromAngle.keys[3].position": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.rolloverLateralCoefficientFromAngle.keys[3].value": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.wheelVisualSteerAngleFromSpeed.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.wheelVisualSteerAngleFromSpeed.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.wheelVisualSteerAngleFromSpeed.keyCount": {
+   "type": "u32",
+   "value": 2
+  },
+  "tuning.curves.wheelVisualSteerAngleFromSpeed.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.wheelVisualSteerAngleFromSpeed.keys[0].value": {
+   "type": "f32",
+   "value": 30,
+   "bits": "0x41f00000"
+  },
+  "tuning.curves.wheelVisualSteerAngleFromSpeed.keys[1].position": {
+   "type": "f32",
+   "value": 100,
+   "bits": "0x42c80000"
+  },
+  "tuning.curves.wheelVisualSteerAngleFromSpeed.keys[1].value": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keyCount": {
+   "type": "u32",
+   "value": 10
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[0].position": {
+   "type": "f32",
+   "value": -100,
+   "bits": "0xc2c80000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[0].value": {
+   "type": "f32",
+   "value": 7,
+   "bits": "0x40e00000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[1].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[1].value": {
+   "type": "f32",
+   "value": 16,
+   "bits": "0x41800000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[2].position": {
+   "type": "f32",
+   "value": 50,
+   "bits": "0x42480000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[2].value": {
+   "type": "f32",
+   "value": 10.3999996,
+   "bits": "0x41266666"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[3].position": {
+   "type": "f32",
+   "value": 100,
+   "bits": "0x42c80000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[3].value": {
+   "type": "f32",
+   "value": 8.5,
+   "bits": "0x41080000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[4].position": {
+   "type": "f32",
+   "value": 150,
+   "bits": "0x43160000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[4].value": {
+   "type": "f32",
+   "value": 6.80000019,
+   "bits": "0x40d9999a"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[5].position": {
+   "type": "f32",
+   "value": 200,
+   "bits": "0x43480000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[5].value": {
+   "type": "f32",
+   "value": 5.5,
+   "bits": "0x40b00000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[6].position": {
+   "type": "f32",
+   "value": 300,
+   "bits": "0x43960000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[6].value": {
+   "type": "f32",
+   "value": 4.25,
+   "bits": "0x40880000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[7].position": {
+   "type": "f32",
+   "value": 400,
+   "bits": "0x43c80000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[7].value": {
+   "type": "f32",
+   "value": 4,
+   "bits": "0x40800000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[8].position": {
+   "type": "f32",
+   "value": 500,
+   "bits": "0x43fa0000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[8].value": {
+   "type": "f32",
+   "value": 3.75,
+   "bits": "0x40700000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[9].position": {
+   "type": "f32",
+   "value": 600,
+   "bits": "0x44160000"
+  },
+  "tuning.curves.steeringDriveTorqueFromSpeed.keys[9].value": {
+   "type": "f32",
+   "value": 3.75,
+   "bits": "0x40700000"
+  },
+  "tuning.curves.steerSlowDownFromSpeed.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.steerSlowDownFromSpeed.interpolation": {
+   "type": "u32",
+   "value": 0
+  },
+  "tuning.curves.steerSlowDownFromSpeed.keyCount": {
+   "type": "u32",
+   "value": 6
+  },
+  "tuning.curves.steerSlowDownFromSpeed.keys[0].position": {
+   "type": "f32",
+   "value": -50,
+   "bits": "0xc2480000"
+  },
+  "tuning.curves.steerSlowDownFromSpeed.keys[0].value": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.steerSlowDownFromSpeed.keys[1].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.steerSlowDownFromSpeed.keys[1].value": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.steerSlowDownFromSpeed.keys[2].position": {
+   "type": "f32",
+   "value": 50,
+   "bits": "0x42480000"
+  },
+  "tuning.curves.steerSlowDownFromSpeed.keys[2].value": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.steerSlowDownFromSpeed.keys[3].position": {
+   "type": "f32",
+   "value": 100,
+   "bits": "0x42c80000"
+  },
+  "tuning.curves.steerSlowDownFromSpeed.keys[3].value": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.steerSlowDownFromSpeed.keys[4].position": {
+   "type": "f32",
+   "value": 200,
+   "bits": "0x43480000"
+  },
+  "tuning.curves.steerSlowDownFromSpeed.keys[4].value": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.steerSlowDownFromSpeed.keys[5].position": {
+   "type": "f32",
+   "value": 300,
+   "bits": "0x43960000"
+  },
+  "tuning.curves.steerSlowDownFromSpeed.keys[5].value": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.suspensionDamperAbsorbModulation.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.suspensionDamperAbsorbModulation.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.suspensionDamperAbsorbModulation.keyCount": {
+   "type": "u32",
+   "value": 4
+  },
+  "tuning.curves.suspensionDamperAbsorbModulation.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.suspensionDamperAbsorbModulation.keys[0].value": {
+   "type": "f32",
+   "value": 0.100000001,
+   "bits": "0x3dcccccd"
+  },
+  "tuning.curves.suspensionDamperAbsorbModulation.keys[1].position": {
+   "type": "f32",
+   "value": 0.600000024,
+   "bits": "0x3f19999a"
+  },
+  "tuning.curves.suspensionDamperAbsorbModulation.keys[1].value": {
+   "type": "f32",
+   "value": 0.300000012,
+   "bits": "0x3e99999a"
+  },
+  "tuning.curves.suspensionDamperAbsorbModulation.keys[2].position": {
+   "type": "f32",
+   "value": 0.975000024,
+   "bits": "0x3f79999a"
+  },
+  "tuning.curves.suspensionDamperAbsorbModulation.keys[2].value": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.suspensionDamperAbsorbModulation.keys[3].position": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.suspensionDamperAbsorbModulation.keys[3].value": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.airControlZScale.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.airControlZScale.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.airControlZScale.keyCount": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.airControlZScale.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.airControlZScale.keys[0].value": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.radiusSteeringRadiusFromSpeed.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.radiusSteeringRadiusFromSpeed.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.radiusSteeringRadiusFromSpeed.keyCount": {
+   "type": "u32",
+   "value": 2
+  },
+  "tuning.curves.radiusSteeringRadiusFromSpeed.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.radiusSteeringRadiusFromSpeed.keys[0].value": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "tuning.curves.radiusSteeringRadiusFromSpeed.keys[1].position": {
+   "type": "f32",
+   "value": 100,
+   "bits": "0x42c80000"
+  },
+  "tuning.curves.radiusSteeringRadiusFromSpeed.keys[1].value": {
+   "type": "f32",
+   "value": 20,
+   "bits": "0x41a00000"
+  },
+  "tuning.curves.radiusSteeringMaxFrictionFromSpeed.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.radiusSteeringMaxFrictionFromSpeed.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.radiusSteeringMaxFrictionFromSpeed.keyCount": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.radiusSteeringMaxFrictionFromSpeed.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.radiusSteeringMaxFrictionFromSpeed.keys[0].value": {
+   "type": "f32",
+   "value": 40,
+   "bits": "0x42200000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.interpolation": {
+   "type": "u32",
+   "value": 0
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keyCount": {
+   "type": "u32",
+   "value": 9
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[0].position": {
+   "type": "f32",
+   "value": -1000,
+   "bits": "0xc47a0000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[0].value": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[1].position": {
+   "type": "f32",
+   "value": -102,
+   "bits": "0xc2cc0000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[1].value": {
+   "type": "f32",
+   "value": 2,
+   "bits": "0x40000000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[2].position": {
+   "type": "f32",
+   "value": -80,
+   "bits": "0xc2a00000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[2].value": {
+   "type": "f32",
+   "value": 6,
+   "bits": "0x40c00000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[3].position": {
+   "type": "f32",
+   "value": -35,
+   "bits": "0xc20c0000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[3].value": {
+   "type": "f32",
+   "value": 12,
+   "bits": "0x41400000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[4].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[4].value": {
+   "type": "f32",
+   "value": 16,
+   "bits": "0x41800000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[5].position": {
+   "type": "f32",
+   "value": 101,
+   "bits": "0x42ca0000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[5].value": {
+   "type": "f32",
+   "value": 11,
+   "bits": "0x41300000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[6].position": {
+   "type": "f32",
+   "value": 201,
+   "bits": "0x43490000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[6].value": {
+   "type": "f32",
+   "value": 7,
+   "bits": "0x40e00000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[7].position": {
+   "type": "f32",
+   "value": 401,
+   "bits": "0x43c88000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[7].value": {
+   "type": "f32",
+   "value": 5.5,
+   "bits": "0x40b00000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[8].position": {
+   "type": "f32",
+   "value": 801,
+   "bits": "0x44484000"
+  },
+  "tuning.curves.slipResponseAccelFromSpeed.keys[8].value": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.slipResponseSlippingAccelFromSpeed.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.slipResponseSlippingAccelFromSpeed.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.slipResponseSlippingAccelFromSpeed.keyCount": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.slipResponseSlippingAccelFromSpeed.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.slipResponseSlippingAccelFromSpeed.keys[0].value": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "tuning.curves.reverseGearAccelFromSpeed.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.reverseGearAccelFromSpeed.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.reverseGearAccelFromSpeed.keyCount": {
+   "type": "u32",
+   "value": 4
+  },
+  "tuning.curves.reverseGearAccelFromSpeed.keys[0].position": {
+   "type": "f32",
+   "value": -150,
+   "bits": "0xc3160000"
+  },
+  "tuning.curves.reverseGearAccelFromSpeed.keys[0].value": {
+   "type": "f32",
+   "value": 0.100000001,
+   "bits": "0x3dcccccd"
+  },
+  "tuning.curves.reverseGearAccelFromSpeed.keys[1].position": {
+   "type": "f32",
+   "value": -100,
+   "bits": "0xc2c80000"
+  },
+  "tuning.curves.reverseGearAccelFromSpeed.keys[1].value": {
+   "type": "f32",
+   "value": 1.5,
+   "bits": "0x3fc00000"
+  },
+  "tuning.curves.reverseGearAccelFromSpeed.keys[2].position": {
+   "type": "f32",
+   "value": -50,
+   "bits": "0xc2480000"
+  },
+  "tuning.curves.reverseGearAccelFromSpeed.keys[2].value": {
+   "type": "f32",
+   "value": 8,
+   "bits": "0x41000000"
+  },
+  "tuning.curves.reverseGearAccelFromSpeed.keys[3].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.reverseGearAccelFromSpeed.keys[3].value": {
+   "type": "f32",
+   "value": 30,
+   "bits": "0x41f00000"
+  },
+  "tuning.curves.burnoutRolloverLateralFromSpeedRatio.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.burnoutRolloverLateralFromSpeedRatio.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.burnoutRolloverLateralFromSpeedRatio.keyCount": {
+   "type": "u32",
+   "value": 5
+  },
+  "tuning.curves.burnoutRolloverLateralFromSpeedRatio.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.burnoutRolloverLateralFromSpeedRatio.keys[0].value": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.burnoutRolloverLateralFromSpeedRatio.keys[1].position": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.burnoutRolloverLateralFromSpeedRatio.keys[1].value": {
+   "type": "f32",
+   "value": 0.800000012,
+   "bits": "0x3f4ccccd"
+  },
+  "tuning.curves.burnoutRolloverLateralFromSpeedRatio.keys[2].position": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "tuning.curves.burnoutRolloverLateralFromSpeedRatio.keys[2].value": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.burnoutRolloverLateralFromSpeedRatio.keys[3].position": {
+   "type": "f32",
+   "value": 20,
+   "bits": "0x41a00000"
+  },
+  "tuning.curves.burnoutRolloverLateralFromSpeedRatio.keys[3].value": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.burnoutRolloverLateralFromSpeedRatio.keys[4].position": {
+   "type": "f32",
+   "value": 30,
+   "bits": "0x41f00000"
+  },
+  "tuning.curves.burnoutRolloverLateralFromSpeedRatio.keys[4].value": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.burnoutRadiusFromSpeed.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.burnoutRadiusFromSpeed.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.burnoutRadiusFromSpeed.keyCount": {
+   "type": "u32",
+   "value": 3
+  },
+  "tuning.curves.burnoutRadiusFromSpeed.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.burnoutRadiusFromSpeed.keys[0].value": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.burnoutRadiusFromSpeed.keys[1].position": {
+   "type": "f32",
+   "value": 5,
+   "bits": "0x40a00000"
+  },
+  "tuning.curves.burnoutRadiusFromSpeed.keys[1].value": {
+   "type": "f32",
+   "value": 2,
+   "bits": "0x40000000"
+  },
+  "tuning.curves.burnoutRadiusFromSpeed.keys[2].position": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "tuning.curves.burnoutRadiusFromSpeed.keys[2].value": {
+   "type": "f32",
+   "value": 3,
+   "bits": "0x40400000"
+  },
+  "tuning.curves.burnoutLateralSpeedFromRadius.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.burnoutLateralSpeedFromRadius.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.burnoutLateralSpeedFromRadius.keyCount": {
+   "type": "u32",
+   "value": 3
+  },
+  "tuning.curves.burnoutLateralSpeedFromRadius.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.burnoutLateralSpeedFromRadius.keys[0].value": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.burnoutLateralSpeedFromRadius.keys[1].position": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.burnoutLateralSpeedFromRadius.keys[1].value": {
+   "type": "f32",
+   "value": 30,
+   "bits": "0x41f00000"
+  },
+  "tuning.curves.burnoutLateralSpeedFromRadius.keys[2].position": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "tuning.curves.burnoutLateralSpeedFromRadius.keys[2].value": {
+   "type": "f32",
+   "value": 30,
+   "bits": "0x41f00000"
+  },
+  "tuning.curves.donutRolloverFromSpeed.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.donutRolloverFromSpeed.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.donutRolloverFromSpeed.keyCount": {
+   "type": "u32",
+   "value": 3
+  },
+  "tuning.curves.donutRolloverFromSpeed.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.donutRolloverFromSpeed.keys[0].value": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.donutRolloverFromSpeed.keys[1].position": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "tuning.curves.donutRolloverFromSpeed.keys[1].value": {
+   "type": "f32",
+   "value": 5,
+   "bits": "0x40a00000"
+  },
+  "tuning.curves.donutRolloverFromSpeed.keys[2].position": {
+   "type": "f32",
+   "value": 20,
+   "bits": "0x41a00000"
+  },
+  "tuning.curves.donutRolloverFromSpeed.keys[2].value": {
+   "type": "f32",
+   "value": 6,
+   "bits": "0x40c00000"
+  },
+  "tuning.curves.burnoutRolloverFromSpeed.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.burnoutRolloverFromSpeed.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.burnoutRolloverFromSpeed.keyCount": {
+   "type": "u32",
+   "value": 3
+  },
+  "tuning.curves.burnoutRolloverFromSpeed.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.burnoutRolloverFromSpeed.keys[0].value": {
+   "type": "f32",
+   "value": 1.5,
+   "bits": "0x3fc00000"
+  },
+  "tuning.curves.burnoutRolloverFromSpeed.keys[1].position": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "tuning.curves.burnoutRolloverFromSpeed.keys[1].value": {
+   "type": "f32",
+   "value": 1.20000005,
+   "bits": "0x3f99999a"
+  },
+  "tuning.curves.burnoutRolloverFromSpeed.keys[2].position": {
+   "type": "f32",
+   "value": 50,
+   "bits": "0x42480000"
+  },
+  "tuning.curves.burnoutRolloverFromSpeed.keys[2].value": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "tuning.curves.splashVerticalImpulse.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.splashVerticalImpulse.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.splashVerticalImpulse.keyCount": {
+   "type": "u32",
+   "value": 4
+  },
+  "tuning.curves.splashVerticalImpulse.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.splashVerticalImpulse.keys[0].value": {
+   "type": "f32",
+   "value": 0.899999976,
+   "bits": "0x3f666666"
+  },
+  "tuning.curves.splashVerticalImpulse.keys[1].position": {
+   "type": "f32",
+   "value": 0.400000006,
+   "bits": "0x3ecccccd"
+  },
+  "tuning.curves.splashVerticalImpulse.keys[1].value": {
+   "type": "f32",
+   "value": 0.899999976,
+   "bits": "0x3f666666"
+  },
+  "tuning.curves.splashVerticalImpulse.keys[2].position": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "tuning.curves.splashVerticalImpulse.keys[2].value": {
+   "type": "f32",
+   "value": 1.5,
+   "bits": "0x3fc00000"
+  },
+  "tuning.curves.splashVerticalImpulse.keys[3].position": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.splashVerticalImpulse.keys[3].value": {
+   "type": "f32",
+   "value": 1.5,
+   "bits": "0x3fc00000"
+  },
+  "tuning.curves.splashHorizontalImpulse.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.splashHorizontalImpulse.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.splashHorizontalImpulse.keyCount": {
+   "type": "u32",
+   "value": 4
+  },
+  "tuning.curves.splashHorizontalImpulse.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.splashHorizontalImpulse.keys[0].value": {
+   "type": "f32",
+   "value": 0.699999988,
+   "bits": "0x3f333333"
+  },
+  "tuning.curves.splashHorizontalImpulse.keys[1].position": {
+   "type": "f32",
+   "value": 0.400000006,
+   "bits": "0x3ecccccd"
+  },
+  "tuning.curves.splashHorizontalImpulse.keys[1].value": {
+   "type": "f32",
+   "value": 0.699999988,
+   "bits": "0x3f333333"
+  },
+  "tuning.curves.splashHorizontalImpulse.keys[2].position": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "tuning.curves.splashHorizontalImpulse.keys[2].value": {
+   "type": "f32",
+   "value": 0.600000024,
+   "bits": "0x3f19999a"
+  },
+  "tuning.curves.splashHorizontalImpulse.keys[3].position": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.splashHorizontalImpulse.keys[3].value": {
+   "type": "f32",
+   "value": 0.600000024,
+   "bits": "0x3f19999a"
+  },
+  "tuning.curves.waterFrictionFromSpeed.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.waterFrictionFromSpeed.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.waterFrictionFromSpeed.keyCount": {
+   "type": "u32",
+   "value": 3
+  },
+  "tuning.curves.waterFrictionFromSpeed.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.waterFrictionFromSpeed.keys[0].value": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.waterFrictionFromSpeed.keys[1].position": {
+   "type": "f32",
+   "value": 2,
+   "bits": "0x40000000"
+  },
+  "tuning.curves.waterFrictionFromSpeed.keys[1].value": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "tuning.curves.waterFrictionFromSpeed.keys[2].position": {
+   "type": "f32",
+   "value": 50,
+   "bits": "0x42480000"
+  },
+  "tuning.curves.waterFrictionFromSpeed.keys[2].value": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.surfaceFeedback.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.surfaceFeedback.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.surfaceFeedback.keyCount": {
+   "type": "u32",
+   "value": 2
+  },
+  "tuning.curves.surfaceFeedback.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.surfaceFeedback.keys[0].value": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.surfaceFeedback.keys[1].position": {
+   "type": "f32",
+   "value": 20,
+   "bits": "0x41a00000"
+  },
+  "tuning.curves.surfaceFeedback.keys[1].value": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "tuning.curves.vehicleFeedbackRamp1.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.vehicleFeedbackRamp1.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.vehicleFeedbackRamp1.keyCount": {
+   "type": "u32",
+   "value": 3
+  },
+  "tuning.curves.vehicleFeedbackRamp1.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.vehicleFeedbackRamp1.keys[0].value": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.vehicleFeedbackRamp1.keys[1].position": {
+   "type": "f32",
+   "value": 30,
+   "bits": "0x41f00000"
+  },
+  "tuning.curves.vehicleFeedbackRamp1.keys[1].value": {
+   "type": "f32",
+   "value": 0.100000001,
+   "bits": "0x3dcccccd"
+  },
+  "tuning.curves.vehicleFeedbackRamp1.keys[2].position": {
+   "type": "f32",
+   "value": 100,
+   "bits": "0x42c80000"
+  },
+  "tuning.curves.vehicleFeedbackRamp1.keys[2].value": {
+   "type": "f32",
+   "value": 0.300000012,
+   "bits": "0x3e99999a"
+  },
+  "tuning.curves.vehicleFeedbackRamp0.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.vehicleFeedbackRamp0.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.vehicleFeedbackRamp0.keyCount": {
+   "type": "u32",
+   "value": 3
+  },
+  "tuning.curves.vehicleFeedbackRamp0.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.vehicleFeedbackRamp0.keys[0].value": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.vehicleFeedbackRamp0.keys[1].position": {
+   "type": "f32",
+   "value": 30,
+   "bits": "0x41f00000"
+  },
+  "tuning.curves.vehicleFeedbackRamp0.keys[1].value": {
+   "type": "f32",
+   "value": 0.00999999978,
+   "bits": "0x3c23d70a"
+  },
+  "tuning.curves.vehicleFeedbackRamp0.keys[2].position": {
+   "type": "f32",
+   "value": 100,
+   "bits": "0x42c80000"
+  },
+  "tuning.curves.vehicleFeedbackRamp0.keys[2].value": {
+   "type": "f32",
+   "value": 0.0500000007,
+   "bits": "0x3d4ccccd"
+  },
+  "tuning.curves.vehicleDefault30To100.present": {
+   "type": "bool",
+   "value": true
+  },
+  "tuning.curves.vehicleDefault30To100.interpolation": {
+   "type": "u32",
+   "value": 1
+  },
+  "tuning.curves.vehicleDefault30To100.keyCount": {
+   "type": "u32",
+   "value": 3
+  },
+  "tuning.curves.vehicleDefault30To100.keys[0].position": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.vehicleDefault30To100.keys[0].value": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.vehicleDefault30To100.keys[1].position": {
+   "type": "f32",
+   "value": 30,
+   "bits": "0x41f00000"
+  },
+  "tuning.curves.vehicleDefault30To100.keys[1].value": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "tuning.curves.vehicleDefault30To100.keys[2].position": {
+   "type": "f32",
+   "value": 100,
+   "bits": "0x42c80000"
+  },
+  "tuning.curves.vehicleDefault30To100.keys[2].value": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.engineSpeedNorm": {
+   "type": "f32",
+   "value": 55.5555573,
+   "bits": "0x425e38e4"
+  },
+  "default.lowSpeedFrictionMagnitude": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.lowSpeedLinearDamping": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.wheelForceMode": {
+   "type": "u32",
+   "value": 0
+  },
+  "default.handlingModel": {
+   "type": "u32",
+   "value": 0
+  },
+  "default.visual.wheelSpeedBase": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.visual.wheelSpeedScale": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "default.steering.slewRate": {
+   "type": "f32",
+   "value": 20,
+   "bits": "0x41a00000"
+  },
+  "default.steering.assistFullSpeed": {
+   "type": "f32",
+   "value": 20,
+   "bits": "0x41a00000"
+  },
+  "default.steering.slowDownScale": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.suspension.wheelSpringCoef": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.suspension.wheelDamperCoef": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.suspension.damperModulationMaxAbsorb": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.suspension.damperModulationMinAbsorb": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.suspension.wheelRestDamperAbsorb": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.suspension.wheelStaticSpringScale": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "default.suspension.wheelAbsorbFollowCoef": {
+   "type": "f32",
+   "value": 5,
+   "bits": "0x40a00000"
+  },
+  "default.contactResponse.bodyImpactFeedbackHighThreshold": {
+   "type": "f32",
+   "value": 20,
+   "bits": "0x41a00000"
+  },
+  "default.contactResponse.bodyImpactFeedbackLowThreshold": {
+   "type": "f32",
+   "value": 5,
+   "bits": "0x40a00000"
+  },
+  "default.contactResponse.wheelImpactFeedbackHighThreshold": {
+   "type": "f32",
+   "value": 20,
+   "bits": "0x41a00000"
+  },
+  "default.contactResponse.wheelImpactFeedbackLowThreshold": {
+   "type": "f32",
+   "value": 5,
+   "bits": "0x40a00000"
+  },
+  "default.contactResponse.bodyContactTangentLimitOther": {
+   "type": "f32",
+   "value": 0.800000012,
+   "bits": "0x3f4ccccd"
+  },
+  "default.contactResponse.bodyContactTangentLimitMetal": {
+   "type": "f32",
+   "value": 0.400000006,
+   "bits": "0x3ecccccd"
+  },
+  "default.contactResponse.bodyContactImpulseMetal": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.contactResponse.bodyContactImpulseOther": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.contactResponse.wheelContactImpulseOther": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.contactResponse.wheelContactImpulseMetal": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.contactResponse.pointImpulseAngularYScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.contactResponse.pointImpulseAngularScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.contactResponse.pointImpulseAngularSpeedMax": {
+   "type": "f32",
+   "value": 100,
+   "bits": "0x42c80000"
+  },
+  "default.contactResponse.pointImpulseLinearSpeedGrowthLimitSq": {
+   "type": "f32",
+   "value": 10000,
+   "bits": "0x461c4000"
+  },
+  "default.contactResponse.specialContactImpulseMagnitude": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "default.contactResponse.specialSolidFeedbackValue": {
+   "type": "f32",
+   "value": 0.100000001,
+   "bits": "0x3dcccccd"
+  },
+  "default.contactResponse.singleMaterial": {
+   "type": "u32",
+   "value": 9
+  },
+  "default.bodyAirResponse.solidPhysicalMass": {
+   "type": "f32",
+   "value": 800,
+   "bits": "0x44480000"
+  },
+  "default.bodyAirResponse.solidInertiaMass": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.bodyAirResponse.solidInertiaBoxSize.x": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "default.bodyAirResponse.solidInertiaBoxSize.y": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "default.bodyAirResponse.solidInertiaBoxSize.z": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "default.bodyAirResponse.solidCenterZHalfExtentScale": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.bodyAirResponse.solidCenterYOffset": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.bodyAirResponse.solidPhysicalResponseCoefB": {
+   "type": "f32",
+   "value": 0.300000012,
+   "bits": "0x3e99999a"
+  },
+  "default.bodyAirResponse.airborneSolidFeedback0": {
+   "type": "f32",
+   "value": 0.100000001,
+   "bits": "0x3dcccccd"
+  },
+  "default.bodyAirResponse.airTorqueLinearCoef": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "default.bodyAirResponse.airTorqueQuadraticCoef": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.bodyAirResponse.groundedSolidFeedback1": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.bodyAirResponse.airborneSolidFeedback1": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.bodyAirResponse.slopeAdherence1Min": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.bodyAirResponse.slopeAdherence1Max": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.bodyAirResponse.slopeAdherence2Min": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.bodyAirResponse.slopeAdherence2Max": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.bodyAirResponse.airControlMemoryTickWindow": {
+   "type": "u32",
+   "value": 0
+  },
+  "default.bodyAirResponse.airControlYSwitchThreshold": {
+   "type": "f32",
+   "value": 3.14159274,
+   "bits": "0x40490fdb"
+  },
+  "default.radiusSteering.steerTorqueSpeedScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.radiusSteering.angularDampingLinear": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.radiusSteering.angularDampingQuadratic": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.radiusSteering.lateralFrictionLinear": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.radiusSteering.lateralFrictionQuadratic": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.radiusSteering.captureExitSideSpeedMax": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.radiusSteering.inputSteerRadiusScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.radiusSteering.slippingFrictionScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.radiusSteering.capturedAngleRate": {
+   "type": "f32",
+   "value": 0.00499999989,
+   "bits": "0x3ba3d70a"
+  },
+  "default.radiusSteering.capturedAngleRadiusScale": {
+   "type": "f32",
+   "value": 0.300000012,
+   "bits": "0x3e99999a"
+  },
+  "default.radiusSteering.steerAngleLimit": {
+   "type": "f32",
+   "value": 0.785398185,
+   "bits": "0x3f490fdb"
+  },
+  "default.radiusSteering.steerAngleFromInputScale": {
+   "type": "f32",
+   "value": 0.785398185,
+   "bits": "0x3f490fdb"
+  },
+  "default.slipResponse.slippingAccelScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.slipResponse.lateralSlowDownTickWindow": {
+   "type": "u32",
+   "value": 500
+  },
+  "default.slipResponse.rolloverTorqueCap": {
+   "type": "f32",
+   "value": 20,
+   "bits": "0x41a00000"
+  },
+  "default.slipResponse.steeringMemoryTicks": {
+   "type": "u32",
+   "value": 1
+  },
+  "default.slipResponse.slipSlowdownEnabled": {
+   "type": "bool",
+   "value": false
+  },
+  "default.slipResponse.slipSlowdownTicks": {
+   "type": "u32",
+   "value": 0
+  },
+  "default.slipResponse.longitudinalTorqueScale": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.gearedDrive.forwardAccelBase": {
+   "type": "f32",
+   "value": 20,
+   "bits": "0x41a00000"
+  },
+  "default.gearedDrive.forwardAccelSpeedCoef": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.gearedDrive.forwardAccelCapWhenSlipping": {
+   "type": "f32",
+   "value": 500,
+   "bits": "0x43fa0000"
+  },
+  "default.gearedDrive.forwardAccelCap": {
+   "type": "f32",
+   "value": 500,
+   "bits": "0x43fa0000"
+  },
+  "default.gearedDrive.speedLimitForce": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "default.gearedDrive.forceZScale": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.gearedDrive.sideForceToDriveTorqueScale": {
+   "type": "f32",
+   "value": 0.00999999978,
+   "bits": "0x3c23d70a"
+  },
+  "default.gearedDrive.slippingSteerTorqueScale": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.gearedDrive.lateralForceScale": {
+   "type": "f32",
+   "value": -1,
+   "bits": "0xbf800000"
+  },
+  "default.gearedDrive.slippingSideFrictionScale": {
+   "type": "f32",
+   "value": 0.600000024,
+   "bits": "0x3f19999a"
+  },
+  "default.gearedDrive.sideFrictionSlipBlend": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "default.gearedDrive.driveSideFrictionSlipBlend": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.gearedDrive.slipRatioScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.gearedDrive.currentForceTorqueMin": {
+   "type": "f32",
+   "value": 0.00999999978,
+   "bits": "0x3c23d70a"
+  },
+  "default.gearedDrive.currentTorqueXScale": {
+   "type": "f32",
+   "value": 0.100000001,
+   "bits": "0x3dcccccd"
+  },
+  "default.gearedDrive.currentTorqueZScale": {
+   "type": "f32",
+   "value": 0.100000001,
+   "bits": "0x3dcccccd"
+  },
+  "default.gearedDrive.perSlippingWheelAccelScale": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "default.gearedDrive.lowSpeedBSlippingGripScale": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "default.gearedDrive.forwardAccelCapWhenSlippingReverse": {
+   "type": "f32",
+   "value": 100,
+   "bits": "0x42c80000"
+  },
+  "default.gearedDrive.forwardAccelCapReverse": {
+   "type": "f32",
+   "value": 50,
+   "bits": "0x42480000"
+  },
+  "default.gearedDrive.dirtSlideSideForceScale": {
+   "type": "f32",
+   "value": 0.0500000007,
+   "bits": "0x3d4ccccd"
+  },
+  "default.gearedDrive.dirtSlideGateScale": {
+   "type": "f32",
+   "value": 20,
+   "bits": "0x41a00000"
+  },
+  "default.gearedDrive.dirtSlideForwardForceScale": {
+   "type": "f32",
+   "value": 15,
+   "bits": "0x41700000"
+  },
+  "default.gearedDrive.dirtSlideForwardGateScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.gearedDrive.transmission.reverseSpeedNorm": {
+   "type": "f32",
+   "value": 13.8888893,
+   "bits": "0x415e38e4"
+  },
+  "default.gearedDrive.transmission.gearSpeedRatio.size": {
+   "type": "u32",
+   "value": 0
+  },
+  "default.gearedDrive.transmission.upshiftThreshold.size": {
+   "type": "u32",
+   "value": 0
+  },
+  "default.gearedDrive.transmission.downshiftThreshold.size": {
+   "type": "u32",
+   "value": 0
+  },
+  "default.gearedDrive.transmission.rpmWanted.size": {
+   "type": "u32",
+   "value": 0
+  },
+  "default.gearedDrive.transmission.targetInputBias.size": {
+   "type": "u32",
+   "value": 0
+  },
+  "default.gearedDrive.transmission.rpmDelta.size": {
+   "type": "u32",
+   "value": 0
+  },
+  "default.gearedDrive.burnout.reverseForceThreshold": {
+   "type": "f32",
+   "value": 200,
+   "bits": "0x43480000"
+  },
+  "default.gearedDrive.burnout.donutSpeedHigh": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "default.gearedDrive.burnout.donutSpeedLow": {
+   "type": "f32",
+   "value": 3,
+   "bits": "0x40400000"
+  },
+  "default.gearedDrive.burnout.lateralCorrectionScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.gearedDrive.burnout.angleTorqueScale": {
+   "type": "f32",
+   "value": 6,
+   "bits": "0x40c00000"
+  },
+  "default.gearedDrive.burnout.angularDampingLinear": {
+   "type": "f32",
+   "value": 2,
+   "bits": "0x40000000"
+  },
+  "default.gearedDrive.burnout.angleReturnQuadratic": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "default.gearedDrive.burnout.tangentAngularDamping": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "default.gearedDrive.burnout.radiusCorrectionScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.gearedDrive.burnout.radiusCorrectionSpeedScale": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "default.gearedDrive.burnout.radiusMin": {
+   "type": "f32",
+   "value": 20,
+   "bits": "0x41a00000"
+  },
+  "default.gearedDrive.burnout.tangentSpeedMax": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "default.gearedDrive.burnout.angleLimit": {
+   "type": "f32",
+   "value": 0.349999994,
+   "bits": "0x3eb33333"
+  },
+  "default.gearedDrive.burnout.angleLimitPositive": {
+   "type": "f32",
+   "value": 1.74530005,
+   "bits": "0x3fdf65fe"
+  },
+  "default.gearedDrive.burnout.angleLimitNegative": {
+   "type": "f32",
+   "value": 0.785000026,
+   "bits": "0x3f48f5c3"
+  },
+  "default.gearedDrive.burnout.durationTicks": {
+   "type": "u32",
+   "value": 1000
+  },
+  "default.gearedDrive.burnout.driveFadeScale": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "default.gearedDrive.burnout.sideForceFadeScale": {
+   "type": "f32",
+   "value": 0.00999999978,
+   "bits": "0x3c23d70a"
+  },
+  "default.gearedDrive.burnout.exitDurationTicks": {
+   "type": "u32",
+   "value": 500
+  },
+  "default.gearedDrive.burnout.exitAccelFadeScale": {
+   "type": "f32",
+   "value": 4,
+   "bits": "0x40800000"
+  },
+  "default.gearedDrive.burnout.exitMinSpeed": {
+   "type": "f32",
+   "value": 5,
+   "bits": "0x40a00000"
+  },
+  "default.gearedDrive.burnout.exitSteerGripScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.gearedDrive.burnout.exitBonusAccelScale": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "default.gearedDrive.burnout.wheelAngularSpeedOverride": {
+   "type": "f32",
+   "value": 150,
+   "bits": "0x43160000"
+  },
+  "default.gearedDrive.burnout.exitSideFrictionScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.gearedDrive.input.engineInputMaximum": {
+   "type": "f32",
+   "value": 0.800000012,
+   "bits": "0x3f4ccccd"
+  },
+  "default.gearedDrive.input.burnoutHoldInputRise": {
+   "type": "f32",
+   "value": 5000,
+   "bits": "0x459c4000"
+  },
+  "default.gearedDrive.input.airborneInputRise": {
+   "type": "f32",
+   "value": 5000,
+   "bits": "0x459c4000"
+  },
+  "default.gearedDrive.input.airborneInputFall": {
+   "type": "f32",
+   "value": 2500,
+   "bits": "0x451c4000"
+  },
+  "default.gearedDrive.input.groundInputBrake": {
+   "type": "f32",
+   "value": 5000,
+   "bits": "0x459c4000"
+  },
+  "default.gearedDrive.input.groundInputRise": {
+   "type": "f32",
+   "value": 10000,
+   "bits": "0x461c4000"
+  },
+  "default.gearedDrive.input.transitionInputRise": {
+   "type": "f32",
+   "value": 10000,
+   "bits": "0x461c4000"
+  },
+  "default.gearedDrive.input.groundInputFall": {
+   "type": "f32",
+   "value": 4000,
+   "bits": "0x457a0000"
+  },
+  "default.gearedDrive.input.forwardTransitionSpeedHigh": {
+   "type": "f32",
+   "value": 3,
+   "bits": "0x40400000"
+  },
+  "default.gearedDrive.input.forwardTransitionSpeedLow": {
+   "type": "f32",
+   "value": -2,
+   "bits": "0xc0000000"
+  },
+  "default.gearedDrive.input.reverseTransitionSpeedHigh": {
+   "type": "f32",
+   "value": 2,
+   "bits": "0x40000000"
+  },
+  "default.gearedDrive.input.reverseTransitionSpeedLow": {
+   "type": "f32",
+   "value": -3,
+   "bits": "0xc0400000"
+  },
+  "default.water.buoyancyForce": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "default.water.splashHorizontalSpeedThreshold": {
+   "type": "f32",
+   "value": 55.5555573,
+   "bits": "0x425e38e4"
+  },
+  "default.water.splashTotalSpeedThreshold": {
+   "type": "f32",
+   "value": 50,
+   "bits": "0x42480000"
+  },
+  "default.water.angularLinearDamping": {
+   "type": "f32",
+   "value": 0.100000001,
+   "bits": "0x3dcccccd"
+  },
+  "default.water.angularSpeedDamping": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "default.turbo.impulseScaleA": {
+   "type": "f32",
+   "value": 3,
+   "bits": "0x40400000"
+  },
+  "default.turbo.impulseScaleB": {
+   "type": "f32",
+   "value": 3,
+   "bits": "0x40400000"
+  },
+  "default.turbo.durationA": {
+   "type": "u32",
+   "value": 1000
+  },
+  "default.turbo.durationB": {
+   "type": "u32",
+   "value": 1000
+  },
+  "default.feedback.surfaceBaseRate": {
+   "type": "f32",
+   "value": -0.300000012,
+   "bits": "0xbe99999a"
+  },
+  "default.feedback.forceDivisor": {
+   "type": "f32",
+   "value": 5,
+   "bits": "0x40a00000"
+  },
+  "default.curves.lateralContactSlowDownFromSpeed.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.maxSideFrictionFromSpeed.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.rolloverLateralFromSpeed.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.rolloverLateralCoefficientFromAngle.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.wheelVisualSteerAngleFromSpeed.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.steeringDriveTorqueFromSpeed.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.steerSlowDownFromSpeed.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.suspensionDamperAbsorbModulation.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.airControlZScale.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.radiusSteeringRadiusFromSpeed.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.radiusSteeringMaxFrictionFromSpeed.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.slipResponseAccelFromSpeed.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.slipResponseSlippingAccelFromSpeed.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.reverseGearAccelFromSpeed.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.burnoutRolloverLateralFromSpeedRatio.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.burnoutRadiusFromSpeed.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.burnoutLateralSpeedFromRadius.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.donutRolloverFromSpeed.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.burnoutRolloverFromSpeed.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.splashVerticalImpulse.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.splashHorizontalImpulse.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.waterFrictionFromSpeed.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.surfaceFeedback.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.vehicleFeedbackRamp1.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.vehicleFeedbackRamp0.present": {
+   "type": "bool",
+   "value": false
+  },
+  "default.curves.vehicleDefault30To100.present": {
+   "type": "bool",
+   "value": false
+  },
+  "vehicle.initialParameters.present": {
+   "type": "bool",
+   "value": true
+  },
+  "vehicle.initialParameters.linearSpeedCap": {
+   "type": "f32",
+   "value": 277.777771,
+   "bits": "0x438ae38e"
+  },
+  "vehicle.initialParameters.reverseGearSpeedThreshold": {
+   "type": "f32",
+   "value": 10,
+   "bits": "0x41200000"
+  },
+  "vehicle.initialParameters.waterBoxLocal.center.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "vehicle.initialParameters.waterBoxLocal.center.y": {
+   "type": "f32",
+   "value": 0.938000023,
+   "bits": "0x3f7020c5"
+  },
+  "vehicle.initialParameters.waterBoxLocal.center.z": {
+   "type": "f32",
+   "value": 0.154232994,
+   "bits": "0x3e1def41"
+  },
+  "vehicle.initialParameters.waterBoxLocal.halfExtents.x": {
+   "type": "f32",
+   "value": 1.26799405,
+   "bits": "0x3fa24da1"
+  },
+  "vehicle.initialParameters.waterBoxLocal.halfExtents.y": {
+   "type": "f32",
+   "value": 0.941879988,
+   "bits": "0x3f711f0c"
+  },
+  "vehicle.initialParameters.waterBoxLocal.halfExtents.z": {
+   "type": "f32",
+   "value": 2.34418011,
+   "bits": "0x4016070c"
+  },
+  "vehicle.wheelContactSettings[0].surfaceId": {
+   "type": "u32",
+   "value": 1
+  },
+  "vehicle.wheelContactSettings[0].killsLateralSpeedOnContact": {
+   "type": "bool",
+   "value": true
+  },
+  "vehicle.wheelContactSettings[0].axle": {
+   "type": "u32",
+   "value": 1
+  },
+  "vehicle.wheelContactSettings[1].surfaceId": {
+   "type": "u32",
+   "value": 2
+  },
+  "vehicle.wheelContactSettings[1].killsLateralSpeedOnContact": {
+   "type": "bool",
+   "value": true
+  },
+  "vehicle.wheelContactSettings[1].axle": {
+   "type": "u32",
+   "value": 1
+  },
+  "vehicle.wheelContactSettings[2].surfaceId": {
+   "type": "u32",
+   "value": 3
+  },
+  "vehicle.wheelContactSettings[2].killsLateralSpeedOnContact": {
+   "type": "bool",
+   "value": true
+  },
+  "vehicle.wheelContactSettings[2].axle": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.wheelContactSettings[3].surfaceId": {
+   "type": "u32",
+   "value": 4
+  },
+  "vehicle.wheelContactSettings[3].killsLateralSpeedOnContact": {
+   "type": "bool",
+   "value": true
+  },
+  "vehicle.wheelContactSettings[3].axle": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materials[0].naturalId": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materials[0].blend.x": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[0].blend.y": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[0].blend.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[0].blend.w": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[0].fakeContactPeriodX": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[0].fakeContactPeriodZ": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[0].fakeContactSpeedScale": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "vehicle.materials[0].fakeContactDepthMax": {
+   "type": "f32",
+   "value": 0.0500000007,
+   "bits": "0x3d4ccccd"
+  },
+  "vehicle.materials[0].feedbackSpeedDivisor": {
+   "type": "f32",
+   "value": 2.5,
+   "bits": "0x40200000"
+  },
+  "vehicle.materials[0].feedbackScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[0].usesFakeContactTexture": {
+   "type": "bool",
+   "value": false
+  },
+  "vehicle.materials[1].naturalId": {
+   "type": "u32",
+   "value": 2
+  },
+  "vehicle.materials[1].blend.x": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "vehicle.materials[1].blend.y": {
+   "type": "f32",
+   "value": 0.400000006,
+   "bits": "0x3ecccccd"
+  },
+  "vehicle.materials[1].blend.z": {
+   "type": "f32",
+   "value": 0.0500000007,
+   "bits": "0x3d4ccccd"
+  },
+  "vehicle.materials[1].blend.w": {
+   "type": "f32",
+   "value": 0.150000006,
+   "bits": "0x3e19999a"
+  },
+  "vehicle.materials[1].fakeContactPeriodX": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[1].fakeContactPeriodZ": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[1].fakeContactSpeedScale": {
+   "type": "f32",
+   "value": 0.0500000007,
+   "bits": "0x3d4ccccd"
+  },
+  "vehicle.materials[1].fakeContactDepthMax": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "vehicle.materials[1].feedbackSpeedDivisor": {
+   "type": "f32",
+   "value": 2.5,
+   "bits": "0x40200000"
+  },
+  "vehicle.materials[1].feedbackScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[1].usesFakeContactTexture": {
+   "type": "bool",
+   "value": true
+  },
+  "vehicle.materials[2].naturalId": {
+   "type": "u32",
+   "value": 8
+  },
+  "vehicle.materials[2].blend.x": {
+   "type": "f32",
+   "value": 0.699999988,
+   "bits": "0x3f333333"
+  },
+  "vehicle.materials[2].blend.y": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[2].blend.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[2].blend.w": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "vehicle.materials[2].fakeContactPeriodX": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[2].fakeContactPeriodZ": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[2].fakeContactSpeedScale": {
+   "type": "f32",
+   "value": 0.0500000007,
+   "bits": "0x3d4ccccd"
+  },
+  "vehicle.materials[2].fakeContactDepthMax": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "vehicle.materials[2].feedbackSpeedDivisor": {
+   "type": "f32",
+   "value": 2.5,
+   "bits": "0x40200000"
+  },
+  "vehicle.materials[2].feedbackScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[2].usesFakeContactTexture": {
+   "type": "bool",
+   "value": true
+  },
+  "vehicle.materials[3].naturalId": {
+   "type": "u32",
+   "value": 5
+  },
+  "vehicle.materials[3].blend.x": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "vehicle.materials[3].blend.y": {
+   "type": "f32",
+   "value": 0.400000006,
+   "bits": "0x3ecccccd"
+  },
+  "vehicle.materials[3].blend.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[3].blend.w": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "vehicle.materials[3].fakeContactPeriodX": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[3].fakeContactPeriodZ": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[3].fakeContactSpeedScale": {
+   "type": "f32",
+   "value": 0.0500000007,
+   "bits": "0x3d4ccccd"
+  },
+  "vehicle.materials[3].fakeContactDepthMax": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "vehicle.materials[3].feedbackSpeedDivisor": {
+   "type": "f32",
+   "value": 2.5,
+   "bits": "0x40200000"
+  },
+  "vehicle.materials[3].feedbackScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[3].usesFakeContactTexture": {
+   "type": "bool",
+   "value": true
+  },
+  "vehicle.materials[4].naturalId": {
+   "type": "u32",
+   "value": 16
+  },
+  "vehicle.materials[4].blend.x": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[4].blend.y": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[4].blend.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[4].blend.w": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[4].fakeContactPeriodX": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[4].fakeContactPeriodZ": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[4].fakeContactSpeedScale": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "vehicle.materials[4].fakeContactDepthMax": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "vehicle.materials[4].feedbackSpeedDivisor": {
+   "type": "f32",
+   "value": 2.5,
+   "bits": "0x40200000"
+  },
+  "vehicle.materials[4].feedbackScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[4].usesFakeContactTexture": {
+   "type": "bool",
+   "value": false
+  },
+  "vehicle.materials[5].naturalId": {
+   "type": "u32",
+   "value": 20
+  },
+  "vehicle.materials[5].blend.x": {
+   "type": "f32",
+   "value": 0.100000001,
+   "bits": "0x3dcccccd"
+  },
+  "vehicle.materials[5].blend.y": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "vehicle.materials[5].blend.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[5].blend.w": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "vehicle.materials[5].fakeContactPeriodX": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[5].fakeContactPeriodZ": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[5].fakeContactSpeedScale": {
+   "type": "f32",
+   "value": 0.0500000007,
+   "bits": "0x3d4ccccd"
+  },
+  "vehicle.materials[5].fakeContactDepthMax": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "vehicle.materials[5].feedbackSpeedDivisor": {
+   "type": "f32",
+   "value": 2.5,
+   "bits": "0x40200000"
+  },
+  "vehicle.materials[5].feedbackScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[5].usesFakeContactTexture": {
+   "type": "bool",
+   "value": true
+  },
+  "vehicle.materials[6].naturalId": {
+   "type": "u32",
+   "value": 17
+  },
+  "vehicle.materials[6].blend.x": {
+   "type": "f32",
+   "value": 0.899999976,
+   "bits": "0x3f666666"
+  },
+  "vehicle.materials[6].blend.y": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[6].blend.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[6].blend.w": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[6].fakeContactPeriodX": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[6].fakeContactPeriodZ": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[6].fakeContactSpeedScale": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "vehicle.materials[6].fakeContactDepthMax": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "vehicle.materials[6].feedbackSpeedDivisor": {
+   "type": "f32",
+   "value": 2.5,
+   "bits": "0x40200000"
+  },
+  "vehicle.materials[6].feedbackScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[6].usesFakeContactTexture": {
+   "type": "bool",
+   "value": false
+  },
+  "vehicle.materials[7].naturalId": {
+   "type": "u32",
+   "value": 19
+  },
+  "vehicle.materials[7].blend.x": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[7].blend.y": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[7].blend.z": {
+   "type": "f32",
+   "value": 0.850000024,
+   "bits": "0x3f59999a"
+  },
+  "vehicle.materials[7].blend.w": {
+   "type": "f32",
+   "value": 0.850000024,
+   "bits": "0x3f59999a"
+  },
+  "vehicle.materials[7].fakeContactPeriodX": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[7].fakeContactPeriodZ": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[7].fakeContactSpeedScale": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "vehicle.materials[7].fakeContactDepthMax": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "vehicle.materials[7].feedbackSpeedDivisor": {
+   "type": "f32",
+   "value": 2.5,
+   "bits": "0x40200000"
+  },
+  "vehicle.materials[7].feedbackScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[7].usesFakeContactTexture": {
+   "type": "bool",
+   "value": false
+  },
+  "vehicle.materials[8].naturalId": {
+   "type": "u32",
+   "value": 21
+  },
+  "vehicle.materials[8].blend.x": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "vehicle.materials[8].blend.y": {
+   "type": "f32",
+   "value": 0.600000024,
+   "bits": "0x3f19999a"
+  },
+  "vehicle.materials[8].blend.z": {
+   "type": "f32",
+   "value": 0.100000001,
+   "bits": "0x3dcccccd"
+  },
+  "vehicle.materials[8].blend.w": {
+   "type": "f32",
+   "value": 0.100000001,
+   "bits": "0x3dcccccd"
+  },
+  "vehicle.materials[8].fakeContactPeriodX": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[8].fakeContactPeriodZ": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[8].fakeContactSpeedScale": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "vehicle.materials[8].fakeContactDepthMax": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "vehicle.materials[8].feedbackSpeedDivisor": {
+   "type": "f32",
+   "value": 2.5,
+   "bits": "0x40200000"
+  },
+  "vehicle.materials[8].feedbackScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[8].usesFakeContactTexture": {
+   "type": "bool",
+   "value": false
+  },
+  "vehicle.materials[9].naturalId": {
+   "type": "u32",
+   "value": 3
+  },
+  "vehicle.materials[9].blend.x": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[9].blend.y": {
+   "type": "f32",
+   "value": 0.100000001,
+   "bits": "0x3dcccccd"
+  },
+  "vehicle.materials[9].blend.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "vehicle.materials[9].blend.w": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "vehicle.materials[9].fakeContactPeriodX": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[9].fakeContactPeriodZ": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[9].fakeContactSpeedScale": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "vehicle.materials[9].fakeContactDepthMax": {
+   "type": "f32",
+   "value": 0.5,
+   "bits": "0x3f000000"
+  },
+  "vehicle.materials[9].feedbackSpeedDivisor": {
+   "type": "f32",
+   "value": 2.5,
+   "bits": "0x40200000"
+  },
+  "vehicle.materials[9].feedbackScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[9].usesFakeContactTexture": {
+   "type": "bool",
+   "value": false
+  },
+  "vehicle.materials[10].naturalId": {
+   "type": "u32",
+   "value": 6
+  },
+  "vehicle.materials[10].blend.x": {
+   "type": "f32",
+   "value": 0.899999976,
+   "bits": "0x3f666666"
+  },
+  "vehicle.materials[10].blend.y": {
+   "type": "f32",
+   "value": 0.899999976,
+   "bits": "0x3f666666"
+  },
+  "vehicle.materials[10].blend.z": {
+   "type": "f32",
+   "value": 0.400000006,
+   "bits": "0x3ecccccd"
+  },
+  "vehicle.materials[10].blend.w": {
+   "type": "f32",
+   "value": 0.25,
+   "bits": "0x3e800000"
+  },
+  "vehicle.materials[10].fakeContactPeriodX": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[10].fakeContactPeriodZ": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[10].fakeContactSpeedScale": {
+   "type": "f32",
+   "value": 0.0500000007,
+   "bits": "0x3d4ccccd"
+  },
+  "vehicle.materials[10].fakeContactDepthMax": {
+   "type": "f32",
+   "value": 0.300000012,
+   "bits": "0x3e99999a"
+  },
+  "vehicle.materials[10].feedbackSpeedDivisor": {
+   "type": "f32",
+   "value": 2.5,
+   "bits": "0x40200000"
+  },
+  "vehicle.materials[10].feedbackScale": {
+   "type": "f32",
+   "value": 0.75,
+   "bits": "0x3f400000"
+  },
+  "vehicle.materials[10].usesFakeContactTexture": {
+   "type": "bool",
+   "value": true
+  },
+  "vehicle.materials[11].naturalId": {
+   "type": "u32",
+   "value": 4
+  },
+  "vehicle.materials[11].blend.x": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[11].blend.y": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[11].blend.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[11].blend.w": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[11].fakeContactPeriodX": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[11].fakeContactPeriodZ": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[11].fakeContactSpeedScale": {
+   "type": "f32",
+   "value": 0.0399999991,
+   "bits": "0x3d23d70a"
+  },
+  "vehicle.materials[11].fakeContactDepthMax": {
+   "type": "f32",
+   "value": 0.100000001,
+   "bits": "0x3dcccccd"
+  },
+  "vehicle.materials[11].feedbackSpeedDivisor": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[11].feedbackScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[11].usesFakeContactTexture": {
+   "type": "bool",
+   "value": false
+  },
+  "vehicle.materials[12].naturalId": {
+   "type": "u32",
+   "value": 14
+  },
+  "vehicle.materials[12].blend.x": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[12].blend.y": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[12].blend.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[12].blend.w": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[12].fakeContactPeriodX": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[12].fakeContactPeriodZ": {
+   "type": "f32",
+   "value": 32,
+   "bits": "0x42000000"
+  },
+  "vehicle.materials[12].fakeContactSpeedScale": {
+   "type": "f32",
+   "value": 0.0399999991,
+   "bits": "0x3d23d70a"
+  },
+  "vehicle.materials[12].fakeContactDepthMax": {
+   "type": "f32",
+   "value": 0.150000006,
+   "bits": "0x3e19999a"
+  },
+  "vehicle.materials[12].feedbackSpeedDivisor": {
+   "type": "f32",
+   "value": 2,
+   "bits": "0x40000000"
+  },
+  "vehicle.materials[12].feedbackScale": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "vehicle.materials[12].usesFakeContactTexture": {
+   "type": "bool",
+   "value": false
+  },
+  "vehicle.materialIndexByNaturalId[0]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[1]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[2]": {
+   "type": "u32",
+   "value": 1
+  },
+  "vehicle.materialIndexByNaturalId[3]": {
+   "type": "u32",
+   "value": 9
+  },
+  "vehicle.materialIndexByNaturalId[4]": {
+   "type": "u32",
+   "value": 11
+  },
+  "vehicle.materialIndexByNaturalId[5]": {
+   "type": "u32",
+   "value": 3
+  },
+  "vehicle.materialIndexByNaturalId[6]": {
+   "type": "u32",
+   "value": 10
+  },
+  "vehicle.materialIndexByNaturalId[7]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[8]": {
+   "type": "u32",
+   "value": 2
+  },
+  "vehicle.materialIndexByNaturalId[9]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[10]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[11]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[12]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[13]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[14]": {
+   "type": "u32",
+   "value": 12
+  },
+  "vehicle.materialIndexByNaturalId[15]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[16]": {
+   "type": "u32",
+   "value": 4
+  },
+  "vehicle.materialIndexByNaturalId[17]": {
+   "type": "u32",
+   "value": 6
+  },
+  "vehicle.materialIndexByNaturalId[18]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[19]": {
+   "type": "u32",
+   "value": 7
+  },
+  "vehicle.materialIndexByNaturalId[20]": {
+   "type": "u32",
+   "value": 5
+  },
+  "vehicle.materialIndexByNaturalId[21]": {
+   "type": "u32",
+   "value": 8
+  },
+  "vehicle.materialIndexByNaturalId[22]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[23]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[24]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[25]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[26]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[27]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[28]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[29]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.materialIndexByNaturalId[30]": {
+   "type": "u32",
+   "value": 0
+  },
+  "vehicle.fakeContactTexture.width": {
+   "type": "u32",
+   "value": 128
+  },
+  "vehicle.fakeContactTexture.height": {
+   "type": "u32",
+   "value": 128
+  },
+  "vehicle.fakeContactTexture.rgbFnv1a64": {
+   "type": "hash",
+   "value": "0d922490c6e4b626"
+  },
+  "vehicle.fakeContactTexture.redChannelHexRowMajor": {
+   "type": "hex",
+   "value": "0000000000ce000000000e000000000500000000000000000000000000000000000000000000000000000000f5c40000000000000000000000000005f522008aa7ce000000000000000000000000000000000000940e056ff5b100003f35940000bbb1f5f5000000000000000000000000000000000000000000000000000000f5eb0005946f0000000000000000000000000000000000000000000000000000000000000000000000002b79f50e0000000000000000000000000000f5f50000000000000066830000000000000000000000000000000079f58a00000018a7f5f59435f5a7000000000000000000000000000000000000000000000000000000f5f505000000000000000000000000000000000000000000000000000000000000000000000000000000eb9400000000000000000000000000000000f5f50000000000000000003f0000000000001800000000000000000000000000cef5f5f58a0000220000660000f5eb000000000000005c00000000000000000000000000f5f5f5350000002b0000000000000000000000000000000000000000000000000000000000000000009e8a52000000940000000000000000000000000ef56600000000000000000000000000002b83180000000000000000000000499449f5f5000000000000f5f5f5f5660e0000000000003f00000000000000000000000000f5f5f55200000066a700000000000000000000009ef5f59e7900000000000000000000000000000000000000000000f500000018d800000000000000cef5f5c400000000000000000000002b9479495200000000000000000000000000005200000000005200947900000000000000000000001800000000000000000000b1d80079000005940e3f00000000000000000000000000e2f594f500000000000000000000000000000000000000000000f500000000f5000000000066f5f5f5f5eb000000000000000000008aa7000000000000000000000000000000000000000000000018f5000000000000000000d8f57900006feb94000000000005945c8a0000003549003f0000000000000000000000000000008a3f003500000e000000000052b1000000000000000000000000d86f000000000000000000ebf5f5f5f53f353f9e000000000000002b0000000000005c0000000000000000000000000000000000185c000000000000000000f5d85c0000f5f5f50000000083f5f5bb00000e94f5490000002200000000000000000000000000000000000000bbe2bb830000799e000000000000000000000000499400000000000000000000790000000094f5e266000000000000000000000049f5f50000000000bb940000000035050000000000000000000000000e00a7f566000000e2f5f52200000000f5f5790000000094000000180000000000000000000000000000000000000000008af594000000000000000000000000000000000000000000000000000000000000000079f5f5f5d8000000003f000000000000f5f5e2000000006ff5f5000000000000000000000000000000000000f5f5f5f5833500000018ce52000000000000000000000005000000000000000000b1660000000000000000000000000000006600000000000000000000002b000000000000000000000000f5bb00000000000000e2f5f5f50000000035b1000000000000a7f518000000000052f59e00000000000000000000000000002b83f5f5f5f58a00000000000022000000000000000000000005f5000000000000009ef5a72b00000000000000002b22000000000000000000000000000000000000000000000000000000000000f55200000000000000ced85c0000005c00052b000000000000000000000000000000f5f535000000000000000000000000008a0000f5f5c40000000000000000000000000000000000000000f594000000000000bbeb00000000000000000000000000229ec4220000000000000000000000000000000000b100000000000000050000000000000035180000000005f5a79ef5a7000000000000000000000e1800003ff5f5bb0000000000000000000000000000002beb000052050000000000000000000000000000000000058349000000003f8a35006f9e000000000000000000003ff5f50000000000000000000000942b22005cf5f5f53f00000000000079000000e2f5520000000000000000003f000035000000000000000000000018000000c4f54900000e00000000000000000000000000490000f5b100000000000066f56f0e00000005f5185c3fe2f5bbbba7225cc4bbf5f5f50000004900000000000000d85200000000000000000000bbf5f5f5003ff5f5f500000000000000f5e2000083b1000000000000000000000000000000000000000000000000000000000000000500005c050000000000000000185c00000005350e00000000000000f5f5f5f5490000f5f5520000000000003f493f000000f5f5000000000000000000000000000000000000000000000000b1f5f50000d8f5f5000000000000008a2200000000000000000000000000000000000000000000000000000000bb00000000000000000079ce5200d8d8000000000000000094f5f57900005c00000005f5f5f5f5f5f5f5f5f50000000000000000000000000000a70000cef50000000000050000000000000000000000000035f5f5f5f50000003f000000000035f518000000000000000000000000000000000000000000000000000000003ff5f5000000eba70000000000669e8394000000000000000079f5f5f58300d8f5f549a7f5520000522bcef5f500223500008ae222000000000000000000f5f500000000009e0000000000000000000000000000f5f5f5f566000000003f0000009ef50000000083790000000000000000000000a79e000000000000002b5ce2b1f5d8000000f5f50000000000000049f5ce00000000000000000035f5f5cef5f5f5f5ced800003fbb0052f5f500f5f5000035f5180000000000000000000e8a00000000001800000000009e49000022000000000000355c00000000004900000000000000005cf5f500000000003f0000000000000000000000000000e2f5f5ce0000000000663500009e00000000d8f5f50000000000000018000000d8f5f5f5f5f55c520005a7f5bbf5f579007966000000004900000000000000a70005660000000000000000000000000000000000000000000000050000000000000594000000000000bbf5520000005cbb0e000000000000000000000000000000f5f5000000000000000000000e00000000ebb16f001800000000f5f5000000000035f5bbf5000000003f66f5f5f5002200000000000049495279f5ceebf5f55c229e7918000000000018000000001894f5f5f5f500000000c4f50000000000ebf5f50000000000007983000000005cf53f000000000000000000000000000000350000000066f500000000000000000000180000000000000000b15c000000000000ce6f490000000000009ef5f500e200000000000083f5f5f5f5f5f5f5f50000000500000000000049f50000002bf5f5f5f5f5000000d8f5f500000000d8f5f5eb1800000000000000000000000000000000000000006600000000000000000000000000f5f50000005c000000000000000000660000000000000000000000003f5c0000000500006f4900000000f500000000006ff5f5f5f5f5eb6f4900000000f59e000000000066f5f5000000f5f5f5f5ce00000000e22200000500ce0000003500000000000000000000000000000000000500000000000000000022000000000000ce3f00000000000000831800000000ce00000000000000000000cef5c47900005cf5350079000000005c0000000000000000008a6f0000055c00000000f56f00000000000094f5f50000f5f5f5f5eb0000000000000000f58aeb000000f5ce00356f00000000000000d8b10e0000000000000000000000000049000000000000005200001800000000bb5c00000079d800000000000000000000f5f5f579e2f5f5f5bb003500000000f500000000000000000000000000003500000000000000359e000052a7f5f500005ca7b135940000000000000000b183f52266f5f5f5f55c520000000000002bf5f5790000000000000000000000000000000000000000002b00000000055c003500000005a73500000000000000000000ebf5f52bbbf5f5f50000350000008a79000000000000003500003f2b2b000000000000000000005200000552f5a70000000000000000000000000000224922a7056ff5f5f5bb0000000000008a006feb0000000000000000000000000000000000000000000000000000000000eb5c000000000000000000009eeb490000000052f5f579f5f5f50000cea7000083bb05f50000000000003f185cf5f5f5f55c00000000000000000000000000009e0e00000000000000000000000005f5c4353f0e6fbb000000000000000000f500005c0000000000006f00000000000000000000000000000000000000000000790000000000000000000052f5f5f5000000006ff5833ff5ce2b0000f5f5c400359e00f50000000000000022e2a7f5f5f5f5000000000000000000f5f50000003f5c8a0000000000000000000000f5f56fa7f5f5f59e0000000000000000f5f500000049839e0000000000000000000000ebf5f5bb180500000000000e00008a7900058a3f000000000000003fd8d80000000000000000bb94790049f5f5f5f56f0e0000000000000000005cd83500c4f5b1005c3f0000000000a7f5f50035000000790000000000000000002b83f5f522002bf5f5000000000000000000000000000000225c0000000000000052180000f5f5f5f58a0000000000003f000005835cbbe23f0000000000000000003fb13f0000000000006f00000ee2f5f5f5f5000000000000000000000005226f5c8a8a0000008ace220000f5f5f53500f59e0000003f000000000e000000ebf5f5f57979000000000000000000000000000000000000005cce350000000000f5f55c00ebf5f50000000000000000000000000000a7f5f5180000000000000018f5f500000000000000000000009ea7000000000000000e000000000000000000000000000000836f00006ff5f5f59e5cf51800000005000000ebf5f50000bbf5f500000e00000000005c0000f5f5350000000000000000008af59e18940000bb3f4983b1e23f000000664900000000000000008acee2ebc435000000000000cef5f5000000000000000000000000000000000000000000cef566000000000000008300000000947900006ff58a0035f5f52b6f79000000005cbb7900180e3505220000000000000000bb0000f5f5f5f5f5000000000000005ccebbf5f5f59e00000000000000000000002b18000000000000002b00000022bb0e000000000005f5f5000000000000000000000000000000cef50000000000f5f566000000000000f5e266003ff5f5830049f5790005c4ce003566000000001800000000000000050000000000f5f50000000094f5f5f579000000000000000094a7b1f59e52000000000000b100000000a700000000000000000022220000d8f5f500000000001879000000000000000000000000000000ebf5b1000000002be29e0000000000002b052b3f050ef5f5838af5f500000000000000000000000000000035f5f5f5f500000000bbf5f50000000079f5f5f50000000000000000000000000000000000000000a7f5e2a79ef5f50000000000000000a7f5520ea7f5f5f5bb0000000000180500000000000000000000000000225c0e35f5000000c4f5f5f5c4790000000018e2a7000000000000ebb100000000000000000000000000000000499e6f790000000000000000000000000000000000000000000000000000000000002b0000000000b1f5f5f5f5d800002b00000000002283226f6f5c8af5f5b100000000000000000000000000000000000000f5940035f500000000e2f5f5f59e0000001852832b00000049000000000000002b0000002200050000003f0000000e000000000000000000000000001800000000000000000000000000000000000000000000000000220066000000830e000000000000000000000000c42b0000000000000000000000005200001800000000943f35b1f50000000000000018220000000000000e0000003500000000000000000000000518f58a009e5c000000000000000000000000003f0000008a350000002b00000000000000000000000000000000000000000000000000f5f50e00000000000000000000000000000000000000000000000000002b000000005200000000000094000000000000000000f5f5bb49000018c4f59e00000000000000000022f5f5bb229e18005c000000ce000000000e8a3f2b000000000000002b000000f5eb000000000000000000000000000000000000000000000049f52b00000000000000000000000000000000000000000000000000000000000000000000000000000000f50000000000000000f5f5f59e6f0094f5f5f5f500000000000000000000bb3f0000000505000000f5c400000000f5f5f5350000000000000000000035520000000000830000000000000000000000000000000000000000000000000049b100000022220000000000000000490000000000000e490000000000000000000000f5f56f00000000185cf579c422bb9ef5f5f5f5f50e000000000000000000000000000000000000ebf5f500000000f5f5f50000000000000000000000000000000000002b7900000000000000000000000000660000000000000000000052f5000000000000000000000000003f000000000000bbe26f0000000000000000000000b100000000f5f5f53f00000049f5f5f59e79b1000000000000000000003500000000000000f5f5f5f50000000000002b000049000000000000f583000000000000000000000000000000000000000000058a350000832b000000000005520000000000000000000000000000005c0000000049f5f5f500000000006600000000000000000094f5790000000083a79400000000000000000000f53500009400000000000000f5f5f5665c00000000000000bbf5000000000000f50e0000000000000000000000000000000000000000000000000000f5f55c002b6f000000000000000000000000000000008af5f5f500000000f5f5f500000000f5f5f5f5f505000000000000e23f00000000940000000000000000002bf5f5f500000000000000000000000000000000000000000e0000f5f5c48af583000000000000000000000000225c0000000000000000000000000000000083f50000000000000000000000000079790000000000000ef566000000005cf53500000018f5f5f5f5f50000000000000000000000000000000000000000000094bbf5f500000000000000000000000000000000000000009ef5050079000000b1eb5200000000000000000000000000000000000000000000000000005c0000000000000000838300000000000079bb00000000000000005200000000000083000000229ef5f5f5f5f5c400000000000000000000000000000000000000000ef5c4f5f5000000000000000000000000bb0000000000052b6f00000000000000000000000000000000009e0000000000000000000000000000000000008a35000000000000001800000000000000000000000000000000000000000000008a000000002b0035cee28af5f500000000000000000000000000000000000000000083f5f500000000000000000000495c6fce0000000000f5f59e0000000e0000000035493f9e00000005f5f5f50e00000000000000000000000000000000002b0000000000000000000000000e0000000000000000000000000000000000bbce00053500000000000e6fc4790000005c00000e0000839483000000000000000000ebf5bb00cef5f5f50000000000005cb15c00000000000022000000009e00000005f5f594f56600000583f5f5f5660000000000003f0000000000000000836f0500000000000000bbb10022940000000000000000000000000000000000000000f5f5f5000000003ff5f518000000f50500000005f5f5f518000000000000000079f5e200e2f5f5f5c40000000000000035ce0000000000000000000035000094f5f5c435f5b100050e0000a7f50000498a2b6652c4498a66050000000094f5e2ce180000002b9ef5f500000018a7350000000000000000000000000000000000f5f5f5f53f0000f5f57900000018f5f50000009ef5f5f500000000000000000000f58322f5f5f5f5f50000000000000000ce8a00000000003f0000000000000000000000cee20000002200000500002b66f5f505008af5f5180000000000005cb16600000005000000220022e2f53fcef5c41800830000000000000000000000f5f5f5f5f505185ce200000000f5f5bb000000e294e29e00000000000000000000bbd8c449d8f5f5f5000000000000000000000000000000000000000000050000000000000000000ef55200b166000000f5f500009449000000000000000000181800000000000000f5f5f5f5f5001800000035f5000000000000000000000000f5f5f5000000000018000e00cef594000000830e0e0000000000000000000000f5f5eb0000f5f500000000000000b1000000bbc40000000000000000001800000000000000000079f52200f5f5f56600220000002b00000000000005000000222b0000000e000000f5f5f5f56f00000000005cc400000000000000000000000049f566000000000000187922eb5c00000000000000000000000000000000000000f52200005c6600000000000000f5f500000000000000000000f5f58a0000000000000000004966660000f5bb00000000000000000000000000000000000000000000000000000049f5eb520000000000000000000000000000000000000000002200000000000000f5f5cef5000000000000000000000000000000000000000000000000000000000000000000f5f500000000000000000000f5f5f5009ea700000000000022000000003f000000000000000000000000000000000000000000000000000000002bc4f5e23500180000000000000000000000000000000000a7f5f5f5bb0000180ef5f5f5f50e00000000222b00000000006ff5f500000000000000000000b18a79c400000035f5350000000000000000000000d8f5526f9418000000000000000000000000000000000000000000000000000000000000000000000000000049f5f522000000000000000000000000000000001800000000c4f5f5f5f5b19e0500f5f5f5f55c000000000000000000000000e249000000000000790000000566f5f50000006f35000000000000000000008a94ceb1352b9e2b00000000000083520e000000000000000000000000000000000000000000000000a7f5b15c002bf5f50000000000000000520000000000000000000000006ff5f5000094f5f50000f5f5f5f55c00000000000000b1f5d800000000940000000000f50000000000f5f500000083000e0000000000000000f5e26f49000000eb8a000000000000f5f50e0000000000000000000000a722000000000000000000008af5f5f5a70000000000000000000000000e000000000000000000000000c4f5f5000000f5bb3f009e79c4f55c000000000000f5f5f5f5000000000e0000000005f500000000000000000066520000000000000000000052000000000000c4f5222200000000f5f500000000000000000000000000000000000000000000000e5c0083f5f518b1050000000000000000000000000049799e00000000000066f5f5000000b1189ec4000066f5f5830000000000f5f5220000000000000000004952f56f000000000000000035000000000000000000000000000000000000000000000094f5c4f5d80000000000000000350000000000000000000000000000180e00002bf5529400000000000000000000000e0000bbf5f53f000000000094f5d800006f000000f50000f5f5f5f5c4f5f5f5003f0e000000002283000000000000839e0000000000f5c40000000000000000000000000000000000000000000000000066f59e00000000000052a70000f5f50000000000000000000000000000000000006600000000000000000000000000000000000000000000000000f5f55c000000000000000000f5f5830566f5f5f58a790000006ff5f5f55200520000003f520000000000f5f5000000000000180000000000000000000000180000000000002b0000000000000000e2f50000949e00000000000518000000000000000000520000000000000000000000000049f5000000000000000000009449f5f5000000002b0000000000f59e00000049f59ef5f500000e8af5f5f53535220000000000000000000079f5f56600000000520000000000000022000000000000000000000000000000002200005c490000000000000000003ff59e000000000000000000000000000000000000000000009ef500000000000000000000b1000000000000008ae200000000f5b1000000003500f5f500005c0079f5ce5cce000000000000000000003f3579f594000000000000001800000000f5f500000000000000000000000000185c5c000000000000000000000000000000000000000000000000000000000079f5520000000000000035000000000000000000836f0000050000350000e200000000f5f5ce0e00000000f5e2bbf58a000022182bf5000000000000000000f5f5f5000000000000000000000000000000665c00003f000000000000000000000000000000000000000000000000000000000000c4f50000000000000000000000220000000000000000b1000000000000000000000000ebf535e2f500000000000000000e5c66000000005c1800000000000000006f0000000000000000a7f5f5f500000000000000000066000000008ac40000000500000000000000000000000000000000000000000000000000000000000000c47900000000000000522b00000000000000000000f5f50000000035000000000000f5f55266f55c00000000000000000094350000009ee2c4003f050000000000000000000000000000f5f5eb0500000000000000c49e00000000e2bb0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f5f5000000059449cef500000000e218008a52000000000000000500000000008af5f5f5356f2b0000000000000000000000000000000000000000002b7994b100000000000000000000000000b1f5f50000000000000000000000000000000000000000000000000000000000000000000000000e000000000000000000000000c4183ff5bb83f5f5f5000000000000000000000000000049006f00000000006694f5f59e0005000000000000003f49f5b100000000002b00000000000e5c830000000000000500000000000000f5f500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009ef5f5f5940000220000000000000000005200000000180000d8eb000000005cf5f5f500000000000000000000f5f5790e0000a7f5f50000000000f5bb180000000000f58a22000000000000000000000000000000000000000035000000000e000000000000000083b10000525c5c221800000000000000000000000000000000008ace0000000000006f8a5cb10000008a050ef500350000e2f5a7f5f5a7b1f5f5b100000000000000000000f5d80000b1f5f5f5f50000000052f59e000000000079f5bb0000000000000000000000000000000000000000f5f52b0000009e0000000000000000a7f50000f5f583220500000000000000000000000000000000000000000000000000000ee2f5f51800c4f5f5f5bbce003ff5f5d8eb18000ef5f50000000000000000000000cef55200f5f594000000000000000000000000000000002200000000000000000000000000003f0000000035ebf500000000f500000000000000000035f5b13f000000008af5eb00000000000000000000000000000000003500000000000000f5f5f552f5f5f5f5d80000000000000000003fe2c400000000000000000000000000180022b100000000002b00000000000000000000000000000000000000000000000000b1790000000000000000000000f55c00000000000000000ea700000000000066e20000000000000000000000000000000000000000000000000000e2f5f552052bbb001800000000000079f583000000000000000000000000000000005c79000000000083f5a7000000000000000000000000000000000000000000000000000e000000000000000000000000002b5c00000000000000180000000000000000000000000000000000000000000000000000000000000000f5bb499ef5f5000000000000000000000000bbf59e00000000000000000000000000000000000000000000005c9e0000000000000000000000000000000000a7f5f522000000000000000000000000000e0000000000668a0000000000000000000000000000000000000000000000000000000000000000000000000000009ef51800000000000000000000000000000000006f1800000000000000000000000000000000000000000000002bbb000000000000000000000000a70e00000049f5f549000000000000000000000000ebf50000000049835c000005b100000000180000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000226f00003ff583000000008a35000000000000000000000000000000000e5c000000000000000000000000b14900000000b100005249006f0000000000000000f5f500000000000000000000490000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083f5b1ce0000b1f53f00000000c4f5000000000000000000000000000000186600000083050000000000000000000000000000ce0000000000f59e00000000000000f5830000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e2000000000000006fb10000000000f5f5f5cebb00000000000000000000000000000000000000050000000000004918000000bbf583000000007935000000000000003500000000008a0e00004900000094f5a700000000000000000000000000000000000000000000c479000000000000496f000000000000000000000000f5220000000000f5f5f5a700000000f5f5f5b1f5f5000000000000000000000022000000003ff5f5f56600000e83d835000000009eeb5c000000000000000000000000000000000000000000f5ce000000f5c40000220000000000ebeb0000b1f58a00000000000000006f000000000000000000000000220000000000000035c40000000083f5f5f5f5660005f50000e2050000e200000083a7a78a00000000521800000000c48ad8f58aa7a700000000000000000000000000000000000000000000000000000000000094f500000018f5000066000000000000f5f566f5c4663f0000f5f579000000000000000000000000000000000000000000000000000000000000228af5f5ce050000f5000000000000000000f5f5bb0000000000000066000000000000052b0000000000000000000000000000000000000000520000000000000000000049180000000000ebf50000942b0000000000f5f5f5f5490000000022000000000000000000000000000000000000000000000000000000c42b0052180000000000000000f5000000000000000000f5f5f5a7830000000000f5490000000000008a180000000000000000000000000000000018c4c4f58a00000000005200000000000000000505e2f51800d8f5220000000000b1520000000000000000000000000000000000002b52000000000000000000000000005cce050000000000000000000000f5000000000000000000c4f5f5f5f5f5000000bbf5f5220000000005f5bb00000000000000000000000000000000526fe25c79f5f5352bbbf5f50000000000000035f5f5000066f5f5f5000000000000350000000000000000000000000000000000000000000e0000000000f5f5f53f000000a78a000e0000000000000000006f180000000000000052f5f5f5f500000000a7e20000000000000000000000000000000000000000000000008af5c42bbb52a7f5f5b16ff5f5f5f50e000052f5f5b1b1350000496f528300000000000000000000000000226f00000000000000000000000000000000000022f5f5000000000000000000668394f50500000000000000000022002b000052790000000000000000000000000000000000000000000000000000000000f5f5c4b1d80000002252f5f5f5ebe2f5f5f5f5000018f5f5f50e0000b1f5f500000000000000000000000000000000050000000000000000000000000000000000000000000000000000000000000035f5f58a0000000000000000005c0e9e050000000000000000000000000000000000000000000000003500000000000000f5f52b00000000000000005cf5f500000e6fb100000000002b008383f5f5f5000000000000000000000000005c000000005c00000000350000000000000000000000000000000000000000000000001883d8000000000000c40500002b00353f0000000000002279000000000000000000000000000000002b5c000000000000f579000000000000000000000eb100000000180000000000000094f5f5f59400000000000000000000000000f5b1000000bb000000000000000000000000223500c435000000000000000000000000006f660000000000008322000000000000000000000022000000000e00000000003f00000000000018f5f500000000798ac400000000000000000000000000006fa7799e5200002b0000000005f5f5f5350000000000f5f5000000002bf59e0000005c00000000000000000000006f83058af500000000000000000000000000005218000000000000006f5200000000000000000000000000000005000000006ff53f0000000000a7f5f5941800000000000000000000000000000000000000000049f5f5bb05790e000000005cf5f5f5d800000000f5f500000000000000005200000000000000000000220000e2f53f8300000000000000000000000000003ff5f5f5ce0000000000000000000000000000002b0000002b000000000018e2000000000000000000f5f5f5f5350000000000000000000000000000000000000000000e00000000000500000000f5f5f5f500000000005c0000003500183f058a0e0000000000000066f5a700000ef5f5f500000000000000000000000000008af5f5f5f5000000002200000000000000000000f5000000000000000000008300000000000000000000eb5c3f35000000000000000049000000000000000000000000000000000000180000000000000000000000000000490e66f5f5f57900189e000000000000f5f5bb00000000f5f5f50500000000000000000000054900000000f5f5c46f0000a7f5c43f00000000000083f5000000000000000000000000350e3f000000000000180500052b000000000000000000000018942200c4f5794900000000000000523f006635000000000000000000000000008af5f50e2b6fa70000000049009ef50000000000bbf5f50000000000000000000000000000000000f5f5f58300006ff56652000000000000003f00000000000000000000525cd8d8f5f500000000000000000000000e0000000000000000000000000049f5f500000000000000000000004900003f8a0000000000000000000000f5490000d835000000529400000000000000182be279000000a700000000000000000000008a5c66bb490000004900000000000000000000000000000000000000002b5c35000000000000000000000000000000000000000000000018000000000066e2a700000000f5f5f566000000000000bb8a0000000500000000000000e25c0005ce00000000220000000000000000000000000000f5f51800000000000000000000f5c4000000000000000000f5c4000000000000000000000000000000000000000000000000000000000000000000000000ce0500000000000000000000d8f56600000000f5ceb1ce00000000008af5000000003f0000000000002bf5f579f5ce000000ebf500000000000000000000000000d8f5f500000000000000000000000000000000000000000066f5f500000000b1a700000000000000000000000000000000000000000000000000000000000066000000000000000000000000000052353500000000f55c00000000bbf50500000000000000000000008a356ff500000000f5f549000e00000000793f0000000052000000000000000000000000000000000000000000003fb10000000000003f940005000000790000000000000000000000000000009eeb05180000000000000000f5f500000000000000000000053fa783000000c449000000000018f55c0000000000000000000000000005000000f5f5f5a72bbb00000000000000000000000000000000000000000000000000003f2200000000f5f5f500000000000000003ff52200bbeb0000000000000000000000000000000ef50035050000000000000083940000220000000000000000000066006f9e0000000000000000f50000000000008a00000000003f0000000000e2f5f5f5000000000000000000000000000000000000000000000000000066f5f56f00000000f5f5f500000000000000000049180000000018000000000000000000000000000000009e520000000000005c520000000000000066220000180000000000000000006ff594000005000000000049a7000000000000000000000005f5f5f500000000005c2b0000001800000000000000000000000000000000f5f5b100000000f5f5f50000000000000000003fa7000000f5b100000000003500000000000000000000000000000000006f0000000000000000003f00005c66000000000000003f9ee2f50000000000000000f5f52b006fbb8300000000000000000005f58a0000000000000000f5f500000000000000000500000000000000006f9e00000000f5c4000000000000000000000000000005bb0000000000000000000000000000000000000000000000009e000000000000000000000000000000000000000000050083f50000000000000079f5490005f5f5f50000000000000000000000ce7900000000000000f5f500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f5940000000000000000000000000000000000b100002b830000ce8a000000003fb1d85c000000000000000000000000000000000052d866000000000000000000d822000000000000000000000035000000000000000000000000005cf59e00000000000000000000000000000000000000005c000000000000220000000079f5f583f5f5000000000000000000000000009ece0000bb660000a7eb6ff5bb002b8a00000000000000000000000000000000000000f5f5f5f50000050000000000000000790000000000000000000000000000000000000000000000f5f5f50000000000000000000079bb4918009400000035f5ce0000000000ce3500006ff53500f5f5f500006f00000049000000000000000000a73f0000000022f5f5f5834900000000000000000000000000220000000018a7f5f5f5f5f5ce00000000000000002bf50e00b1f5f5220000000000000000000000000000000000e2f5eb8a0000002b3f0000000000006679005200000035f59e00000000003f000000f5f5000022f5f5000000000000000000000000000000009e22000000000000a7c4e20000000000000000220000000000000000000066f5f5f5a7f5f594000000000000008af5f5e20000eb6f00000079f5f5f5f5f55200000000000000f5f5d8c4c4000000520000000000000000000000000000f5f5f50000003535350000009ef5050000000000008af50000000005f5c4000000000018f583000000000000003500000000000000000000000000000000000000003500000000bb00000000000000008af5f5f50000000000000ee2a7000000000000000094000000f5f500352b00000000000000000000000000000000009eb1f5eb000000350094000000c4f5949e00000000008af5f50e0000d8f5ce0000000000bbf5f50000000000000000000000008ad8521800000000000000000000ce831800002b00000000000000000000000518b10e000000000005b1000000000000000000009400009e00000000000000000000f5bb000000005c94f5f5f5f500000000000005000000000018d8f5f5a7eb05000000b1f5f5f5c4f5f535000000000005948300000000000000000000002bf5f5f55200050000000000000022f5f5e294f5f5f500000000000000000000180000660500000000008a00000000000000000000798a000000000000000000000066f5eb2200005cbbf5f5f5f5f5000000f5f500000000000000a7f5f5f5f5f5c40000005c2b2bf5f5f579000000000000000000000000000000000000003ff5f59ee200000022f54900000000000049b1c4f5f5f5f58a000000000000005c3f18182279000000000094000000000000000035000000002b00000000000000000000f52b000005d835f5f5f5d88300005cf5f5000000000000002294f5bb2b8a223f3f18d8bb0066f5eb00000000000000000000000000bb9e0000000018f5f518000000000000e2d81852a70000002b0005f5f5f5f56f00000000000000523f8a8318000000000000d8000000000000000000000000003f00000000000000000000495c000000350000bbce000000000000002200000000000000000000000000000000f5f5f58a830000000000c43500000000000000d88a005cbb00000000000000000000003ff5f5f5f5f500004900002b000000003f0066f51800000e000000830000000000006f000000000000000000000000054900000000000000000000eb9e000000000000000000000000000000f5ce79f52b0000000000000000000000000e79ebbb000000000000a79e0000490049793f0e0000bb8a00000000000000000000000066f5f5f5f5f52b1800000000000005f5f5f5f566000000000000000e000000000000000000000000000000000000000000000000000000220000f5eb0000000000220000002bb1220000001852f5f5f5000000000000000000000000000000000000000500000e5cf5f5b100bbeb180000000000000000000000000035000000000005f5f5f518000000000000009ef5f5f5f5eb0000000500006feb000000000000000000000000000000000000000000000000000000832205f5f50000000035350000000052ce2b00000000ebf5f59e00000000000066bb000000000000000000008a3f49a7bbf5f518000000000000000000000000000000a7f5ce000000000000c4222200000000000000000000000000a7000000f5f5f5f5f535000000000000000005cef5bb000000000000000000000000000000220000180000000079eb0500000000000000000000055c6f2b0000000000001835498af5f5180000000000000000182bf5a70000000000000000000000003f000000f5f55c0000000000000500003f52000000000000000000000000000000f5f5f5a72b000000000000000079f5e2f5f52200005c00000000009eeb00000000f5ce00000000000052b1793fe27900000ef56f000000005c00000000000000000052f5f5f56635000000000000000000000000000000000000cebbc4f5f5f5d80000a7f5220000000000000000b1f5f5f5000000000000000000000000000000b100000000000000000000003ff5ebf5f50500009435000000000e9e000000f5f5f5000000000000000000002200000052f5f5790000008a00000000009ef50e0018f5f5f566520000000000000000000000000000000000f5f5f5f56f3fe2f5000049d800000000000000000018f5e2d80000000000000000000000000000000000000000000000000079668af5f5f5f50e0000c46f000018000000000000e2f5f58a000000000000000000000000000000bb05000000050000000000ebf5f56ff5f5f50e00000000050000000000000000000000000000bbf5f5b10000f5f505000000000083a70000000000007900000000000e000000bb180000007900000000000000522b0000000000000000000000005c2200000005000000000000008a059e0e0035f5bb00000000000000000000000000000000000000000052f5f566bbce520000000000000000000000000000000000000000008af56f000049f5bb0e3f9e002bf5f5000000000000000e0000000000000000eba72b0000350000bbeb0000009ed86f00000000000000000066ebf5830000000000000000000000000000000005f5f500000000000000000000000000000000000000000000f5f5000000000000000000000000000066f518000000000000000000000000000094d88a66c4000079b100000000000000005c94000000000000b1e29494b1839ef5f5f5f5182bf5eb6f00000000000000000000f5f5f50000000000183f00000022520000005294f5f50000000000009e18003f00000000000000000e000000000000000000000000000000000000c4f5f5f5000000000005350000000000000000000e83940500000000000000005c0000b1ce000000000052eb8ab1a7ebf5f5f5f5f5f5c4f5f5bb000000000000000000000000f5f5f5f58a0000ebf5000000663f00002bb1795c2b00050000000ef5c40ec4bb7900003fd87900050000000000000000000000000000000000003ff5f5f5eb0000000000000000006f2200004900b1f583000000000000000083f500003f00000000000094f5f5f5f5f5f5f53f000000008af5f5000000000000000000000000f5f5f5f5f500002bf5f50000000000000ef5f5eb000005000000009400006ff5f5e29e52000000000000000000000000000000000000836635b1000083a7f52b000000000000000000a7f5f5f59e79000000000000000000003fce0e000000000000000000f5f5e2e2f5f500000000000022eb8a0e00000000000000000000000ef5f5f56f000000666600000000000000f5f5f50000000000000000000000a7f5f5f583000000000000000000000000000000000000f5f5f5f552000000005c35000000000000000000a79ea72b0e00000000000000000000000000180000000094ce0000f5f5f52b00000000000000003ff5000000001805000000000000000094f5791800a76600000000003500000000f5f5000000000000d8ce9e000566a7f5f5660000000000000000000000000000002bb1f5d86ff5f52200000000f5f50e000000000000000000050000f5f5f5ce8a00000000000000000e660000f5f5f5f5000000000e000000000000000000b1f552000000000000000000000000000000000018f5bb0000000000005c0000008a05000000000005f5f5f55c000000f5e2000000000000000000000000000000000000000005f56f00000000f5f5f5f5660000000000000000000000c4f5d8180000000000000000f5f5d80018f5f5f5f5000000008a0000000000830000bbf5f5790000000000000000000594000000000000522b0e00000000000000000000000000000000000000b1a700000000f59e000000000000000000000000000000c40000000094f52b00220000a7f5f5f5180000000000000000000000000000000000000000000018f5f5f5f5f5f5f5f5bb000066f5f56f00000000f5c400b1bb660000000000000000000000000000000000003f00000000000000000000000000000000000e0000000000000005000e000000000000000000000000000000b1f5000000005c0000000000000000f52b0000000000355c00001800000000000000000000000000006ff5f5f5f5bb001800000005f5f5ceceb12b00000000000000000000000000000000000000000000b1f5f5c4000022660000000000000000000000000005000000000000c4f50e0000000000000000000000000000000083f500000000ce0000000000000000000000000000000022000035000000000000000000000000000000bbf5f5b1000000000000000ea7ced8f5f5f5000000000000000000f5f5790000000000000000f5f5f594f53ff5f5f500000000000000000000000000000000000000f5f5f500000000000000000000000000000000000000e2000000d80000003f497900000000000000831800000000f5f5000000a70000000000000000359e83f5f56f00000000f5f50000000000f5f5f5f5b100000000000000ebf5f5948300000066f5"
+  },
+  "solid.wheels[0].surfaceId": {
+   "type": "u32",
+   "value": 1
+  },
+  "solid.wheels[0].rollingRadius": {
+   "type": "f32",
+   "value": 0.363999993,
+   "bits": "0x3eba5e35"
+  },
+  "solid.wheels[0].forceApplicationPoint.x": {
+   "type": "f32",
+   "value": 0.863012016,
+   "bits": "0x3f5cee5b"
+  },
+  "solid.wheels[0].forceApplicationPoint.y": {
+   "type": "f32",
+   "value": 0.352499992,
+   "bits": "0x3eb47ae1"
+  },
+  "solid.wheels[0].forceApplicationPoint.z": {
+   "type": "f32",
+   "value": 1.78208899,
+   "bits": "0x3fe41b7e"
+  },
+  "solid.wheels[0].initialSurfacePoint.x": {
+   "type": "f32",
+   "value": 0.863012016,
+   "bits": "0x3f5cee5b"
+  },
+  "solid.wheels[0].initialSurfacePoint.y": {
+   "type": "f32",
+   "value": 0.352499992,
+   "bits": "0x3eb47ae1"
+  },
+  "solid.wheels[0].initialSurfacePoint.z": {
+   "type": "f32",
+   "value": 1.78208899,
+   "bits": "0x3fe41b7e"
+  },
+  "solid.wheels[0].restSurfacePose.rotation.basisX.x": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.wheels[0].restSurfacePose.rotation.basisX.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[0].restSurfacePose.rotation.basisX.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[0].restSurfacePose.rotation.basisY.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[0].restSurfacePose.rotation.basisY.y": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.wheels[0].restSurfacePose.rotation.basisY.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[0].restSurfacePose.rotation.basisZ.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[0].restSurfacePose.rotation.basisZ.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[0].restSurfacePose.rotation.basisZ.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.wheels[0].restSurfacePose.translation.x": {
+   "type": "f32",
+   "value": 0.863012016,
+   "bits": "0x3f5cee5b"
+  },
+  "solid.wheels[0].restSurfacePose.translation.y": {
+   "type": "f32",
+   "value": 0.352499992,
+   "bits": "0x3eb47ae1"
+  },
+  "solid.wheels[0].restSurfacePose.translation.z": {
+   "type": "f32",
+   "value": 1.78208899,
+   "bits": "0x3fe41b7e"
+  },
+  "solid.wheels[0].collisionRole": {
+   "type": "u32",
+   "value": 4
+  },
+  "solid.wheels[1].surfaceId": {
+   "type": "u32",
+   "value": 2
+  },
+  "solid.wheels[1].rollingRadius": {
+   "type": "f32",
+   "value": 0.363999993,
+   "bits": "0x3eba5e35"
+  },
+  "solid.wheels[1].forceApplicationPoint.x": {
+   "type": "f32",
+   "value": -0.862990022,
+   "bits": "0xbf5cecea"
+  },
+  "solid.wheels[1].forceApplicationPoint.y": {
+   "type": "f32",
+   "value": 0.352499992,
+   "bits": "0x3eb47ae1"
+  },
+  "solid.wheels[1].forceApplicationPoint.z": {
+   "type": "f32",
+   "value": 1.78208899,
+   "bits": "0x3fe41b7e"
+  },
+  "solid.wheels[1].initialSurfacePoint.x": {
+   "type": "f32",
+   "value": -0.862990022,
+   "bits": "0xbf5cecea"
+  },
+  "solid.wheels[1].initialSurfacePoint.y": {
+   "type": "f32",
+   "value": 0.352499992,
+   "bits": "0x3eb47ae1"
+  },
+  "solid.wheels[1].initialSurfacePoint.z": {
+   "type": "f32",
+   "value": 1.78208899,
+   "bits": "0x3fe41b7e"
+  },
+  "solid.wheels[1].restSurfacePose.rotation.basisX.x": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.wheels[1].restSurfacePose.rotation.basisX.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[1].restSurfacePose.rotation.basisX.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[1].restSurfacePose.rotation.basisY.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[1].restSurfacePose.rotation.basisY.y": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.wheels[1].restSurfacePose.rotation.basisY.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[1].restSurfacePose.rotation.basisZ.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[1].restSurfacePose.rotation.basisZ.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[1].restSurfacePose.rotation.basisZ.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.wheels[1].restSurfacePose.translation.x": {
+   "type": "f32",
+   "value": -0.862990022,
+   "bits": "0xbf5cecea"
+  },
+  "solid.wheels[1].restSurfacePose.translation.y": {
+   "type": "f32",
+   "value": 0.352499992,
+   "bits": "0x3eb47ae1"
+  },
+  "solid.wheels[1].restSurfacePose.translation.z": {
+   "type": "f32",
+   "value": 1.78208899,
+   "bits": "0x3fe41b7e"
+  },
+  "solid.wheels[1].collisionRole": {
+   "type": "u32",
+   "value": 5
+  },
+  "solid.wheels[2].surfaceId": {
+   "type": "u32",
+   "value": 3
+  },
+  "solid.wheels[2].rollingRadius": {
+   "type": "f32",
+   "value": 0.363999993,
+   "bits": "0x3eba5e35"
+  },
+  "solid.wheels[2].forceApplicationPoint.x": {
+   "type": "f32",
+   "value": -0.88499999,
+   "bits": "0xbf628f5c"
+  },
+  "solid.wheels[2].forceApplicationPoint.y": {
+   "type": "f32",
+   "value": 0.352503985,
+   "bits": "0x3eb47b67"
+  },
+  "solid.wheels[2].forceApplicationPoint.z": {
+   "type": "f32",
+   "value": -1.20550203,
+   "bits": "0xbf9a4de4"
+  },
+  "solid.wheels[2].initialSurfacePoint.x": {
+   "type": "f32",
+   "value": -0.88499999,
+   "bits": "0xbf628f5c"
+  },
+  "solid.wheels[2].initialSurfacePoint.y": {
+   "type": "f32",
+   "value": 0.352503985,
+   "bits": "0x3eb47b67"
+  },
+  "solid.wheels[2].initialSurfacePoint.z": {
+   "type": "f32",
+   "value": -1.20550203,
+   "bits": "0xbf9a4de4"
+  },
+  "solid.wheels[2].restSurfacePose.rotation.basisX.x": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.wheels[2].restSurfacePose.rotation.basisX.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[2].restSurfacePose.rotation.basisX.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[2].restSurfacePose.rotation.basisY.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[2].restSurfacePose.rotation.basisY.y": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.wheels[2].restSurfacePose.rotation.basisY.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[2].restSurfacePose.rotation.basisZ.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[2].restSurfacePose.rotation.basisZ.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[2].restSurfacePose.rotation.basisZ.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.wheels[2].restSurfacePose.translation.x": {
+   "type": "f32",
+   "value": -0.88499999,
+   "bits": "0xbf628f5c"
+  },
+  "solid.wheels[2].restSurfacePose.translation.y": {
+   "type": "f32",
+   "value": 0.352503985,
+   "bits": "0x3eb47b67"
+  },
+  "solid.wheels[2].restSurfacePose.translation.z": {
+   "type": "f32",
+   "value": -1.20550203,
+   "bits": "0xbf9a4de4"
+  },
+  "solid.wheels[2].collisionRole": {
+   "type": "u32",
+   "value": 7
+  },
+  "solid.wheels[3].surfaceId": {
+   "type": "u32",
+   "value": 4
+  },
+  "solid.wheels[3].rollingRadius": {
+   "type": "f32",
+   "value": 0.363999993,
+   "bits": "0x3eba5e35"
+  },
+  "solid.wheels[3].forceApplicationPoint.x": {
+   "type": "f32",
+   "value": 0.885002017,
+   "bits": "0x3f628f7e"
+  },
+  "solid.wheels[3].forceApplicationPoint.y": {
+   "type": "f32",
+   "value": 0.352503985,
+   "bits": "0x3eb47b67"
+  },
+  "solid.wheels[3].forceApplicationPoint.z": {
+   "type": "f32",
+   "value": -1.20550203,
+   "bits": "0xbf9a4de4"
+  },
+  "solid.wheels[3].initialSurfacePoint.x": {
+   "type": "f32",
+   "value": 0.885002017,
+   "bits": "0x3f628f7e"
+  },
+  "solid.wheels[3].initialSurfacePoint.y": {
+   "type": "f32",
+   "value": 0.352503985,
+   "bits": "0x3eb47b67"
+  },
+  "solid.wheels[3].initialSurfacePoint.z": {
+   "type": "f32",
+   "value": -1.20550203,
+   "bits": "0xbf9a4de4"
+  },
+  "solid.wheels[3].restSurfacePose.rotation.basisX.x": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.wheels[3].restSurfacePose.rotation.basisX.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[3].restSurfacePose.rotation.basisX.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[3].restSurfacePose.rotation.basisY.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[3].restSurfacePose.rotation.basisY.y": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.wheels[3].restSurfacePose.rotation.basisY.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[3].restSurfacePose.rotation.basisZ.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[3].restSurfacePose.rotation.basisZ.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.wheels[3].restSurfacePose.rotation.basisZ.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.wheels[3].restSurfacePose.translation.x": {
+   "type": "f32",
+   "value": 0.885002017,
+   "bits": "0x3f628f7e"
+  },
+  "solid.wheels[3].restSurfacePose.translation.y": {
+   "type": "f32",
+   "value": 0.352503985,
+   "bits": "0x3eb47b67"
+  },
+  "solid.wheels[3].restSurfacePose.translation.z": {
+   "type": "f32",
+   "value": -1.20550203,
+   "bits": "0xbf9a4de4"
+  },
+  "solid.wheels[3].collisionRole": {
+   "type": "u32",
+   "value": 6
+  },
+  "solid.collisionShapes[0].role": {
+   "type": "u32",
+   "value": 4294967295
+  },
+  "solid.collisionShapes[0].surfaceType": {
+   "type": "u32",
+   "value": 1
+  },
+  "solid.collisionShapes[0].surfaceMaterial": {
+   "type": "u32",
+   "value": 0
+  },
+  "solid.collisionShapes[0].localPose.rotation.basisX.x": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.collisionShapes[0].localPose.rotation.basisX.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[0].localPose.rotation.basisX.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[0].localPose.rotation.basisY.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[0].localPose.rotation.basisY.y": {
+   "type": "f32",
+   "value": 0.998223007,
+   "bits": "0x3f7f8b8b"
+  },
+  "solid.collisionShapes[0].localPose.rotation.basisY.z": {
+   "type": "f32",
+   "value": 0.0595859997,
+   "bits": "0x3d741073"
+  },
+  "solid.collisionShapes[0].localPose.rotation.basisZ.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[0].localPose.rotation.basisZ.y": {
+   "type": "f32",
+   "value": -0.0595859997,
+   "bits": "0xbd741073"
+  },
+  "solid.collisionShapes[0].localPose.rotation.basisZ.z": {
+   "type": "f32",
+   "value": 0.998223007,
+   "bits": "0x3f7f8b8b"
+  },
+  "solid.collisionShapes[0].localPose.translation.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[0].localPose.translation.y": {
+   "type": "f32",
+   "value": 0.471253008,
+   "bits": "0x3ef14813"
+  },
+  "solid.collisionShapes[0].localPose.translation.z": {
+   "type": "f32",
+   "value": 0.219106004,
+   "bits": "0x3e605d53"
+  },
+  "solid.collisionShapes[0].localBounds.center.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[0].localBounds.center.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[0].localBounds.center.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[0].localBounds.halfExtents.x": {
+   "type": "f32",
+   "value": 0.439117998,
+   "bits": "0x3ee0d413"
+  },
+  "solid.collisionShapes[0].localBounds.halfExtents.y": {
+   "type": "f32",
+   "value": 0.361999989,
+   "bits": "0x3eb95810"
+  },
+  "solid.collisionShapes[0].localBounds.halfExtents.z": {
+   "type": "f32",
+   "value": 1.901528,
+   "bits": "0x3ff36545"
+  },
+  "solid.collisionShapes[1].role": {
+   "type": "u32",
+   "value": 4294967295
+  },
+  "solid.collisionShapes[1].surfaceType": {
+   "type": "u32",
+   "value": 1
+  },
+  "solid.collisionShapes[1].surfaceMaterial": {
+   "type": "u32",
+   "value": 0
+  },
+  "solid.collisionShapes[1].localPose.rotation.basisX.x": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.collisionShapes[1].localPose.rotation.basisX.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[1].localPose.rotation.basisX.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[1].localPose.rotation.basisY.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[1].localPose.rotation.basisY.y": {
+   "type": "f32",
+   "value": 0.998953998,
+   "bits": "0x3f7fbb73"
+  },
+  "solid.collisionShapes[1].localPose.rotation.basisY.z": {
+   "type": "f32",
+   "value": 0.0457159989,
+   "bits": "0x3d3b40b3"
+  },
+  "solid.collisionShapes[1].localPose.rotation.basisZ.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[1].localPose.rotation.basisZ.y": {
+   "type": "f32",
+   "value": -0.0457159989,
+   "bits": "0xbd3b40b3"
+  },
+  "solid.collisionShapes[1].localPose.rotation.basisZ.z": {
+   "type": "f32",
+   "value": 0.998953998,
+   "bits": "0x3f7fbb73"
+  },
+  "solid.collisionShapes[1].localPose.translation.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[1].localPose.translation.y": {
+   "type": "f32",
+   "value": 0.448781997,
+   "bits": "0x3ee5c6c1"
+  },
+  "solid.collisionShapes[1].localPose.translation.z": {
+   "type": "f32",
+   "value": -0.20792,
+   "bits": "0xbe54e8fb"
+  },
+  "solid.collisionShapes[1].localBounds.center.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[1].localBounds.center.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[1].localBounds.center.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[1].localBounds.halfExtents.x": {
+   "type": "f32",
+   "value": 0.968297005,
+   "bits": "0x3f77e250"
+  },
+  "solid.collisionShapes[1].localBounds.halfExtents.y": {
+   "type": "f32",
+   "value": 0.362740993,
+   "bits": "0x3eb9b930"
+  },
+  "solid.collisionShapes[1].localBounds.halfExtents.z": {
+   "type": "f32",
+   "value": 1.68227601,
+   "bits": "0x3fd754d2"
+  },
+  "solid.collisionShapes[2].role": {
+   "type": "u32",
+   "value": 4294967295
+  },
+  "solid.collisionShapes[2].surfaceType": {
+   "type": "u32",
+   "value": 1
+  },
+  "solid.collisionShapes[2].surfaceMaterial": {
+   "type": "u32",
+   "value": 0
+  },
+  "solid.collisionShapes[2].localPose.rotation.basisX.x": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.collisionShapes[2].localPose.rotation.basisX.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[2].localPose.rotation.basisX.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[2].localPose.rotation.basisY.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[2].localPose.rotation.basisY.y": {
+   "type": "f32",
+   "value": 0.998899996,
+   "bits": "0x3f7fb7e9"
+  },
+  "solid.collisionShapes[2].localPose.rotation.basisY.z": {
+   "type": "f32",
+   "value": 0.0468880013,
+   "bits": "0x3d400da2"
+  },
+  "solid.collisionShapes[2].localPose.rotation.basisZ.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[2].localPose.rotation.basisZ.y": {
+   "type": "f32",
+   "value": -0.0468880013,
+   "bits": "0xbd400da2"
+  },
+  "solid.collisionShapes[2].localPose.rotation.basisZ.z": {
+   "type": "f32",
+   "value": 0.998899996,
+   "bits": "0x3f7fb7e9"
+  },
+  "solid.collisionShapes[2].localPose.translation.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[2].localPose.translation.y": {
+   "type": "f32",
+   "value": 0.652812004,
+   "bits": "0x3f271eb0"
+  },
+  "solid.collisionShapes[2].localPose.translation.z": {
+   "type": "f32",
+   "value": -0.897629976,
+   "bits": "0xbf65cb14"
+  },
+  "solid.collisionShapes[2].localBounds.center.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[2].localBounds.center.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[2].localBounds.center.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[2].localBounds.halfExtents.x": {
+   "type": "f32",
+   "value": 1.02092195,
+   "bits": "0x3f82ad92"
+  },
+  "solid.collisionShapes[2].localBounds.halfExtents.y": {
+   "type": "f32",
+   "value": 0.515218019,
+   "bits": "0x3f03e554"
+  },
+  "solid.collisionShapes[2].localBounds.halfExtents.z": {
+   "type": "f32",
+   "value": 1.03800702,
+   "bits": "0x3f84dd6a"
+  },
+  "solid.collisionShapes[3].role": {
+   "type": "u32",
+   "value": 4294967295
+  },
+  "solid.collisionShapes[3].surfaceType": {
+   "type": "u32",
+   "value": 1
+  },
+  "solid.collisionShapes[3].surfaceMaterial": {
+   "type": "u32",
+   "value": 0
+  },
+  "solid.collisionShapes[3].localPose.rotation.basisX.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[3].localPose.rotation.basisX.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[3].localPose.rotation.basisX.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.collisionShapes[3].localPose.rotation.basisY.x": {
+   "type": "f32",
+   "value": -1,
+   "bits": "0xbf800000"
+  },
+  "solid.collisionShapes[3].localPose.rotation.basisY.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x80000000"
+  },
+  "solid.collisionShapes[3].localPose.rotation.basisY.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x80000000"
+  },
+  "solid.collisionShapes[3].localPose.rotation.basisZ.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[3].localPose.rotation.basisZ.y": {
+   "type": "f32",
+   "value": -1,
+   "bits": "0xbf800000"
+  },
+  "solid.collisionShapes[3].localPose.rotation.basisZ.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[3].localPose.translation.x": {
+   "type": "f32",
+   "value": -0.015532,
+   "bits": "0xbc7e79ee"
+  },
+  "solid.collisionShapes[3].localPose.translation.y": {
+   "type": "f32",
+   "value": 0.363252014,
+   "bits": "0x3eb9fc2b"
+  },
+  "solid.collisionShapes[3].localPose.translation.z": {
+   "type": "f32",
+   "value": 1.75356996,
+   "bits": "0x3fe074fb"
+  },
+  "solid.collisionShapes[3].localBounds.center.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[3].localBounds.center.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[3].localBounds.center.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[3].localBounds.halfExtents.x": {
+   "type": "f32",
+   "value": 0.384840995,
+   "bits": "0x3ec509e1"
+  },
+  "solid.collisionShapes[3].localBounds.halfExtents.y": {
+   "type": "f32",
+   "value": 0.905323029,
+   "bits": "0x3f67c340"
+  },
+  "solid.collisionShapes[3].localBounds.halfExtents.z": {
+   "type": "f32",
+   "value": 0.283418,
+   "bits": "0x3e911c2a"
+  },
+  "solid.collisionShapes[4].role": {
+   "type": "u32",
+   "value": 4
+  },
+  "solid.collisionShapes[4].surfaceType": {
+   "type": "u32",
+   "value": 1
+  },
+  "solid.collisionShapes[4].surfaceMaterial": {
+   "type": "u32",
+   "value": 0
+  },
+  "solid.collisionShapes[4].localPose.rotation.basisX.x": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.collisionShapes[4].localPose.rotation.basisX.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[4].localPose.rotation.basisX.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[4].localPose.rotation.basisY.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[4].localPose.rotation.basisY.y": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.collisionShapes[4].localPose.rotation.basisY.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[4].localPose.rotation.basisZ.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[4].localPose.rotation.basisZ.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[4].localPose.rotation.basisZ.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.collisionShapes[4].localPose.translation.x": {
+   "type": "f32",
+   "value": 0.863012016,
+   "bits": "0x3f5cee5b"
+  },
+  "solid.collisionShapes[4].localPose.translation.y": {
+   "type": "f32",
+   "value": 0.352499992,
+   "bits": "0x3eb47ae1"
+  },
+  "solid.collisionShapes[4].localPose.translation.z": {
+   "type": "f32",
+   "value": 1.78208899,
+   "bits": "0x3fe41b7e"
+  },
+  "solid.collisionShapes[4].localBounds.center.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[4].localBounds.center.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[4].localBounds.center.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[4].localBounds.halfExtents.x": {
+   "type": "f32",
+   "value": 0.181999996,
+   "bits": "0x3e3a5e35"
+  },
+  "solid.collisionShapes[4].localBounds.halfExtents.y": {
+   "type": "f32",
+   "value": 0.363999993,
+   "bits": "0x3eba5e35"
+  },
+  "solid.collisionShapes[4].localBounds.halfExtents.z": {
+   "type": "f32",
+   "value": 0.363999993,
+   "bits": "0x3eba5e35"
+  },
+  "solid.collisionShapes[5].role": {
+   "type": "u32",
+   "value": 5
+  },
+  "solid.collisionShapes[5].surfaceType": {
+   "type": "u32",
+   "value": 1
+  },
+  "solid.collisionShapes[5].surfaceMaterial": {
+   "type": "u32",
+   "value": 0
+  },
+  "solid.collisionShapes[5].localPose.rotation.basisX.x": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.collisionShapes[5].localPose.rotation.basisX.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[5].localPose.rotation.basisX.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[5].localPose.rotation.basisY.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[5].localPose.rotation.basisY.y": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.collisionShapes[5].localPose.rotation.basisY.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[5].localPose.rotation.basisZ.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[5].localPose.rotation.basisZ.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[5].localPose.rotation.basisZ.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.collisionShapes[5].localPose.translation.x": {
+   "type": "f32",
+   "value": -0.862990022,
+   "bits": "0xbf5cecea"
+  },
+  "solid.collisionShapes[5].localPose.translation.y": {
+   "type": "f32",
+   "value": 0.352499992,
+   "bits": "0x3eb47ae1"
+  },
+  "solid.collisionShapes[5].localPose.translation.z": {
+   "type": "f32",
+   "value": 1.78208899,
+   "bits": "0x3fe41b7e"
+  },
+  "solid.collisionShapes[5].localBounds.center.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[5].localBounds.center.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[5].localBounds.center.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[5].localBounds.halfExtents.x": {
+   "type": "f32",
+   "value": 0.181999996,
+   "bits": "0x3e3a5e35"
+  },
+  "solid.collisionShapes[5].localBounds.halfExtents.y": {
+   "type": "f32",
+   "value": 0.363999993,
+   "bits": "0x3eba5e35"
+  },
+  "solid.collisionShapes[5].localBounds.halfExtents.z": {
+   "type": "f32",
+   "value": 0.363999993,
+   "bits": "0x3eba5e35"
+  },
+  "solid.collisionShapes[6].role": {
+   "type": "u32",
+   "value": 6
+  },
+  "solid.collisionShapes[6].surfaceType": {
+   "type": "u32",
+   "value": 1
+  },
+  "solid.collisionShapes[6].surfaceMaterial": {
+   "type": "u32",
+   "value": 0
+  },
+  "solid.collisionShapes[6].localPose.rotation.basisX.x": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.collisionShapes[6].localPose.rotation.basisX.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[6].localPose.rotation.basisX.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[6].localPose.rotation.basisY.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[6].localPose.rotation.basisY.y": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.collisionShapes[6].localPose.rotation.basisY.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[6].localPose.rotation.basisZ.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[6].localPose.rotation.basisZ.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[6].localPose.rotation.basisZ.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.collisionShapes[6].localPose.translation.x": {
+   "type": "f32",
+   "value": 0.885002017,
+   "bits": "0x3f628f7e"
+  },
+  "solid.collisionShapes[6].localPose.translation.y": {
+   "type": "f32",
+   "value": 0.352503985,
+   "bits": "0x3eb47b67"
+  },
+  "solid.collisionShapes[6].localPose.translation.z": {
+   "type": "f32",
+   "value": -1.20550203,
+   "bits": "0xbf9a4de4"
+  },
+  "solid.collisionShapes[6].localBounds.center.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[6].localBounds.center.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[6].localBounds.center.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[6].localBounds.halfExtents.x": {
+   "type": "f32",
+   "value": 0.181999996,
+   "bits": "0x3e3a5e35"
+  },
+  "solid.collisionShapes[6].localBounds.halfExtents.y": {
+   "type": "f32",
+   "value": 0.363999993,
+   "bits": "0x3eba5e35"
+  },
+  "solid.collisionShapes[6].localBounds.halfExtents.z": {
+   "type": "f32",
+   "value": 0.363999993,
+   "bits": "0x3eba5e35"
+  },
+  "solid.collisionShapes[7].role": {
+   "type": "u32",
+   "value": 7
+  },
+  "solid.collisionShapes[7].surfaceType": {
+   "type": "u32",
+   "value": 1
+  },
+  "solid.collisionShapes[7].surfaceMaterial": {
+   "type": "u32",
+   "value": 0
+  },
+  "solid.collisionShapes[7].localPose.rotation.basisX.x": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.collisionShapes[7].localPose.rotation.basisX.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[7].localPose.rotation.basisX.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[7].localPose.rotation.basisY.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[7].localPose.rotation.basisY.y": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.collisionShapes[7].localPose.rotation.basisY.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[7].localPose.rotation.basisZ.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[7].localPose.rotation.basisZ.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[7].localPose.rotation.basisZ.z": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "solid.collisionShapes[7].localPose.translation.x": {
+   "type": "f32",
+   "value": -0.88499999,
+   "bits": "0xbf628f5c"
+  },
+  "solid.collisionShapes[7].localPose.translation.y": {
+   "type": "f32",
+   "value": 0.352503985,
+   "bits": "0x3eb47b67"
+  },
+  "solid.collisionShapes[7].localPose.translation.z": {
+   "type": "f32",
+   "value": -1.20550203,
+   "bits": "0xbf9a4de4"
+  },
+  "solid.collisionShapes[7].localBounds.center.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[7].localBounds.center.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[7].localBounds.center.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "solid.collisionShapes[7].localBounds.halfExtents.x": {
+   "type": "f32",
+   "value": 0.181999996,
+   "bits": "0x3e3a5e35"
+  },
+  "solid.collisionShapes[7].localBounds.halfExtents.y": {
+   "type": "f32",
+   "value": 0.363999993,
+   "bits": "0x3eba5e35"
+  },
+  "solid.collisionShapes[7].localBounds.halfExtents.z": {
+   "type": "f32",
+   "value": 0.363999993,
+   "bits": "0x3eba5e35"
+  },
+  "derived.dyna.present": {
+   "type": "bool",
+   "value": true
+  },
+  "derived.dyna.mass": {
+   "type": "f32",
+   "value": 1,
+   "bits": "0x3f800000"
+  },
+  "derived.dyna.inverseBodyInertia.basisX.x": {
+   "type": "f32",
+   "value": 0.479999989,
+   "bits": "0x3ef5c28f"
+  },
+  "derived.dyna.inverseBodyInertia.basisX.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "derived.dyna.inverseBodyInertia.basisX.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "derived.dyna.inverseBodyInertia.basisY.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "derived.dyna.inverseBodyInertia.basisY.y": {
+   "type": "f32",
+   "value": 0.479999989,
+   "bits": "0x3ef5c28f"
+  },
+  "derived.dyna.inverseBodyInertia.basisY.z": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "derived.dyna.inverseBodyInertia.basisZ.x": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "derived.dyna.inverseBodyInertia.basisZ.y": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "derived.dyna.inverseBodyInertia.basisZ.z": {
+   "type": "f32",
+   "value": 1.20000005,
+   "bits": "0x3f99999a"
+  },
+  "derived.dyna.linearDampingScale": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "derived.dyna.angularDampingScale": {
+   "type": "f32",
+   "value": 0,
+   "bits": "0x00000000"
+  },
+  "derived.dyna.maxStepDistance": {
+   "type": "f32",
+   "value": 0.300000012,
+   "bits": "0x3e99999a"
+  },
+  "derived.dyna.forceScale": {
+   "type": "f32",
+   "value": 3,
+   "bits": "0x40400000"
+  },
+  "derived.dyna.localCenterOfMass.x": {
+   "type": "f32",
+   "value": 1.01327896e-06,
+   "bits": "0x35880000"
+  },
+  "derived.dyna.localCenterOfMass.y": {
+   "type": "f32",
+   "value": 0.438501984,
+   "bits": "0x3ee08355"
+  },
+  "derived.dyna.localCenterOfMass.z": {
+   "type": "f32",
+   "value": 0.288293481,
+   "bits": "0x3e939b34"
+  },
+  "derived.wheelSet.present": {
+   "type": "bool",
+   "value": true
+  },
+  "derived.wheelSet.restDamperAbsorb": {
+   "type": "f32",
+   "value": 0.200000003,
+   "bits": "0x3e4ccccd"
+  },
+  "derived.wheelSet.wheels[0].surfaceId": {
+   "type": "u32",
+   "value": 1
+  },
+  "derived.wheelSet.wheels[0].killsLateralSpeedOnContact": {
+   "type": "bool",
+   "value": true
+  },
+  "derived.wheelSet.wheels[0].axle": {
+   "type": "u32",
+   "value": 1
+  },
+  "derived.wheelSet.wheels[0].rollingRadius": {
+   "type": "f32",
+   "value": 0.363999993,
+   "bits": "0x3eba5e35"
+  },
+  "derived.wheelSet.wheels[0].forceApplicationPoint.x": {
+   "type": "f32",
+   "value": 0.863012016,
+   "bits": "0x3f5cee5b"
+  },
+  "derived.wheelSet.wheels[0].forceApplicationPoint.y": {
+   "type": "f32",
+   "value": 0.352499992,
+   "bits": "0x3eb47ae1"
+  },
+  "derived.wheelSet.wheels[0].forceApplicationPoint.z": {
+   "type": "f32",
+   "value": 1.78208899,
+   "bits": "0x3fe41b7e"
+  },
+  "derived.wheelSet.wheels[0].restSurfacePose.translation.x": {
+   "type": "f32",
+   "value": 0.863012016,
+   "bits": "0x3f5cee5b"
+  },
+  "derived.wheelSet.wheels[0].restSurfacePose.translation.y": {
+   "type": "f32",
+   "value": 0.352499992,
+   "bits": "0x3eb47ae1"
+  },
+  "derived.wheelSet.wheels[0].restSurfacePose.translation.z": {
+   "type": "f32",
+   "value": 1.78208899,
+   "bits": "0x3fe41b7e"
+  },
+  "derived.wheelSet.wheels[1].surfaceId": {
+   "type": "u32",
+   "value": 2
+  },
+  "derived.wheelSet.wheels[1].killsLateralSpeedOnContact": {
+   "type": "bool",
+   "value": true
+  },
+  "derived.wheelSet.wheels[1].axle": {
+   "type": "u32",
+   "value": 1
+  },
+  "derived.wheelSet.wheels[1].rollingRadius": {
+   "type": "f32",
+   "value": 0.363999993,
+   "bits": "0x3eba5e35"
+  },
+  "derived.wheelSet.wheels[1].forceApplicationPoint.x": {
+   "type": "f32",
+   "value": -0.862990022,
+   "bits": "0xbf5cecea"
+  },
+  "derived.wheelSet.wheels[1].forceApplicationPoint.y": {
+   "type": "f32",
+   "value": 0.352499992,
+   "bits": "0x3eb47ae1"
+  },
+  "derived.wheelSet.wheels[1].forceApplicationPoint.z": {
+   "type": "f32",
+   "value": 1.78208899,
+   "bits": "0x3fe41b7e"
+  },
+  "derived.wheelSet.wheels[1].restSurfacePose.translation.x": {
+   "type": "f32",
+   "value": -0.862990022,
+   "bits": "0xbf5cecea"
+  },
+  "derived.wheelSet.wheels[1].restSurfacePose.translation.y": {
+   "type": "f32",
+   "value": 0.352499992,
+   "bits": "0x3eb47ae1"
+  },
+  "derived.wheelSet.wheels[1].restSurfacePose.translation.z": {
+   "type": "f32",
+   "value": 1.78208899,
+   "bits": "0x3fe41b7e"
+  },
+  "derived.wheelSet.wheels[2].surfaceId": {
+   "type": "u32",
+   "value": 3
+  },
+  "derived.wheelSet.wheels[2].killsLateralSpeedOnContact": {
+   "type": "bool",
+   "value": true
+  },
+  "derived.wheelSet.wheels[2].axle": {
+   "type": "u32",
+   "value": 0
+  },
+  "derived.wheelSet.wheels[2].rollingRadius": {
+   "type": "f32",
+   "value": 0.363999993,
+   "bits": "0x3eba5e35"
+  },
+  "derived.wheelSet.wheels[2].forceApplicationPoint.x": {
+   "type": "f32",
+   "value": -0.88499999,
+   "bits": "0xbf628f5c"
+  },
+  "derived.wheelSet.wheels[2].forceApplicationPoint.y": {
+   "type": "f32",
+   "value": 0.352503985,
+   "bits": "0x3eb47b67"
+  },
+  "derived.wheelSet.wheels[2].forceApplicationPoint.z": {
+   "type": "f32",
+   "value": -1.20550203,
+   "bits": "0xbf9a4de4"
+  },
+  "derived.wheelSet.wheels[2].restSurfacePose.translation.x": {
+   "type": "f32",
+   "value": -0.88499999,
+   "bits": "0xbf628f5c"
+  },
+  "derived.wheelSet.wheels[2].restSurfacePose.translation.y": {
+   "type": "f32",
+   "value": 0.352503985,
+   "bits": "0x3eb47b67"
+  },
+  "derived.wheelSet.wheels[2].restSurfacePose.translation.z": {
+   "type": "f32",
+   "value": -1.20550203,
+   "bits": "0xbf9a4de4"
+  },
+  "derived.wheelSet.wheels[3].surfaceId": {
+   "type": "u32",
+   "value": 4
+  },
+  "derived.wheelSet.wheels[3].killsLateralSpeedOnContact": {
+   "type": "bool",
+   "value": true
+  },
+  "derived.wheelSet.wheels[3].axle": {
+   "type": "u32",
+   "value": 0
+  },
+  "derived.wheelSet.wheels[3].rollingRadius": {
+   "type": "f32",
+   "value": 0.363999993,
+   "bits": "0x3eba5e35"
+  },
+  "derived.wheelSet.wheels[3].forceApplicationPoint.x": {
+   "type": "f32",
+   "value": 0.885002017,
+   "bits": "0x3f628f7e"
+  },
+  "derived.wheelSet.wheels[3].forceApplicationPoint.y": {
+   "type": "f32",
+   "value": 0.352503985,
+   "bits": "0x3eb47b67"
+  },
+  "derived.wheelSet.wheels[3].forceApplicationPoint.z": {
+   "type": "f32",
+   "value": -1.20550203,
+   "bits": "0xbf9a4de4"
+  },
+  "derived.wheelSet.wheels[3].restSurfacePose.translation.x": {
+   "type": "f32",
+   "value": 0.885002017,
+   "bits": "0x3f628f7e"
+  },
+  "derived.wheelSet.wheels[3].restSurfacePose.translation.y": {
+   "type": "f32",
+   "value": 0.352503985,
+   "bits": "0x3eb47b67"
+  },
+  "derived.wheelSet.wheels[3].restSurfacePose.translation.z": {
+   "type": "f32",
+   "value": -1.20550203,
+   "bits": "0xbf9a4de4"
+  }
+ }
+}

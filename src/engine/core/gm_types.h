@@ -312,6 +312,9 @@ struct GmBoxAligned {
                                               const GmVec3 &triangleVertex1,
                                               const GmVec3 &triangleVertex2) const;
     int TestInter(const GmBoxAligned &rhs) const;
+    bool TestInterSegment(const GmVec3 &start, const GmVec3 &end) const;
+    bool TestInterSegmentMiddleVector(const GmVec3 &middle,
+                                     const GmVec3 &delta) const;
     void SetMinMax(const GmVec3 &minPoint, const GmVec3 &maxPoint);
     void GetDiag(GmVec3 &out) const;
     void SetMult(const GmBoxAligned &box, const GmIso4 &iso);

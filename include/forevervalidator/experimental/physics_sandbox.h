@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <variant>
@@ -23,6 +24,9 @@ struct PhysicsSandboxStaticSceneTestAccess;
 }
 namespace cuda_test {
 struct PhysicsSandboxCudaTestAccess;
+}
+namespace twin_test {
+struct PhysicsSandboxTwinTestAccess;
 }
 
 class PhysicsSandboxCudaSearchSession;
@@ -61,8 +65,6 @@ struct PhysicsSandboxOptions {
             PhysicsSandboxTimelineMode::RecordedReplay;
     // Required in canonical mode and unset in recorded-replay mode.
     std::optional<std::uint32_t> simulationHorizonMs;
-    // Build the optional map-specific CUDA search module during LoadReplay.
-    bool prepareCudaSearchSpecialization = false;
 };
 
 enum class PhysicsSandboxInputAction : std::uint8_t {
@@ -146,7 +148,12 @@ struct PhysicsSandboxCollisionTriangle {
     Vector3 a{};
     Vector3 b{};
     Vector3 c{};
+    // The surface material (EPlugSurfaceMaterialId, 28 = NotCollidable);
+    // kPhysicsSandboxUnknownMaterial where the surface names none.
+    std::uint8_t material = 0xffu;
 };
+
+inline constexpr std::uint8_t kPhysicsSandboxUnknownMaterial = 0xffu;
 
 struct PhysicsSandboxEllipsoid {
     float rotationX = 0.0f;
@@ -299,9 +306,27 @@ struct PhysicsSandboxRenderScene {
 using PhysicsSandboxRenderSceneHandle =
         std::shared_ptr<const PhysicsSandboxRenderScene>;
 
+enum class PhysicsSandboxCheckpointTriggerRole : std::uint8_t {
+    Checkpoint,
+    Finish,
+    StartFinish,
+};
+
+// A checkpoint or finish trigger: the collision surface the car touches to
+// pass it, in world space. checkpointSlot is a checkpoint's map slot, as in
+// PhysicsSandboxAcceptedCheckpointEvent (unused for finishes).
+struct PhysicsSandboxCheckpointTrigger {
+    PhysicsSandboxCheckpointTriggerRole role =
+            PhysicsSandboxCheckpointTriggerRole::Checkpoint;
+    std::uint32_t checkpointSlot = 0u;
+    std::vector<PhysicsSandboxCollisionTriangle> triangles;
+};
+
 struct PhysicsSandboxSceneView {
     std::vector<PhysicsSandboxCollisionTriangle> collisionTriangles;
+    // Car-local: the car's collision shapes at rest.
     std::vector<PhysicsSandboxEllipsoid> carEllipsoids;
+    std::vector<PhysicsSandboxCheckpointTrigger> checkpointTriggers;
 };
 
 struct PhysicsSandboxAcceptedCheckpointEvent {
@@ -327,6 +352,10 @@ struct PhysicsSandboxStateView {
     float steering = 0.0f;
     std::uint32_t checkpointsCollected = 0u;
     std::uint32_t checkpointsTotal = 0u;
+    // Checkpoints taken in the current lap: their count, and their map slots
+    // as bits (slot n is bit n % 32 of word n / 32). CPU backends.
+    std::uint32_t currentLapCheckpoints = 0u;
+    std::array<std::uint32_t, 32> passedCheckpointSlots{};
     std::uint32_t completedLaps = 0u;
     std::uint32_t totalLaps = 1u;
     bool raceCompleted = false;
@@ -420,6 +449,9 @@ struct PhysicsSandboxCudaVelocityEvaluator {
     bool alignmentEnabled = false;
     PhysicsSandboxCudaVector3 direction{};
     double minimumAlignment = -1.0;
+    // The direction from the car towards point, every tick, instead.
+    bool towardsPoint = false;
+    PhysicsSandboxCudaVector3 point{};
 };
 
 struct PhysicsSandboxCudaPointEvaluator {
@@ -433,11 +465,16 @@ struct PhysicsSandboxCudaPoseEvaluator {
     double targetRotationZ = 0.0;
     double targetRotationW = 1.0;
     double rotationWeight = 0.5;
+    // World x, y, z; then yaw, pitch, roll (a rotation vector in the
+    // target's axes). 1 counts an axis fully.
+    std::array<double, 6> axisWeights{{1.0, 1.0, 1.0, 1.0, 1.0, 1.0}};
 };
 
 struct PhysicsSandboxCudaVolumeEntryEvaluator {
     PhysicsSandboxCudaVector3 minimum{};
     PhysicsSandboxCudaVector3 maximum{};
+    // Scores the speed at entry (higher is better) instead of its time.
+    bool entrySpeed = false;
 };
 
 // A simple polygon extruded along the selected plane's positive normal.
@@ -448,6 +485,32 @@ struct PhysicsSandboxCudaCustomVolumeEntryEvaluator {
     PhysicsSandboxCudaVector3 origin{};
     double depth = 1.0;
     std::vector<PhysicsSandboxCudaVector3> polygon;
+    bool entrySpeed = false;
+};
+
+// Distance from the car's collision shapes to a checkpoint or the finish,
+// picked with the selectors of PhysicsSandboxCudaCheckpointEvaluator. A
+// candidate that reaches it scores the tick time it does; one that does not
+// scores 1e12 + 1e6 per checkpoint still to come before it + its closest
+// distance in metres (to the slot's trigger, or with any slot to the
+// nearest checkpoint not taken yet this lap). Lower is better. CUDA, HIP.
+// An around-walls table and the lock its users take to read or fill it.
+struct PhysicsSandboxAroundWallsTable {
+    std::mutex mutex;
+    std::vector<std::uint8_t> bytes;
+};
+
+struct PhysicsSandboxCudaDistanceEvaluator {
+    bool finish = false;
+    std::uint32_t checkpointIndex = 0u;
+    std::uint32_t lap = 1u;
+    std::optional<std::uint32_t> checkpointSlot;
+    std::uint64_t eventIndex = 0u;
+    // Around walls: one table per target trigger (around_walls_table.h),
+    // in the order the map lists the triggers; empty measures straight.
+    // Shared with the caller: the corners a search fills on demand stay
+    // filled in it for the next searches.
+    std::vector<std::shared_ptr<PhysicsSandboxAroundWallsTable>> aroundWalls;
 };
 
 struct PhysicsSandboxCudaStuntPointsEvaluator {};
@@ -504,7 +567,8 @@ using PhysicsSandboxCudaEvaluator = std::variant<
         PhysicsSandboxCudaScriptedEvaluator,
         PhysicsSandboxCudaConditionTimeEvaluator,
         PhysicsSandboxCudaCheckpointEvaluator,
-        PhysicsSandboxCudaCustomVolumeEntryEvaluator>;
+        PhysicsSandboxCudaCustomVolumeEntryEvaluator,
+        PhysicsSandboxCudaDistanceEvaluator>;
 
 struct PhysicsSandboxCudaSearchIncumbent {
     bool mutation = false;
@@ -610,6 +674,34 @@ struct PhysicsSandboxCudaMutationSegment {
     std::int64_t maximumTimeMs = 0;
 };
 
+// Runs the search on CPU threads with the twin engine instead of a GPU
+// (docs/twin/m13-search.md). Needs a loaded optimized-CPU sandbox and a
+// build with FOREVERVALIDATOR_HAS_TWIN. Same configuration, same candidates
+// for the same seeds, same batch results as the GPU backends.
+struct PhysicsSandboxTwinSearchOptions {
+    // Worker threads; 0 = hardware concurrency. The FV delegate below runs
+    // on one thread (FV's game random sequence is process-global).
+    std::uint32_t threads = 0u;
+    TwinPolicy policy = TwinPolicy::FvSubsteps;          // others fail the acceptance test
+    TwinCollision collision = TwinCollision::Noise;      // Exact: the reference stage
+    // DEBUG ONLY, until the twin tick exists: candidates are simulated on
+    // FV optimized_cpu instead of the twin, through the same loop.
+    bool debugDelegateToOptimizedCpu = false;
+    // No longer read: the search runs the twin path whatever
+    // twin::QueryTwinEngine().stepImplemented says (it describes another step).
+    bool debugAllowUnfinishedEngine = false;
+    // Re-simulate every new best on FV reference (metrics.winnerVerified*).
+    bool verifyWinners = true;
+    // The candidates' physics on the GPU (the twin's GPU engine; needs a build
+    // with FOREVERVALIDATOR_BUILD_TWIN_GPU) instead of CPU threads. The same
+    // results bit for bit. FOREVERVALIDATOR_TWIN_SEARCH_ENGINE=gpu sets it too.
+    bool gpu = false;
+    // Twin path: a candidate starts from the baseline's state before its first
+    // changed control, the shared prefix judged from the baseline's per-tick
+    // states (same results bit for bit; false: every candidate from the branch).
+    bool branchAtFirstChange = true;
+};
+
 struct PhysicsSandboxCudaSearchConfiguration {
     std::uint32_t maximumBatchSize = 1u;
     std::int64_t earliestMutationTimeMs = 0;
@@ -619,8 +711,6 @@ struct PhysicsSandboxCudaSearchConfiguration {
     PhysicsSandboxCudaEvaluator evaluator =
             PhysicsSandboxCudaFinishTimeEvaluator{};
     std::optional<PhysicsSandboxCudaConditionProgram> condition;
-    // Use the map-specific CUDA module, preparing it on demand if needed.
-    bool useSessionSpecialization = false;
     // Retains the original materialization path for exact differential tests.
     bool useLegacyMutationPipelineForTesting = false;
     // ForeverTAS resolves improved runs on its optimized CPU worker. Other
@@ -631,6 +721,9 @@ struct PhysicsSandboxCudaSearchConfiguration {
     // Inclusive, ordered, non-overlapping tick ranges. Empty keeps flat search.
     std::vector<PhysicsSandboxCudaMutationSegment> mutationSegments;
     std::uint32_t changedSegmentCount = 1u;
+    // Set to search on the CPU with the twin engine (the sandbox must be
+    // optimized-CPU); unset keeps the sandbox's GPU backend.
+    std::optional<PhysicsSandboxTwinSearchOptions> twin;
 };
 
 // An opaque in-process runtime clone. States are not serializable and are not
@@ -651,6 +744,7 @@ private:
     std::shared_ptr<const Impl> impl_;
     friend class PhysicsSandbox;
     friend class PhysicsSandboxCudaSearchSession;
+    friend struct twin_test::PhysicsSandboxTwinTestAccess;
 };
 
 struct PhysicsSandboxCudaSearchMetrics {
@@ -671,6 +765,9 @@ struct PhysicsSandboxCudaSearchMetrics {
     double winnerReductionKernelMilliseconds = 0.0;
     double winnerStateCaptureKernelMilliseconds = 0.0;
     double finalizationKernelMilliseconds = 0.0;
+    // Around walls: times the batch ran again after filling the corners it
+    // needed (its time includes those runs and fills).
+    std::uint32_t aroundWallsReruns = 0u;
     std::uint32_t simulationThreadsPerBlock = 0u;
     std::uint32_t simulationRegistersPerThread = 0u;
     std::uint64_t simulationLocalBytesPerThread = 0u;
@@ -679,6 +776,19 @@ struct PhysicsSandboxCudaSearchMetrics {
     // Conservative reservation bound, excluding fixed shared scene buffers.
     // Zero means the backend requires measured capacity-growth estimates.
     std::uint64_t reservationBytesPerCandidate = 0u;
+    // Twin CPU search only (zero on GPU backends): thread-summed host time
+    // per stage, simulated ticks, and the FV re-check of a new best.
+    double hostGenerationMilliseconds = 0.0;
+    double hostPhysicsMilliseconds = 0.0;
+    double hostEvaluationMilliseconds = 0.0;
+    double hostSelectionMilliseconds = 0.0;
+    double hostVerificationMilliseconds = 0.0;
+    std::uint32_t hostThreads = 0u;
+    std::uint64_t hostSimulatedTicks = 0u;
+    std::uint64_t hostSharedPrefixTicks = 0u;  // judged from the baseline's states, not simulated
+    bool winnerVerified = false;
+    bool winnerVerificationMatched = false;
+    double winnerVerifiedScore = 0.0;
 };
 
 struct PhysicsSandboxCudaSearchBatch {
@@ -747,6 +857,11 @@ public:
     PhysicsSandboxResult<PhysicsSandboxRenderSceneHandle> ReadRenderScene()
             const noexcept;
     PhysicsSandboxResult<PhysicsSandboxSceneView> ReadScene() const noexcept;
+    // The game's static collision segment query (the race cameras' cast):
+    // the fraction along start..end of the first face the segment enters
+    // (one-sided meshes and spheres). None without a loaded race.
+    std::optional<float> IntersectStaticSegment(
+            const Vector3 &start, const Vector3 &end) const noexcept;
 
 private:
     struct Impl;
@@ -767,10 +882,17 @@ private:
                     std::uint32_t count) noexcept;
     friend struct static_scene_test::PhysicsSandboxStaticSceneTestAccess;
     friend struct cuda_test::PhysicsSandboxCudaTestAccess;
+    friend struct twin_test::PhysicsSandboxTwinTestAccess;
     friend class PhysicsSandboxCudaSearchSession;
     friend PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>
             CreatePhysicsSandboxCudaSearchSession(
                     PhysicsSandbox &sandbox,
+                    const PhysicsSandboxCudaSearchConfiguration
+                            &configuration) noexcept;
+    friend PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>
+            PromotePhysicsSandboxCudaSearchSession(
+                    PhysicsSandbox &sandbox,
+                    PhysicsSandboxCudaSearchSession &&previous,
                     const PhysicsSandboxCudaSearchConfiguration
                             &configuration) noexcept;
 };
@@ -816,6 +938,12 @@ private:
                     PhysicsSandbox &sandbox,
                     const PhysicsSandboxCudaSearchConfiguration
                             &configuration) noexcept;
+    friend PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>
+            PromotePhysicsSandboxCudaSearchSession(
+                    PhysicsSandbox &sandbox,
+                    PhysicsSandboxCudaSearchSession &&previous,
+                    const PhysicsSandboxCudaSearchConfiguration
+                            &configuration) noexcept;
 };
 
 PhysicsSandboxResult<PhysicsSandbox> CreatePhysicsSandbox(
@@ -828,6 +956,17 @@ PhysicsSandboxResult<PhysicsSandbox> ClonePhysicsSandbox(
 PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>
 CreatePhysicsSandboxCudaSearchSession(
         PhysicsSandbox &sandbox,
+        const PhysicsSandboxCudaSearchConfiguration &configuration) noexcept;
+
+// A search whose best became its baseline: the session
+// CreatePhysicsSandboxCudaSearchSession makes for the sandbox (its inputs now
+// the promoted best's), made from `previous`. An approximate (twin) session
+// keeps its compiled world, threads and device buffers; any other is closed,
+// then made anew.
+PhysicsSandboxResult<PhysicsSandboxCudaSearchSession>
+PromotePhysicsSandboxCudaSearchSession(
+        PhysicsSandbox &sandbox,
+        PhysicsSandboxCudaSearchSession &&previous,
         const PhysicsSandboxCudaSearchConfiguration &configuration) noexcept;
 
 std::vector<PhysicsSandboxResult<PhysicsSandboxStateView>>

@@ -1,4 +1,5 @@
 #include "simulation/runtime/replay_simulation_session.h"
+#include "simulation/backends/twin/twin_backend.h"
 
 #include "engine/game/game_random_sequence.h"
 #include <algorithm>
@@ -7,6 +8,7 @@
 #include <cstring>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <new>
 #include <string>
 #include <tuple>
@@ -14,6 +16,7 @@
 #include <utility>
 
 #include "engine/core/binary32_math.h"
+#include "engine/game/block_race_role.h"
 #include "engine/physics/geometry/gm_surface.h"
 #include "engine/physics/geometry/plug_surface.h"
 #include "engine/scene/plug_solid.h"
@@ -50,7 +53,6 @@
 #include "simulation/backends/vulkan/vulkan_timeline_executor.h"
 #if FOREVERVALIDATOR_HAS_CUDA
 #include <cuda_runtime.h>
-#include "simulation/backends/cuda/cuda_session_specialization.h"
 #endif
 #include "simulation/backends/speculative_ticking/speculative_ticking_backend.h"
 #include "simulation/runtime/replay_environment.h"
@@ -77,6 +79,15 @@ void AppendTriangle(std::vector<ReplayStaticCollisionTriangle> &triangles,
             TransformPoint(a, iso),
             TransformPoint(b, iso),
             TransformPoint(c, iso)});
+}
+
+// The material a surface gives its local material index, if it has one.
+std::uint8_t MaterialOf(const CPlugSurface &surface, GmLocalMaterialIndex local) {
+    if (local.Index() >= surface.MaterialCount() ||
+        surface.MaterialAt(local.Index()) == nullptr) {
+        return 0xffu;
+    }
+    return static_cast<std::uint8_t>(surface.SurfaceMaterialIdFromLocalIndex(local));
 }
 
 void AppendBox(std::vector<ReplayStaticCollisionTriangle> &triangles,
@@ -196,7 +207,17 @@ void AppendTree(std::vector<ReplayStaticCollisionTriangle> &triangles,
     if (tree.AllowsSurfaceCollision()) {
         const CPlugSurface *surface = tree.Surface();
         if (surface != nullptr && surface->Geometry() != nullptr) {
+            const std::size_t first = triangles.size();
             AppendSurface(triangles, *surface->Geometry(), iso);
+            // Meshes name a material per triangle, other shapes one.
+            const auto *mesh = dynamic_cast<const GmSurfMesh *>(surface->Geometry());
+            for (std::size_t index = first; index < triangles.size(); ++index) {
+                triangles[index].material = MaterialOf(
+                        *surface,
+                        mesh != nullptr
+                                ? mesh->Triangle(static_cast<u32>(index - first)).material
+                                : GmLocalMaterialIndex::FromIndex(0u));
+            }
         }
     }
     for (u32 index = 0u; index < tree.GetChildCount(); ++index) {
@@ -230,6 +251,51 @@ bool BuildStaticCollisionTriangles(
 }
 
 namespace sandbox = forevervalidator::experimental;
+
+// Checkpoint slots count the checkpoint triggers in model order, as
+// ReplayStaticCorpusCollection::CheckpointSlotForBlock does.
+bool BuildCheckpointTriggerSurfaces(
+        const StaticSceneModelCollection &models,
+        std::vector<ReplayCheckpointTriggerSurface> &triggers) {
+    try {
+        std::uint32_t slot = 0u;
+        for (const StaticSceneModel &model : models.Models()) {
+            if (model.Purpose() != StaticScenePurpose::CheckpointTrigger ||
+                !model.CheckpointIdentity().has_value()) {
+                continue;
+            }
+            ReplayCheckpointTriggerSurface trigger;
+            switch (model.CheckpointIdentity()->raceRole) {
+            case BlockRaceRole::Checkpoint:
+                trigger.role =
+                        sandbox::PhysicsSandboxCheckpointTriggerRole::Checkpoint;
+                trigger.checkpointSlot = slot++;
+                break;
+            case BlockRaceRole::FinishLine:
+                trigger.role =
+                        sandbox::PhysicsSandboxCheckpointTriggerRole::Finish;
+                break;
+            case BlockRaceRole::StartFinishLine:
+                trigger.role = sandbox::PhysicsSandboxCheckpointTriggerRole::
+                        StartFinish;
+                break;
+            default:
+                continue;
+            }
+            CPlugSolid *solid = model.Prototype().SourceSolid();
+            CPlugTree *tree =
+                    solid != nullptr ? solid->CollisionTree() : nullptr;
+            if (tree != nullptr) {
+                AppendTree(trigger.triangles, *tree, model.WorldIso());
+            }
+            triggers.push_back(std::move(trigger));
+        }
+    } catch (const std::bad_alloc &) {
+        triggers.clear();
+        return false;
+    }
+    return true;
+}
 
 sandbox::PhysicsSandboxScenePurpose PublicPurpose(
         StaticScenePurpose purpose) {
@@ -882,14 +948,37 @@ struct ReplaySimulationInstance {
 };
 
 struct ReplaySimulationSession::Impl {
+    // CachedTwinWorld / KeepTwinWorld
+    std::mutex twinWorldMutex;
+    std::uint64_t twinWorldKey = 0u;
+    std::shared_ptr<const void> twinWorld;
+
+    void DropTwinWorld() {
+        std::lock_guard<std::mutex> lock(twinWorldMutex);
+        twinWorld.reset();
+    }
+
     explicit Impl(forevervalidator::SimulationBackend requestedBackend)
-        : backend(requestedBackend) {}
+        : backend(requestedBackend ==
+                                  forevervalidator::SimulationBackend::Twin
+                          ? forevervalidator::SimulationBackend::OptimizedCpu
+                          : requestedBackend),
+          twinRequested(requestedBackend ==
+                        forevervalidator::SimulationBackend::Twin) {}
 
     forevervalidator::SimulationBackend backend;
+    // SimulationBackend::Twin: `backend` is OptimizedCpu (FV loads the map
+    // and runs the prestart); the timeline goes through ExecuteTwinTimeline.
+    bool twinRequested = false;
+    forevervalidator::TwinValidationOptions twinOptions{};
+    std::uint32_t twinHandoffMs = 2600u;
+    std::string twinDiagnostic;
     ReplayMapScene mapScene;
     ReplaySimulationInstance instance;
     std::shared_ptr<const std::vector<ReplayStaticCollisionTriangle>>
             staticCollisionTriangles;
+    std::shared_ptr<const std::vector<ReplayCheckpointTriggerSurface>>
+            checkpointTriggerSurfaces;
     sandbox::PhysicsSandboxRenderSceneHandle staticRenderScene;
     forevervalidator::simulation::CudaHostScene cudaHostScene;
     forevervalidator::simulation::CudaDeviceScene cudaDeviceScene;
@@ -926,11 +1015,6 @@ struct ReplaySimulationSession::Impl {
     std::optional<forevervalidator::simulation::VulkanTransferMetrics>
             vulkanConfigurationTransfer;
     std::string cudaInitializationDiagnostic;
-    std::shared_ptr<forevervalidator::simulation::cuda::specialization::
-                            SessionModule>
-            cudaSearchSpecialization;
-    std::string cudaSearchSpecializationDiagnostic;
-    bool cudaSearchSpecializationAttempted = false;
     std::optional<forevervalidator::simulation::
                           CudaTimelineExecutionMetrics>
             cudaTimelineMetrics;
@@ -1073,6 +1157,146 @@ struct ReplaySimulationSession::Impl {
                 ? "CUDA immutable scene and configuration are ready"
                 : "Vulkan immutable scene and configuration are ready";
         return ReplaySimulationRunResult::Success;
+    }
+
+    // Steps ticks [begin, end) on FV optimized_cpu exactly as the
+    // OptimizedCpu branch of SimulateTimeline does (same math path choice,
+    // same calls, same observations). False on failure (result.result set).
+    bool StepOptimizedCpuTicks(
+            const std::vector<ReplayControlTick> &controlTicks,
+            std::size_t begin,
+            std::size_t end,
+            forevervalidator::simulation::OptimizedCpuBinary32MathPath
+                    binary32MathPath,
+            ReplaySimulationTimelineResult &result) {
+        for (std::size_t index = begin; index < end; ++index) {
+            const ReplayControlTick &tick = controlTicks[index];
+            const ReplaySimulationStepExecution execution =
+                    binary32MathPath ==
+                                    forevervalidator::simulation::
+                                            OptimizedCpuBinary32MathPath::X86Sse2
+                            ? instance.runtime->StepOptimizedCpuNativeBinary32(
+                                      tick)
+                            : instance.runtime->StepOptimizedCpu(tick);
+            if (execution.result != ReplaySimulationRunResult::Success) {
+                result.result = execution.result;
+                return false;
+            }
+            result.executedRespawnCount += execution.respawnExecutedCount;
+            if (tick.observe) {
+                try {
+                    result.observations.push_back(
+                            ObserveReplayTrajectory(execution, tick));
+                } catch (const std::bad_alloc &) {
+                    result.result =
+                            ReplaySimulationRunResult::ObservationAllocationFailed;
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    // SimulationBackend::Twin (design.md §8.2): FV optimized_cpu runs the
+    // prestart, every tick up to and including T = twinHandoffMs (the 260
+    // ticks T = 10 ... 2600, race-start tick included: the same state a
+    // PhysicsSandbox holds at race time 0), then the twin runs the rest
+    // from the exact FV state. With the debug delegate, FV optimized_cpu
+    // also runs the rest, through the same split.
+    ReplaySimulationTimelineResult ExecuteTwinTimeline(
+            const ReplaySimulationDefinition &definition,
+            const GmIso4 &startSpawn,
+            const std::vector<ReplayControlTick> &controlTicks,
+            std::uint32_t validationSeed,
+            ReplaySimulationTimelineResult result) {
+        instance.runtime->PrepareOptimizedCpuStaticTransforms();
+        instance.runtime->CertifyOptimizedCpuStaticTransformsForAdvance();
+        const forevervalidator::simulation::OptimizedCpuBinary32MathPath
+                binary32MathPath = forevervalidator::simulation::
+                        SelectOptimizedCpuBinary32MathPathForActiveExecution();
+        std::size_t handoff = 0u;
+        while (handoff < controlTicks.size() &&
+               controlTicks[handoff].timeMs <= twinHandoffMs) {
+            ++handoff;
+        }
+        if (!StepOptimizedCpuTicks(controlTicks, 0u, handoff,
+                                   binary32MathPath, result)) {
+            return result;
+        }
+        if (twinOptions.debugDelegateToOptimizedCpu) {
+            // Same hand-off as the twin path (the capture is read-only), then
+            // FV keeps stepping: the report equals the optimized_cpu report.
+            if (handoff < controlTicks.size() &&
+                !instance.runtime->CaptureRuntimeClone().has_value()) {
+                twinDiagnostic = "twin hand-off: FV state capture failed";
+                result.result = ReplaySimulationRunResult::TwinExecutionFailed;
+                return result;
+            }
+            twinDiagnostic =
+                    "twin debug delegate: hand-off after " +
+                    std::to_string(handoff) + " FV ticks; " +
+                    std::to_string(controlTicks.size() - handoff) +
+                    " ticks after T=" + std::to_string(twinHandoffMs) +
+                    " ran on optimized_cpu, not on the twin";
+            if (!StepOptimizedCpuTicks(controlTicks, handoff,
+                                       controlTicks.size(),
+                                       binary32MathPath, result)) {
+                return result;
+            }
+        } else if (handoff < controlTicks.size()) {
+            std::optional<ReplaySimulationRuntime::RuntimeClone> runtime =
+                    instance.runtime->CaptureRuntimeClone();
+            if (!runtime.has_value()) {
+                twinDiagnostic = "twin hand-off: FV state capture failed";
+                result.result = ReplaySimulationRunResult::TwinExecutionFailed;
+                return result;
+            }
+            ReplaySimulationInstanceClone clone;
+            clone.race = instance.race.CaptureRuntimeClone();
+            clone.runtime = std::move(*runtime);
+            clone.incrementalRespawnCount = instance.incrementalRespawnCount;
+            forevervalidator::simulation::TwinTimelineSegmentRequest request;
+            request.start = &clone;
+            request.ticks = controlTicks.data() + handoff;
+            request.tickCount = controlTicks.size() - handoff;
+            request.validationSeed = validationSeed;
+            request.policy = twinOptions.policy;
+            request.collision = twinOptions.collision;
+            request.models = &mapScene.Models();
+            request.definition = &definition;
+            request.startSpawn = startSpawn;
+            request.haveStartSpawn = true;
+            forevervalidator::simulation::TwinTimelineSegmentResult segment =
+                    forevervalidator::simulation::ExecuteTwinTimelineSegment(
+                            request);
+            twinDiagnostic = std::move(segment.diagnostic);
+            if (segment.result != ReplaySimulationRunResult::Success) {
+                result.result = segment.result;
+                return result;
+            }
+            try {
+                result.observations.insert(
+                        result.observations.end(),
+                        segment.observations.begin(),
+                        segment.observations.end());
+            } catch (const std::bad_alloc &) {
+                result.result =
+                        ReplaySimulationRunResult::ObservationAllocationFailed;
+                return result;
+            }
+            result.executedRespawnCount += segment.executedRespawnCount;
+            result.finishTimeMs = segment.finishTimeMs;
+            result.finishTime = segment.finishTime;
+            result.raceCompleted = result.finishTimeMs.has_value();
+            result.result = ReplaySimulationRunResult::Success;
+            return result;
+        }
+        result.finishTimeMs = instance.runtime->FinishTimeMs();
+        result.finishTime = instance.runtime->FinishTime();
+        result.stuntsScore = instance.runtime->StuntsScore();
+        result.raceCompleted = result.finishTimeMs.has_value();
+        result.result = ReplaySimulationRunResult::Success;
+        return result;
     }
 
     ReplaySimulationTimelineResult ExecuteCudaTimeline(
@@ -1289,9 +1513,14 @@ ReplaySimulationSession::ReplaySimulationSession(
 ReplaySimulationSession::~ReplaySimulationSession() = default;
 
 std::unique_ptr<ReplaySimulationSession>
-ReplaySimulationSession::ClonePrepared() const {
+ReplaySimulationSession::ClonePrepared(
+        forevervalidator::SimulationBackend backend) const {
+    if (backend != forevervalidator::SimulationBackend::Reference &&
+        backend != forevervalidator::SimulationBackend::OptimizedCpu) {
+        return {};
+    }
     try {
-        auto clone = std::make_unique<ReplaySimulationSession>(impl->backend);
+        auto clone = std::make_unique<ReplaySimulationSession>(backend);
         if (!clone->impl->mapScene.ClonePreparedFrom(impl->mapScene)) {
             return {};
         }
@@ -1306,14 +1535,52 @@ ReplaySimulationSession::ClonePrepared() const {
     }
 }
 
+void ReplaySimulationSession::ConfigureTwinTimeline(
+        const forevervalidator::TwinValidationOptions &options,
+        std::uint32_t handoffMs) {
+    impl->twinOptions = options;
+    impl->twinHandoffMs = handoffMs;
+}
+
+const std::string &ReplaySimulationSession::TwinDiagnostic() const noexcept {
+    return impl->twinDiagnostic;
+}
+
+const StaticSceneModelCollection &ReplaySimulationSession::StaticModels() const noexcept {
+    return impl->mapScene.Models();
+}
+
+bool ReplaySimulationSession::StartSpawnLocation(GmIso4 &location) const {
+    return impl->mapScene.FirstStartLineSpawnLocation(location);
+}
+
+std::unique_ptr<ReplaySimulationSession>
+ReplaySimulationSession::ClonePrepared() const {
+    try {
+        auto clone = std::make_unique<ReplaySimulationSession>(impl->backend);
+        if (!clone->impl->mapScene.ClonePreparedFrom(impl->mapScene)) {
+            return {};
+        }
+        clone->impl->staticCollisionTriangles =
+                impl->staticCollisionTriangles;
+        clone->impl->checkpointTriggerSurfaces =
+                impl->checkpointTriggerSurfaces;
+        clone->impl->staticRenderScene = impl->staticRenderScene;
+        clone->impl->incrementalValidationSeed =
+                impl->incrementalValidationSeed;
+        return clone;
+    } catch (const std::bad_alloc &) {
+        return {};
+    }
+}
+
 void ReplaySimulationSession::Reset() {
+    impl->DropTwinWorld();
     impl->ResetRuntime();
     impl->mapScene.Reset(impl->instance.race);
     impl->staticCollisionTriangles.reset();
+    impl->checkpointTriggerSurfaces.reset();
     impl->staticRenderScene.reset();
-    impl->cudaSearchSpecialization.reset();
-    impl->cudaSearchSpecializationDiagnostic.clear();
-    impl->cudaSearchSpecializationAttempted = false;
     impl->cudaHostScene.Clear();
 #if FOREVERVALIDATOR_HAS_HIP
     impl->hipHostScene.Clear();
@@ -1339,12 +1606,25 @@ void ReplaySimulationSession::Reset() {
 
 bool ReplaySimulationSession::PreloadChallenge(
         CGameCtnChallengeConstruction &construction) {
+    impl->DropTwinWorld();
     return impl->mapScene.PreloadChallenge(construction) ==
            ReplayMapSceneResult::Ready;
 }
 
+std::shared_ptr<const void> ReplaySimulationSession::CachedTwinWorld(std::uint64_t key) const {
+    std::lock_guard<std::mutex> lock(impl->twinWorldMutex);
+    return impl->twinWorldKey == key ? impl->twinWorld : nullptr;
+}
+
+void ReplaySimulationSession::KeepTwinWorld(std::uint64_t key, std::shared_ptr<const void> world) const {
+    std::lock_guard<std::mutex> lock(impl->twinWorldMutex);
+    impl->twinWorldKey = key;
+    impl->twinWorld = std::move(world);
+}
+
 bool ReplaySimulationSession::InstallStaticScene(
         StaticSceneModelCollection models) {
+    impl->DropTwinWorld();
     std::vector<ReplayStaticCollisionTriangle> triangles;
     sandbox::PhysicsSandboxRenderSceneHandle renderScene =
             BuildStaticRenderScene(models);
@@ -1377,8 +1657,10 @@ bool ReplaySimulationSession::InstallStaticScene(
         }
     }
 #endif
+    std::vector<ReplayCheckpointTriggerSurface> triggers;
     if (!renderScene ||
         !BuildStaticCollisionTriangles(models, triangles) ||
+        !BuildCheckpointTriggerSurfaces(models, triggers) ||
         impl->mapScene.InstallModels(std::move(models)) !=
                 ReplayMapSceneResult::Ready) {
         return false;
@@ -1388,6 +1670,10 @@ bool ReplaySimulationSession::InstallStaticScene(
                 std::make_shared<const std::vector<
                         ReplayStaticCollisionTriangle>>(
                         std::move(triangles));
+        impl->checkpointTriggerSurfaces =
+                std::make_shared<const std::vector<
+                        ReplayCheckpointTriggerSurface>>(
+                        std::move(triggers));
     } catch (const std::bad_alloc &) {
         return false;
     }
@@ -1436,6 +1722,14 @@ ReplaySimulationSession::StaticCollisionTriangles() const noexcept {
     static const std::vector<ReplayStaticCollisionTriangle> empty;
     return impl->staticCollisionTriangles
             ? *impl->staticCollisionTriangles
+            : empty;
+}
+
+const std::vector<ReplayCheckpointTriggerSurface> &
+ReplaySimulationSession::CheckpointTriggerSurfaces() const noexcept {
+    static const std::vector<ReplayCheckpointTriggerSurface> empty;
+    return impl->checkpointTriggerSurfaces
+            ? *impl->checkpointTriggerSurfaces
             : empty;
 }
 
@@ -1505,6 +1799,11 @@ ReplaySimulationTimelineResult ReplaySimulationSession::SimulateTimeline(
         return result;
     }
 
+    if (impl->twinRequested) {
+        return impl->ExecuteTwinTimeline(
+                simulationDefinition, startLocation, controlTicks,
+                validationSeed, std::move(result));
+    }
     if (impl->backend == forevervalidator::SimulationBackend::Cuda ||
         impl->backend == forevervalidator::SimulationBackend::Vulkan ||
         impl->backend == forevervalidator::SimulationBackend::Hip) {
@@ -1763,6 +2062,13 @@ ReplaySimulationTimelineResult ReplaySimulationSession::AdvanceIncremental(
     return result;
 }
 
+std::optional<float> ReplaySimulationSession::IntersectStaticSegment(
+        const GmVec3 &start, const GmVec3 &delta) const {
+    return impl->instance.runtime
+            ? impl->instance.runtime->IntersectStaticSegment(start, delta)
+            : std::nullopt;
+}
+
 std::optional<ReplaySimulationStateView>
 ReplaySimulationSession::CurrentState() const {
     if (!impl->instance.runtime) {
@@ -1776,6 +2082,9 @@ ReplaySimulationSession::CurrentState() const {
         impl->backend != forevervalidator::SimulationBackend::Hip &&
         impl->backend != forevervalidator::SimulationBackend::Vulkan) {
         result.acceptedCheckpointEvents = impl->instance.race.AcceptedCheckpointEvents();
+        impl->instance.race.PassedCheckpointSlotBits(
+                result.passedCheckpointSlots.data(),
+                result.passedCheckpointSlots.size());
     }
     result.finishTimeMs = impl->instance.runtime->FinishTimeMs();
     result.finishTime = impl->instance.runtime->FinishTime();
@@ -1793,7 +2102,16 @@ ReplaySimulationSession::CurrentState() const {
     result.cameraSupportUp = camera.cameraSupportUp;
     const CSceneVehicleCar::SConditionState condition =
             impl->instance.runtime->CurrentConditionState();
-    result.localSpeed = condition.localSpeed;
+    // The car's velocity in its own axes, from its body as the GPU and twin
+    // conditions compute it: the vehicle's frame history held 0 here, on
+    // every CPU backend (car.localvel read 0 everywhere).
+    const auto alongAxis = [&](const GmVec3 &axis) {
+        return result.frame.linearSpeed.x * axis.x + result.frame.linearSpeed.y * axis.y +
+               result.frame.linearSpeed.z * axis.z;
+    };
+    result.localSpeed = GmVec3{alongAxis(result.frame.rotation.basisX),
+                               alongAxis(result.frame.rotation.basisY),
+                               alongAxis(result.frame.rotation.basisZ)};
     result.freeWheeling = condition.freeWheeling;
     result.lateralContact = condition.lateralContact;
     result.sliding = condition.sliding;
@@ -1884,105 +2202,6 @@ ReplaySimulationSession::CaptureRuntimeClone() const {
     clone->randomState =
             tmnf::simulation::CaptureGameRandomState();
     return clone;
-}
-
-bool ReplaySimulationSession::PrepareCudaSearchSpecialization(
-        std::string *diagnostic) {
-#if !FOREVERVALIDATOR_HAS_CUDA
-    if (diagnostic != nullptr) {
-        *diagnostic = "CUDA support is not compiled into this build";
-    }
-    return false;
-#else
-    if (impl->backend != forevervalidator::SimulationBackend::Cuda ||
-        !impl->cudaDeviceScene.Ready() ||
-        !impl->cudaDeviceConfiguration.Ready()) {
-        impl->cudaSearchSpecializationDiagnostic =
-                "CUDA map data is not ready for fast mode";
-        if (diagnostic != nullptr) {
-            *diagnostic = impl->cudaSearchSpecializationDiagnostic;
-        }
-        return false;
-    }
-    if (impl->cudaSearchSpecialization &&
-        impl->cudaSearchSpecialization->Ready()) {
-        if (diagnostic != nullptr) {
-            diagnostic->clear();
-        }
-        return true;
-    }
-    if (impl->cudaSearchSpecializationAttempted) {
-        if (diagnostic != nullptr) {
-            *diagnostic = impl->cudaSearchSpecializationDiagnostic;
-        }
-        return false;
-    }
-    impl->cudaSearchSpecializationAttempted = true;
-
-    forevervalidator::simulation::CudaPackedStaticConfigurationHeader
-            configuration{};
-    forevervalidator::simulation::CudaPackedSceneHeader scene{};
-    cudaError_t error = cudaMemcpy(
-            &configuration,
-            impl->cudaDeviceConfiguration.DeviceData(),
-            sizeof(configuration),
-            cudaMemcpyDeviceToHost);
-    if (error == cudaSuccess) {
-        error = cudaMemcpy(
-                &scene,
-                impl->cudaDeviceScene.DeviceData(),
-                sizeof(scene),
-                cudaMemcpyDeviceToHost);
-    }
-    if (error != cudaSuccess) {
-        impl->cudaSearchSpecializationDiagnostic =
-                "Could not read CUDA map data for fast mode: " +
-                std::string(cudaGetErrorString(error));
-        if (diagnostic != nullptr) {
-            *diagnostic = impl->cudaSearchSpecializationDiagnostic;
-        }
-        return false;
-    }
-
-    auto module = std::make_shared<
-            forevervalidator::simulation::cuda::specialization::
-                    SessionModule>();
-    std::string buildDiagnostic;
-    if (!module->Build(
-                configuration,
-                reinterpret_cast<std::uintptr_t>(
-                        impl->cudaDeviceConfiguration.DeviceData()),
-                scene,
-                reinterpret_cast<std::uintptr_t>(
-                        impl->cudaDeviceScene.DeviceData()),
-                &buildDiagnostic)) {
-        impl->cudaSearchSpecializationDiagnostic =
-                buildDiagnostic.empty()
-                ? "The optional fast CUDA kernel could not be built"
-                : std::move(buildDiagnostic);
-        if (diagnostic != nullptr) {
-            *diagnostic = impl->cudaSearchSpecializationDiagnostic;
-        }
-        return false;
-    }
-    impl->cudaSearchSpecialization = std::move(module);
-    impl->cudaSearchSpecializationDiagnostic.clear();
-    if (diagnostic != nullptr) {
-        diagnostic->clear();
-    }
-    return true;
-#endif
-}
-
-std::shared_ptr<const forevervalidator::simulation::cuda::specialization::
-                        SessionModule>
-ReplaySimulationSession::CudaSearchSpecialization() const noexcept {
-    return impl->cudaSearchSpecialization;
-}
-
-const std::string &
-ReplaySimulationSession::CudaSearchSpecializationDiagnostic() const noexcept {
-    return impl->cudaSearchSpecializationDiagnostic;
 }
 
 std::unique_ptr<forevervalidator::simulation::CudaSearchExecutor>
