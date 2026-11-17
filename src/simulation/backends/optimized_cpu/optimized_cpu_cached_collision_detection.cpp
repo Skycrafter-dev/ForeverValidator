@@ -21,7 +21,19 @@
 #include "simulation/backends/optimized_cpu/optimized_cpu_native_binary32_collision.h"
 #include "simulation/backends/optimized_cpu/optimized_cpu_ellipsoid_mesh_packet.h"
 #include "simulation/backends/optimized_cpu/optimized_cpu_static_bounds_overlap.h"
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 
+static inline unsigned CountTrailingZeros(unsigned value) {
+#if defined(_MSC_VER)
+    unsigned long index = 0;
+    _BitScanForward(&index, value);
+    return static_cast<unsigned>(index);
+#else
+    return static_cast<unsigned>(__builtin_ctz(value));
+#endif
+}
 #if defined(__i386__) || defined(__x86_64__)
 #include <immintrin.h>
 #endif
@@ -845,7 +857,7 @@ bool DetectEllipsoidPacketAgainstStaticGroup(
 
     while (collidedMask != 0u) {
         const unsigned int laneIndex =
-                static_cast<unsigned int>(__builtin_ctz(collidedMask));
+                static_cast<unsigned int>(CountTrailingZeros(collidedMask));
         zone.AddSphereContactOnce(lanes[laneIndex].sphereContact);
         collidedMask &= collidedMask - 1u;
     }

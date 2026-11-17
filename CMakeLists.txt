@@ -408,7 +408,10 @@ if(FOREVERVALIDATOR_ENABLE_CUDA)
         "$<$<COMPILE_LANGUAGE:CUDA>:--prec-div=true>"
         "$<$<COMPILE_LANGUAGE:CUDA>:--prec-sqrt=true>"
         "$<$<COMPILE_LANGUAGE:CUDA>:--ftz=false>"
-        "$<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-ffp-contract=off>")
+        "$<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CXX_COMPILER_ID:MSVC>>:-Xcompiler=/Zc:preprocessor>"
+        "$<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CXX_COMPILER_ID:MSVC>>:-Xcompiler=/fp:strict>"
+        "$<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-Xcompiler=-ffp-contract=off>"
+    )
     if(FOREVERVALIDATOR_CUDA_SPLIT_COMPILE_SUPPORTED AND
        NOT ("${FOREVERVALIDATOR_CUDA_SPLIT_COMPILE_JOBS}" STREQUAL "1"))
         target_compile_options(forevervalidator_core PRIVATE

@@ -1936,6 +1936,28 @@ __device__ inline Status Detect(
             tuning::Section<CudaVehicleCollisionShape>(
                     configuration,
                     configuration->collisionShapes);
+
+    if constexpr (EightOrderedEllipsoids) {
+        // Search can use the fixed traversal only for the matching layout.
+        // Reading eight records from a shorter array reads unrelated data.
+        bool useFixedTraversal = configuration->collisionShapes.count == 8u;
+        if (useFixedTraversal) {
+            for (std::uint32_t index = 0u; index < 8u; ++index) {
+                if (shapes[index].traversalOrder != index ||
+                    shapes[index].surfaceType != static_cast<std::uint32_t>(
+                            GmSurf::EGmSurfType::Ellipsoid)) {
+                    useFixedTraversal = false;
+                    break;
+                }
+            }
+        }
+        if (!useFixedTraversal) {
+            return Detect<TrackDiagnostics, TrustedInputs, false,
+                          WarpCoherentAcceleration, TriggerOnly>(
+                    scene, configuration, candidate, scratch);
+        }
+    }
+
     const GmIso4 bodyPose = detail::BodyPose(candidate.body);
 
     if constexpr (!TrackDiagnostics) {
@@ -1959,25 +1981,32 @@ __device__ inline Status Detect(
         bool useSurfaceCache =
                 !TriggerOnly &&
                 scratch.surfaceCacheEnabled &&
-                (EightOrderedEllipsoids ||
-                 collisionShapeCount == 5u ||
+                (collisionShapeCount == 5u ||
+                 collisionShapeCount == 7u ||
                  collisionShapeCount == CachedShapeCount) &&
                 scratch.shapeCapacity >= collisionShapeCount;
         bool refreshSurfaceCache = !scratch.surfaceCacheValid;
+        bool hasEllipsoid = EightOrderedEllipsoids;
         if (useSurfaceCache) {
             for (std::uint32_t traversal = 0u;
                  traversal < collisionShapeCount;
                  ++traversal) {
                 const std::uint32_t shapeIndex = traversal;
                 if constexpr (!EightOrderedEllipsoids) {
+                    const std::uint32_t surfaceType =
+                            shapes[shapeIndex].surfaceType;
+                    const bool ellipsoid =
+                            surfaceType == static_cast<std::uint32_t>(
+                                    GmSurf::EGmSurfType::Ellipsoid);
+                    const bool sphere = collisionShapeCount == 7u &&
+                            surfaceType == static_cast<std::uint32_t>(
+                                    GmSurf::EGmSurfType::Sphere);
                     if (shapes[shapeIndex].traversalOrder != traversal ||
-                        shapes[shapeIndex].surfaceType !=
-                                static_cast<std::uint32_t>(
-                                        GmSurf::EGmSurfType::
-                                                Ellipsoid)) {
+                        (!ellipsoid && !sphere)) {
                         useSurfaceCache = false;
                         break;
                     }
+                    hasEllipsoid |= ellipsoid;
                 }
                 GmIso4 shapeWorld;
                 if constexpr (EightOrderedEllipsoids) {
@@ -2276,7 +2305,7 @@ __device__ inline Status Detect(
                 }
             }
             scratch.surfaceCacheValid = useSurfaceCache;
-            if (scratch.surfaceCacheValid) {
+            if (scratch.surfaceCacheValid && hasEllipsoid) {
                 detail::BuildMeshCellCache<
                         EightOrderedEllipsoids>(
                         scene, surfaces,
@@ -2490,7 +2519,17 @@ __device__ inline Status Detect(
                                 GmSurf::EGmSurfType::Mesh)) {
                         return Status::UnsupportedGeometry;
                     }
-                    if (scratch.meshCacheValid) {
+                    if (!EightOrderedEllipsoids &&
+                        shape.surfaceType == static_cast<std::uint32_t>(
+                                GmSurf::EGmSurfType::Sphere)) {
+                        // The surface cache preserves traversal order.
+                        // Spheres still use their live mesh query.
+                        detail::SphereMesh<false>(
+                                scene, configuration, surface,
+                                hit.surfaceIndex,
+                                surface.actorIndex,
+                                shape, shapeIndex, shapeWorld, scratch);
+                    } else if (scratch.meshCacheValid) {
                         const CudaCollisionMeshRange range =
                                 detail::MeshRangeAt(
                                         scratch, hitIndex);
