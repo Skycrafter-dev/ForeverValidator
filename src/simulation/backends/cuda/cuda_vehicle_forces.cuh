@@ -1740,11 +1740,15 @@ __device__ inline ForceStatus ComputeModel3Ground(
             cuda::facts::Tuning(configuration).handlingModel ==
             static_cast<std::uint32_t>(
                     CSceneVehicleCarHandlingModel_Lateral);
+    GmVec3 sharedWorldCenter{};
+    if constexpr (ReuseWheelPassInvariants) {
+        sharedWorldCenter = WorldCenterOfMass(candidate);
+    }
     for (std::uint32_t index = 0u;
          index < facts::WheelCount(vehicle); ++index) {
         CudaWheelState &wheel = vehicle.wheels.values[index];
         WheelSuspensionForce<ReuseWheelPassInvariants>(
-                candidate, configuration, wheel, index);
+                candidate, configuration, wheel, index, sharedWorldCenter);
         if (!wheel.realTime.contactPresent ||
             !(cuda::facts::Tuning(configuration).gearedDrive.
                       lateralForceScale > 0.0f) ||
