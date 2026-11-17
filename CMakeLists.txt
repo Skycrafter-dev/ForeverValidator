@@ -411,6 +411,7 @@ if(FOREVERVALIDATOR_ENABLE_CUDA)
         "$<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CXX_COMPILER_ID:MSVC>>:-Xcompiler=/Zc:preprocessor>"
         "$<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CXX_COMPILER_ID:MSVC>>:-Xcompiler=/fp:strict>"
         "$<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-Xcompiler=-ffp-contract=off>"
+    )
     if(FOREVERVALIDATOR_CUDA_SPLIT_COMPILE_SUPPORTED AND
        NOT ("${FOREVERVALIDATOR_CUDA_SPLIT_COMPILE_JOBS}" STREQUAL "1"))
         target_compile_options(forevervalidator_core PRIVATE

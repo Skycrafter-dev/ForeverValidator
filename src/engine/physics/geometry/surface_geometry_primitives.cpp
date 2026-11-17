@@ -106,7 +106,7 @@ void GmSurfPolygon::ComputeNormalFromVertices() {
                     polygon->normal.x * polygon->normal.x) +
             polygon->normal.z * polygon->normal.z);
     if (!(PhysicsTolerance::SurfaceDirectionLengthSquared <= lengthSq)) {
-        polygon->normal = (GmVec3){1.0f, 0.0f, 0.0f};
+        polygon->normal = GmVec3{1.0f, 0.0f, 0.0f};
         return;
     }
 
@@ -240,7 +240,7 @@ void GmSurfMesh::RecomputeAllPlanes(void) {
 
 GmBoxAligned GmBoxAligned::FromCenterHalfExtents(const GmVec3 &center,
                                                  const GmVec3 &halfExtents) {
-    return (GmBoxAligned){center, halfExtents};
+    return GmBoxAligned{center, halfExtents};
 }
 
 GmVec3 GmBoxAligned::Center(void) const {
